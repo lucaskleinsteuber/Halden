@@ -1,0 +1,5 @@
+# Local workspace: plans, builds, test results, logs, reports and private
+# access files. Never committed.
+/Local/
+
+.DS_Store
