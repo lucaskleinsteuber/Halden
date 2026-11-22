@@ -1,0 +1,61 @@
+# Halden server as a systemd service.
+#
+# Install:
+#   sudo install -m 755 halden /usr/local/bin/halden
+#   sudo useradd --system --home /var/lib/halden --shell /usr/sbin/nologin halden
+#   sudo halden setup --library-dir /mnt/photos/halden
+#   sudo install -m 644 halden.service /etc/systemd/system/halden.service
+#   sudo systemctl daemon-reload && sudo systemctl enable --now halden
+#
+# If your library is not under /srv/halden, add its folder to ReadWritePaths below
+# (or in `sudo systemctl edit halden`).
+
+[Unit]
+Description=Halden photo server
+Documentation=https://github.com/lucaskleinsteuber/Halden
+Wants=network-online.target
+After=network-online.target local-fs.target
+RequiresMountsFor=/var/lib/halden
+
+[Service]
+Type=simple
+User=halden
+Group=halden
+ExecStart=/usr/local/bin/halden --config /etc/halden/config.toml serve
+Restart=on-failure
+RestartSec=3
+TimeoutStopSec=20
+UMask=0027
+
+# Only these folders are writable; everything else on the system is read-only for Halden.
+ReadWritePaths=/var/lib/halden /srv/halden
+
+# Hardening: no root, no new privileges, no access to other users or devices.
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+ProtectProc=invisible
+ProcSubset=pid
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX AF_NETLINK
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+RemoveIPC=yes
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallFilter=~@privileged
+
+[Install]
+WantedBy=multi-user.target
