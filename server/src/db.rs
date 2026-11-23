@@ -171,3 +171,137 @@ mod tests {
         assert!(refused.is_err());
     }
 }
+
+/// A database left at every earlier stage of the tables, with data in it, is brought up to date
+/// without losing anything: what a server sees when it is updated after a long time.
+#[cfg(test)]
+mod upgrade_tests {
+    use std::borrow::Cow;
+
+    use sqlx::{ConnectOptions, Connection, sqlite::SqliteConnectOptions};
+
+    use super::*;
+
+    /// Creates a database at migration level `level` (1 = only the first) and fills it with what
+    /// that level knows.
+    async fn database_at(path: &Path, level: usize) {
+        let mut migrator = sqlx::migrate!("./migrations");
+        migrator.migrations = Cow::Owned(migrator.migrations[..level].to_vec());
+        let mut connection = SqliteConnectOptions::new()
+            .filename(path)
+            .create_if_missing(true)
+            .foreign_keys(true)
+            .connect()
+            .await
+            .unwrap();
+        migrator.run(&mut connection).await.unwrap();
+        let statements: &[&str] = &[
+            // 1
+            "INSERT INTO server_meta (key, value) VALUES ('server_id', '11111111-2222-3333-4444-555555555555')",
+            // 2
+            "INSERT INTO users (id, username, display_name, role, password_hash, created_at) \
+             VALUES ('u1', 'lucas', 'Lucas', 'owner', NULL, 1); \
+             INSERT INTO devices (id, user_id, name, platform, token_hash, created_at, last_seen_at) \
+             VALUES ('d1', 'u1', 'iPhone', 'ios', x'00', 1, 1)",
+            // 3
+            "INSERT INTO assets (id, user_id, kind, taken_at, taken_at_source, created_at, updated_at, seq) \
+             VALUES ('a1', 'u1', 'photo', 1795443730000, 'client', 1, 1, 1); \
+             UPDATE counters SET value = 1 WHERE name = 'asset_seq'; \
+             INSERT INTO asset_files (asset_id, role, user_id, sha256, size, mime, storage, path, created_at) \
+             VALUES ('a1', 'original', 'u1', x'01', 10, 'image/heic', 'library', 'lucas/a.heic', 1)",
+            // 4
+            "UPDATE assets SET title = 'Lake' WHERE id = 'a1'; \
+             INSERT INTO jobs (kind, asset_id, user_id, state, run_after, created_at, updated_at) \
+             VALUES ('thumbnail', 'a1', 'u1', 'queued', 0, 1, 1)",
+            // 5
+            "INSERT INTO user_settings (user_id, updated_at) VALUES ('u1', 1)",
+            // 6
+            "INSERT INTO mirror_files (asset_id, role, sha256, path, copied_at) \
+             VALUES ('a1', 'original', x'01', 'lucas/a.heic', 1)",
+            // 7
+            "INSERT INTO file_journal (action, storage, path, created_at) \
+             VALUES ('remove', 'derived', 'ab/cd/x.jpg', 1)",
+        ];
+        for statement in &statements[..level.min(statements.len())] {
+            sqlx::raw_sql(*statement)
+                .execute(&mut connection)
+                .await
+                .unwrap();
+        }
+        connection.close().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn every_older_database_is_brought_up_to_date() {
+        let all = sqlx::migrate!("./migrations").migrations.len();
+        for level in 1..=all {
+            let dir = tempfile::tempdir().unwrap();
+            let path = dir.path().join("halden.db");
+            database_at(&path, level).await;
+            let db = Db::open(&path).await.unwrap();
+            assert_eq!(
+                server_id(&db).await.unwrap().to_string(),
+                "11111111-2222-3333-4444-555555555555",
+                "level {level}"
+            );
+            if level >= 2 {
+                let users = crate::accounts::list_users(&db).await.unwrap();
+                assert_eq!(users.len(), 1, "level {level}");
+                assert_eq!(users[0].devices, 1, "level {level}");
+            }
+            if level >= 3 {
+                let asset = crate::library::assets::get(db.read(), "u1", "a1")
+                    .await
+                    .unwrap()
+                    .expect("the photo is still there");
+                assert_eq!(asset.files.len(), 1, "level {level}");
+                let page = crate::library::sync::changes(&db, "u1", 0, 100)
+                    .await
+                    .unwrap();
+                assert_eq!(page.assets.len(), 1, "level {level}");
+                // New photos get the next number.
+                let mut tx = db.begin().await.unwrap();
+                assert_eq!(crate::library::assets::next_seq(&mut tx).await.unwrap(), 2);
+                tx.rollback().await.unwrap();
+            }
+            if level >= 4 {
+                assert_eq!(
+                    crate::jobs::stats(&db).await.unwrap().waiting,
+                    1,
+                    "level {level}"
+                );
+            }
+            sqlx::query("PRAGMA foreign_key_check")
+                .fetch_all(db.read())
+                .await
+                .map(|rows| assert!(rows.is_empty(), "level {level}: broken references"))
+                .unwrap();
+            db.close().await;
+        }
+    }
+
+    /// A backup made by an older version is restored and brought up to date.
+    #[tokio::test]
+    async fn an_old_backup_can_be_restored() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut config = crate::config::Config::default();
+        config.storage.data_dir = dir.path().join("data");
+        config.storage.library_dir = dir.path().join("library");
+        std::fs::create_dir_all(&config.storage.data_dir).unwrap();
+        let db = Db::open(&config.db_path()).await.unwrap();
+        db.close().await;
+        let old = dir.path().join("halden-2026-01-01_03-00-00.db");
+        database_at(&old, 3).await;
+        crate::backup::database::restore(&config, &old)
+            .await
+            .unwrap();
+        let db = Db::open(&config.db_path()).await.unwrap();
+        assert!(
+            crate::library::assets::get(db.read(), "u1", "a1")
+                .await
+                .unwrap()
+                .is_some()
+        );
+        db.close().await;
+    }
+}

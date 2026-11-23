@@ -99,6 +99,28 @@ async fn photos_go_to_the_trash_before_they_are_gone() {
     assert!(tombstone.body["files"].as_array().unwrap().is_empty());
     assert!(tombstone.body["location"].is_null());
     assert!(tombstone.body["client"].is_null());
+    // Nothing can be put back into a tombstone (found by the model test).
+    let corrected = api
+        .call(
+            reqwest::Method::PATCH,
+            &format!("/api/v1/assets/{id}"),
+            Some(&token),
+            Some(json!({ "title": "still here?", "location": { "latitude": 1.0, "longitude": 2.0 } })),
+        )
+        .await;
+    assert_eq!(corrected.status, 404);
+    api.post(
+        "/api/v1/assets/location",
+        Some(&token),
+        json!({ "ids": [id], "latitude": 1.0, "longitude": 2.0 }),
+    )
+    .await;
+    let still = api.get(&format!("/api/v1/assets/{id}"), &token).await;
+    assert!(
+        still.body["title"].is_null() && still.body["location"].is_null(),
+        "{}",
+        still.body
+    );
     let sync = api
         .get(&format!("/api/v1/sync?since={since}"), &token)
         .await;

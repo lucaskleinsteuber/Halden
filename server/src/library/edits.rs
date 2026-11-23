@@ -276,7 +276,11 @@ pub async fn correct(
         return assets::get(db.read(), user_id, asset_id).await;
     }
     let mut tx = db.begin().await?;
-    let Some(row) = assets::row(&mut *tx, user_id, asset_id).await? else {
+    // A tombstone keeps nothing about the photo, so it can't be corrected either.
+    let Some(row) = assets::row(&mut *tx, user_id, asset_id)
+        .await?
+        .filter(|row| !row.is_deleted())
+    else {
         return Ok(None);
     };
     apply(&mut tx, &row, device_id, correction).await?;
@@ -296,7 +300,10 @@ pub async fn correct_many(
     let mut tx = db.begin().await?;
     let mut changed = 0;
     for asset_id in asset_ids {
-        if let Some(row) = assets::row(&mut *tx, user_id, asset_id).await? {
+        if let Some(row) = assets::row(&mut *tx, user_id, asset_id)
+            .await?
+            .filter(|row| !row.is_deleted())
+        {
             apply(&mut tx, &row, device_id, correction).await?;
             changed += 1;
         }

@@ -46,6 +46,15 @@ There are no version numbers yet; entries are grouped by date until the first re
   routes; one account on another's photos, uploads and devices; paths that try to leave the
   library; oversized bodies and headers; forged client addresses; hundreds of idle connections
   and headers sent one byte a second. Every `halden` command run as the real program.
+- Tests with random inputs (proptest): range headers, path templates, names and paths never
+  leave the library (100,000 cases each in the long run); uploads cut up and interrupted at
+  random always arrive intact; a model test of the whole library (random uploads, duplicates,
+  corrections, trash, restore, deleting) in which every device, whenever it last synced, ends
+  with exactly the server's state. `HALDEN_TEST_SCALE` multiplies the number of cases.
+- Tests: bad files (decompression bomb, broken JPEG, HEIC and video, wrong type, giant EXIF,
+  empty file); databases at every earlier stage, and old backups, brought up to date without
+  loss; photos from 1900 and 2100, a leap day, the farthest time zones and the clock change;
+  ten photos in the same second; names with emoji and control characters.
 
 - Server: daily database backups on the library disk (checked, 14 kept), also made at start;
   `halden backup now|list|restore`. A restore sets the current database aside first.
@@ -121,6 +130,13 @@ There are no version numbers yet; entries are grouped by date until the first re
 
 ### Fixed
 
+- Server: a photo deleted for good could still be corrected (title, place, time), which put
+  details back into its tombstone. Tombstones can't be changed any more. Found by the new model
+  test.
+- Server: a small picture claiming to be huge (a "decompression bomb", e.g. a PNG of
+  50,000 × 50,000 pixels) made the thumbnail job reserve gigabytes before failing, which could
+  take a server with little memory down. Pictures that would need more than 1 GiB decoded are
+  now refused before anything is reserved.
 - Security log: "1 device signed out" instead of "1 devices".
 - Server: a crash at the wrong moment could leave files behind or out of step with the
   database. A file journal now notes every move into the library before it happens and every

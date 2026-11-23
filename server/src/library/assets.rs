@@ -272,6 +272,13 @@ where
         .collect())
 }
 
+impl AssetRow {
+    /// Deleted for good: only a tombstone is left, which nothing may change any more.
+    pub(crate) fn is_deleted(&self) -> bool {
+        self.deleted_at.is_some()
+    }
+}
+
 /// The raw row of one asset of one account.
 pub(crate) async fn row<'e, E>(
     db: E,

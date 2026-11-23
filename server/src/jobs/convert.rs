@@ -12,7 +12,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use image::{DynamicImage, ImageDecoder, ImageEncoder, ImageReader};
+use image::{DynamicImage, ImageDecoder, ImageEncoder};
 use sha2::{Digest, Sha256};
 
 use super::{Job, JobContext, tools};
@@ -335,10 +335,7 @@ async fn transcode(
     let to_mime = to.mime;
     ctx.background
         .run(move || -> Result<(), String> {
-            let reader = ImageReader::open(&source)
-                .and_then(ImageReader::with_guessed_format)
-                .map_err(|e| e.to_string())?;
-            let mut decoder = reader.into_decoder().map_err(|e| e.to_string())?;
+            let mut decoder = super::thumbnail::decoder_for(&source)?;
             let exif = decoder.exif_metadata().ok().flatten();
             let icc = decoder.icc_profile().ok().flatten();
             let orientation = decoder.orientation().map_err(|e| e.to_string())?;

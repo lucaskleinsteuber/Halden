@@ -165,13 +165,39 @@ async fn decode(
     }
 }
 
+/// Pictures that would take more memory than this once decoded are not decoded. A small file can
+/// claim to be gigapixels (a "decompression bomb"); allocating that much could take the whole
+/// server down on a computer with little memory. 1 GiB holds a 48-megapixel photo with 16 bits
+/// per channel twice over.
+pub const MAX_DECODED_BYTES: u64 = 1 << 30;
+/// And no side longer than this.
+pub const MAX_SIDE: u32 = 50_000;
+
+/// A decoder for the picture at `path` that refuses, before allocating anything, pictures that
+/// are too big (see [`MAX_DECODED_BYTES`]).
+pub fn decoder_for(path: &std::path::Path) -> Result<impl ImageDecoder, String> {
+    let mut reader = ImageReader::open(path)
+        .and_then(ImageReader::with_guessed_format)
+        .map_err(|e| e.to_string())?;
+    let mut limits = image::Limits::default();
+    limits.max_image_width = Some(MAX_SIDE);
+    limits.max_image_height = Some(MAX_SIDE);
+    limits.max_alloc = Some(MAX_DECODED_BYTES);
+    reader.limits(limits);
+    let decoder = reader.into_decoder().map_err(|e| e.to_string())?;
+    let (width, height) = decoder.dimensions();
+    if decoder.total_bytes() > MAX_DECODED_BYTES {
+        return Err(format!(
+            "the picture is too big to decode ({width} × {height} pixels)"
+        ));
+    }
+    Ok(decoder)
+}
+
 async fn read_image(ctx: &JobContext, path: std::path::PathBuf) -> Result<DynamicImage, String> {
     ctx.background
         .run(move || -> Result<DynamicImage, String> {
-            let reader = ImageReader::open(&path)
-                .and_then(ImageReader::with_guessed_format)
-                .map_err(|e| e.to_string())?;
-            let mut decoder = reader.into_decoder().map_err(|e| e.to_string())?;
+            let mut decoder = decoder_for(&path)?;
             let orientation = decoder.orientation().map_err(|e| e.to_string())?;
             let mut image = DynamicImage::from_decoder(decoder).map_err(|e| e.to_string())?;
             image.apply_orientation(orientation);
