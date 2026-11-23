@@ -131,13 +131,23 @@ pub async fn start_server_with(
     dir: &Path,
     change: impl FnOnce(&mut Config),
 ) -> (RunningServer, Config) {
+    start_server_in(dir, &dir.join("data"), &dir.join("library"), change).await
+}
+
+/// Like [`start_server_with`], with the data and library folders somewhere else (another disk).
+pub async fn start_server_in(
+    dir: &Path,
+    data: &Path,
+    library: &Path,
+    change: impl FnOnce(&mut Config),
+) -> (RunningServer, Config) {
     let config_path = dir.join("config.toml");
     setup::run(
         &config_path,
         SetupOptions {
             name: Some("testbox".into()),
-            data_dir: Some(dir.join("data")),
-            library_dir: Some(dir.join("library")),
+            data_dir: Some(data.to_path_buf()),
+            library_dir: Some(library.to_path_buf()),
             ..SetupOptions::default()
         },
     )
@@ -219,6 +229,24 @@ impl Api {
     pub async fn start_with(change: impl FnOnce(&mut Config)) -> Self {
         let dir = tempfile::tempdir().unwrap();
         let (server, config) = start_server_with(dir.path(), change).await;
+        let http = client(*server.fingerprint.as_bytes(), &[&rustls::version::TLS13]);
+        Self {
+            http,
+            server: TestServer {
+                addr: server.addr,
+                fingerprint: server.fingerprint,
+                running: Running::Plain(server),
+            },
+            config,
+            config_path: dir.path().join("config.toml"),
+            dir,
+        }
+    }
+
+    /// With the data and library folders on other disks.
+    pub async fn start_in(data: &Path, library: &Path, change: impl FnOnce(&mut Config)) -> Self {
+        let dir = tempfile::tempdir().unwrap();
+        let (server, config) = start_server_in(dir.path(), data, library, change).await;
         let http = client(*server.fingerprint.as_bytes(), &[&rustls::version::TLS13]);
         Self {
             http,

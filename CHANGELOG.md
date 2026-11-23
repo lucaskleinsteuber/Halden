@@ -55,6 +55,17 @@ There are no version numbers yet; entries are grouped by date until the first re
   empty file); databases at every earlier stage, and old backups, brought up to date without
   loss; photos from 1900 and 2100, a leap day, the farthest time zones and the clock change;
   ten photos in the same second; names with emoji and control characters.
+- Nightly CI (`server-intensive.yml`): the whole server on a fresh Ubuntu under systemd
+  (install with `get-halden.sh` from signed stand-in releases, real HEIC photos and HEVC videos
+  in the sandbox, a mirror, an update from the app, a rollback from a broken version, a backup
+  restore); disks that fill up, turn read-only or fail in the middle of a copy; every test with
+  ten times the random cases; the load test with both allocators and a 15-minute soak; fuzzing
+  of every parser; `cargo audit`. `docs/TESTING.md` describes all of it.
+- Load test: `SOAK_MINUTES` keeps it running and watches memory, open files and speed;
+  `HALDEN_BINARY` compares builds; `--features system-allocator` builds without mimalloc.
+- Fuzzing (`server/fuzz`, cargo-fuzz): range headers, path templates, EXIF and QuickTime
+  metadata, picture decoding, the updater's release list and signatures, config files and
+  changes, pairing codes.
 
 - Server: daily database backups on the library disk (checked, 14 kept), also made at start;
   `halden backup now|list|restore`. A restore sets the current database aside first.
@@ -130,6 +141,8 @@ There are no version numbers yet; entries are grouped by date until the first re
 
 ### Fixed
 
+- Updates: after rolling back a version that didn't start, systemd's start limit is reset, so
+  the old version always comes back up.
 - Server: under heavy load, starting again with changed settings could fail for a moment and
   fall back to the old settings (the previous server still held the data folder and the
   database). Stopping now waits for every background task and closes the database, a restart

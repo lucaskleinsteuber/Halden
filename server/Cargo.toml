@@ -53,6 +53,10 @@ x509-parser = { version = "0.18.1", default-features = false }
 # On Linux, mimalloc returns freed memory to the system quickly and avoids the fragmentation
 # glibc's allocator shows in long-running, many-threaded servers. On macOS the system allocator
 # measured best (see examples/loadtest.rs), so it stays.
+[features]
+# Use the system allocator on Linux too (to compare it with mimalloc in the load test).
+system-allocator = []
+
 [target.'cfg(target_os = "linux")'.dependencies]
 mimalloc = "0.1.52"
 

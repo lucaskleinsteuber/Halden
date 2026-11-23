@@ -217,7 +217,8 @@ cargo run -- --config ../Local/dev/config.toml setup --data-dir "$PWD/../Local/d
 cargo run -- --config ../Local/dev/config.toml serve
 ```
 
-`Local/` is ignored by git; it holds plans, test servers and test results.
+`Local/` is ignored by git; it holds plans, test servers and test results. How the server is
+tested, on every push and every night: [docs/TESTING.md](docs/TESTING.md).
 
 ## License
 

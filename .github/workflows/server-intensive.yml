@@ -1,0 +1,165 @@
+name: Server (intensive)
+
+# Every night, and by hand: everything that needs a real Linux with root and systemd, or takes a
+# long time. Also when these tests themselves change.
+#
+# - system: install, run, update and roll back the real server under systemd's hardening
+# - disks: disks that fill up, turn read-only, or fail in the middle of a copy (loop devices)
+# - long: every test with ten times the random cases
+# - memory: the load test with mimalloc and with the system allocator, and a 15-minute soak
+# - fuzz: two minutes per parser of mutated input
+# - audit: known vulnerabilities in the dependencies
+
+on:
+  schedule:
+    - cron: "17 2 * * *"
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/server-intensive.yml"
+      - "packaging/tests/**"
+      - "server/tests/disks.rs"
+      - "server/fuzz/**"
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    working-directory: server
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  system:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: server
+      - name: Tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends ffmpeg libheif-examples \
+            libheif-plugin-libde265 libheif-plugin-x265 minisign jq
+      - name: Two versions of the program (debug builds accept a stand-in for GitHub)
+        run: |
+          HALDEN_BUILD_VERSION=0.0.1 cargo build --locked
+          cp target/debug/halden /tmp/halden-0.0.1
+          HALDEN_BUILD_VERSION=0.0.2 cargo build --locked
+          cp target/debug/halden /tmp/halden-0.0.2
+      - name: Install, run, update and roll back under systemd
+        working-directory: .
+        run: packaging/tests/system-test.sh /tmp/halden-0.0.1 /tmp/halden-0.0.2
+      - name: Service log
+        if: always()
+        run: sudo journalctl -u halden -u halden-update-request --no-pager -n 200 || true
+
+  disks:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: server
+      - name: Full, read-only, unplugged and failing disks
+        env:
+          HALDEN_ROOT_TESTS: "1"
+        run: cargo test --locked --test disks -- --test-threads=1 --nocapture
+
+  long:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: server
+      - name: Tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends ffmpeg libheif-examples \
+            libheif-plugin-libde265 libheif-plugin-x265
+      - name: Every test, ten times the random cases
+        env:
+          HALDEN_TEST_SCALE: "10"
+          HALDEN_REQUIRE_TOOLS: "1"
+        run: cargo test --release --locked --no-fail-fast
+
+  memory:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: server
+      - name: Build with each allocator
+        run: |
+          cargo build --release --locked --features system-allocator
+          cp target/release/halden /tmp/halden-system
+          cargo build --release --locked
+          cp target/release/halden /tmp/halden-mimalloc
+      - name: Load test with mimalloc
+        env:
+          HALDEN_BINARY: /tmp/halden-mimalloc
+          ROUNDS: "10"
+        run: cargo run --release --locked --example loadtest /tmp/mimalloc.md
+      - name: Load test with the system allocator
+        env:
+          HALDEN_BINARY: /tmp/halden-system
+          ROUNDS: "10"
+        run: cargo run --release --locked --example loadtest /tmp/system.md
+      - name: 15-minute soak (mimalloc)
+        env:
+          HALDEN_BINARY: /tmp/halden-mimalloc
+          SOAK_MINUTES: "15"
+        run: cargo run --release --locked --example loadtest /tmp/soak.md
+      - name: Summary
+        if: always()
+        run: |
+          for file in /tmp/mimalloc.md /tmp/system.md /tmp/soak.md; do
+            [ -f "$file" ] && { echo "## $(basename "$file" .md)"; cat "$file"; echo; } >> "$GITHUB_STEP_SUMMARY"
+          done
+
+  fuzz:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@nightly
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-fuzz
+      - name: Two minutes per parser
+        working-directory: server/fuzz
+        run: |
+          for target in range template metadata image release config pairing; do
+            echo "::group::$target"
+            cargo fuzz run "$target" -- -max_total_time=120 -rss_limit_mb=2048 -timeout=10
+            echo "::endgroup::"
+          done
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: fuzz-artifacts
+          path: server/fuzz/artifacts
+
+  audit:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-audit
+      - name: Known vulnerabilities
+        run: cargo audit --ignore RUSTSEC-2026-0543

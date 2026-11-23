@@ -153,6 +153,19 @@ fn footprint_mb(pid: u32) -> Option<f64> {
     })
 }
 
+/// Open file descriptors of a process (sockets, files): if this keeps growing, something leaks.
+fn open_files(pid: u32) -> usize {
+    if let Ok(entries) = std::fs::read_dir(format!("/proc/{pid}/fd")) {
+        return entries.count();
+    }
+    Command::new("lsof")
+        .args(["-n", "-P", "-p", &pid.to_string()])
+        .output()
+        .ok()
+        .and_then(|out| String::from_utf8(out.stdout).ok())
+        .map_or(0, |text| text.lines().count().saturating_sub(1))
+}
+
 fn rss_mb(pid: u32) -> f64 {
     Command::new("ps")
         .args(["-o", "rss=", "-p", &pid.to_string()])
@@ -214,7 +227,10 @@ fn ms(d: Duration) -> String {
 #[tokio::main]
 async fn main() -> Result<()> {
     let out = std::env::args().nth(1).map(PathBuf::from);
-    let binary = Path::new(env!("CARGO_MANIFEST_DIR")).join("target/release/halden");
+    // HALDEN_BINARY compares builds (e.g. with the system allocator on Linux).
+    let binary = std::env::var_os("HALDEN_BINARY")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| Path::new(env!("CARGO_MANIFEST_DIR")).join("target/release/halden"));
     if !binary.exists() {
         bail!("build the server first: cargo build --release");
     }
@@ -563,12 +579,33 @@ async fn main() -> Result<()> {
     );
 
     // More rounds of the heaviest reads: if memory keeps growing, something leaks.
+    // SOAK_MINUTES keeps going that long instead (with a few uploads in every round), and shows
+    // whether memory, open files or the time a round takes creep up.
     let rounds: usize = std::env::var("ROUNDS")
         .ok()
         .and_then(|r| r.parse().ok())
         .unwrap_or(3);
+    let soak = std::env::var("SOAK_MINUTES")
+        .ok()
+        .and_then(|m| m.parse::<u64>().ok())
+        .map(|m| Duration::from_secs(m * 60));
     let only = std::env::var("ONLY").unwrap_or_default();
-    for _ in 0..rounds {
+    let soak_started = Instant::now();
+    let mut round = 0usize;
+    let mut first_round: Option<(f64, usize, Duration)> = None;
+    loop {
+        match soak {
+            Some(limit) if soak_started.elapsed() >= limit => break,
+            None if round >= rounds => break,
+            _ => {}
+        }
+        round += 1;
+        let round_started = Instant::now();
+        if soak.is_some() {
+            for _ in 0..5 {
+                upload(&http, &base, &token, random(200_000), "image/heic").await?;
+            }
+        }
         let mut since = 0;
         #[allow(clippy::while_immutable_condition)] // ends with `break`
         while only != "bulk" {
@@ -602,11 +639,21 @@ async fn main() -> Result<()> {
                 .bytes()
                 .await?;
         }
-        report.row(
-            "Own memory after another full round",
-            format!("{:.0} MB", footprint_mb(server.0.id()).unwrap_or(0.0)),
-            "stays flat",
-        );
+        let memory = footprint_mb(server.0.id()).unwrap_or(0.0);
+        let files = open_files(server.0.id());
+        let took = round_started.elapsed();
+        let (memory_0, files_0, took_0) = *first_round.get_or_insert((memory, files, took));
+        if soak.is_none() || round.is_multiple_of(20) {
+            report.row(
+                &format!("Round {round}: own memory, open files, time"),
+                format!(
+                    "{memory:.0} MB, {files} files, {} (first: {memory_0:.0} MB, {files_0}, {})",
+                    ms(took),
+                    ms(took_0)
+                ),
+                "stays flat",
+            );
+        }
     }
 
     if let Some(out) = out {

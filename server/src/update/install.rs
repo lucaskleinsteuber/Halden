@@ -381,6 +381,8 @@ pub async fn install(
         .await
         .context("could not put the database back")?;
     setup::give_database_back(config)?;
+    // The failing version may have used up systemd's start attempts.
+    let _ = systemctl(&["reset-failed", service]).await;
     systemctl(&["start", service]).await?;
     Ok(Outcome::RolledBack)
 }
