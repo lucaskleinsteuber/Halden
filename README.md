@@ -6,14 +6,14 @@ Halden is a native iPhone camera with your own self-hosted photo library. You ta
 video, it is saved on the phone right away and uploaded to your own server in the background, in
 full quality, without you having to think about it. No cloud, no subscription, no jank.
 
-> **Status:** early development. The server foundation is in place; uploads and the iPhone app
-> come next. Nothing here is ready for your only copy of your photos yet.
+> **Status:** early development. The server foundation, accounts and device pairing are in
+> place; uploads and the iPhone app come next. Nothing here is ready for your only copy of your photos yet.
 
 ## How it fits together
 
 | Part | Built with | State |
 |---|---|---|
-| Server | Rust (Axum, Tokio, rustls, SQLite) for Linux | foundation done |
+| Server | Rust (Axum, Tokio, rustls, SQLite) for Linux | foundation, accounts and pairing done |
 | iPhone app | Swift, SwiftUI, AVFoundation | planned |
 | Mac app | Swift | later |
 
@@ -50,10 +50,23 @@ halden status
 
 `halden setup` creates the config (`/etc/halden/config.toml`), the data folder
 (`/var/lib/halden`, best on the system SSD), the library folder for your photos (best on the big
-disk), the server's certificate and the database. Running it again is safe.
+disk), the server's certificate and the database. The first time, it also asks for a username
+and password for the first account, which becomes the server's owner. Running it again is safe.
 
 When a device connects for the first time, compare the fingerprint it shows with the one from
 `halden status`.
+
+### Add a device
+
+```sh
+sudo halden pair                 # QR code for the only account
+sudo halden pair --user anna     # or for a specific one
+```
+
+Scan the QR code with the Halden app. It carries the server's addresses, its certificate
+fingerprint and a one-time code that is valid for 5 minutes. Devices can also sign in with
+username and password; a device added that way shows up as new on the account's other devices
+until someone confirms it.
 
 ### Commands
 
@@ -62,6 +75,34 @@ When a device connects for the first time, compare the fingerprint it shows with
 | `halden setup` | Set up config, folders, certificate and database |
 | `halden status` | Show state, fingerprint, addresses and free space |
 | `halden serve` | Run the server (systemd does this for you) |
+| `halden user add <name> [--owner]` | Create an account (asks for its password) |
+| `halden user list` | List the accounts |
+| `halden user passwd <name> [--sign-out]` | Set a new password, optionally signing out its devices |
+| `halden user role <name> owner\|member` | Change an account's role |
+| `halden user remove <name>` | Delete an account and sign out its devices |
+| `halden pair [--user <name>]` | Show a QR code that adds a device |
+| `halden devices [--user <name>]` | List signed-in devices |
+| `halden devices revoke <id>` | Sign a device out |
+| `halden log [--limit 50]` | Show the security log |
+
+### Settings
+
+Everything lives in `/etc/halden/config.toml`; every key is optional. Restart the server after
+changes. Besides `[server]`, `[storage]`, `[network]` and `[tls]`:
+
+```toml
+[auth]
+password_login = true        # false: devices can only be added by pairing
+device_inactive_days = 365   # sign out devices unused this long (0 = never)
+
+[security]
+log_retention_days = 90      # keep security log entries this long (0 = forever)
+```
+
+### More
+
+- [Protocol](docs/PROTOCOL.md): the HTTP API the apps use
+- [Security model](docs/SECURITY_MODEL.md): what is protected, how, and the limits
 
 ### Develop
 

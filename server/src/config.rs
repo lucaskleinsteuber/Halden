@@ -25,6 +25,8 @@ pub struct Config {
     pub storage: StorageConfig,
     pub network: NetworkConfig,
     pub tls: TlsConfig,
+    pub auth: AuthConfig,
+    pub security: SecurityConfig,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -84,6 +86,41 @@ pub struct TlsConfig {
     pub cert_file: Option<PathBuf>,
     /// The private key belonging to `cert_file` (PEM).
     pub key_file: Option<PathBuf>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct AuthConfig {
+    /// Allow signing in with username and password. Off: new devices can only be added by
+    /// pairing (QR code from a signed-in device or `halden pair`).
+    pub password_login: bool,
+    /// Sign out devices that haven't been used for this many days. 0: never.
+    pub device_inactive_days: u32,
+}
+
+impl Default for AuthConfig {
+    fn default() -> Self {
+        Self {
+            password_login: true,
+            device_inactive_days: 365,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct SecurityConfig {
+    /// Keep security log entries (sign-ins, new devices, account changes) this many days.
+    /// 0: keep them forever.
+    pub log_retention_days: u32,
+}
+
+impl Default for SecurityConfig {
+    fn default() -> Self {
+        Self {
+            log_retention_days: 90,
+        }
+    }
 }
 
 /// The computer's host name without a domain, or "Halden" when the host name is empty or a
@@ -211,6 +248,9 @@ mod tests {
         parsed.validate().unwrap();
         assert_eq!(parsed.server.port, DEFAULT_PORT);
         assert!(!parsed.network.allow_public);
+        assert!(parsed.auth.password_login);
+        assert_eq!(parsed.auth.device_inactive_days, 365);
+        assert_eq!(parsed.security.log_retention_days, 90);
     }
 
     #[test]

@@ -12,6 +12,7 @@ use anyhow::{Context, Result, bail};
 use uuid::Uuid;
 
 use crate::{
+    accounts,
     config::Config,
     db, fsutil,
     tls::{self, Fingerprint},
@@ -50,6 +51,8 @@ pub struct SetupReport {
     pub fingerprint: Fingerprint,
     /// System user that now owns the folders, if any.
     pub owner: Option<String>,
+    /// Is there at least one account? If not, the terminal offers to create the first owner.
+    pub has_accounts: bool,
     pub warnings: Vec<String>,
 }
 
@@ -102,6 +105,7 @@ pub async fn run(config_path: &Path, options: SetupOptions) -> Result<SetupRepor
 
     let pool = db::open(&config.db_path()).await?;
     let server_id = db::server_id(&pool).await?;
+    let has_accounts = accounts::count_users(&pool).await? > 0;
     pool.close().await;
 
     let owner = hand_over(
@@ -119,6 +123,7 @@ pub async fn run(config_path: &Path, options: SetupOptions) -> Result<SetupRepor
         server_id,
         fingerprint,
         owner,
+        has_accounts,
         warnings,
     })
 }
@@ -176,15 +181,44 @@ fn hand_over(
     Ok(Some(user))
 }
 
+/// After a terminal command ran as root (`sudo halden user add …`), SQLite may have created the
+/// database's side files (`halden.db-wal`, `halden.db-shm`) owned by root, and the server, which
+/// runs as the service user, could then no longer open the database. This gives them back to
+/// whoever owns the data folder.
+pub fn give_database_back(config: &Config) -> Result<()> {
+    if !running_as_root() {
+        return Ok(());
+    }
+    let folder = fs::metadata(&config.storage.data_dir)
+        .with_context(|| format!("could not read {}", config.storage.data_dir.display()))?;
+    if folder.uid() == 0 {
+        return Ok(());
+    }
+    let db = config.db_path();
+    for suffix in ["", "-wal", "-shm", "-journal"] {
+        let mut name = db.clone().into_os_string();
+        name.push(suffix);
+        let path = PathBuf::from(name);
+        match fs::symlink_metadata(&path) {
+            Ok(meta) if meta.file_type().is_file() && meta.uid() == 0 => {
+                std::os::unix::fs::chown(&path, Some(folder.uid()), Some(folder.gid()))
+                    .with_context(|| format!("could not hand over {}", path.display()))?;
+            }
+            _ => {}
+        }
+    }
+    Ok(())
+}
+
 #[cfg(target_os = "linux")]
-fn running_as_root() -> bool {
+pub fn running_as_root() -> bool {
     fs::metadata("/proc/self")
         .map(|m| m.uid() == 0)
         .unwrap_or(false)
 }
 
 #[cfg(not(target_os = "linux"))]
-fn running_as_root() -> bool {
+pub fn running_as_root() -> bool {
     false
 }
 

@@ -57,6 +57,11 @@ pub async fn server_id(pool: &SqlitePool) -> Result<Uuid> {
     Uuid::parse_str(&value).context("the stored server id is damaged")
 }
 
+/// The current time as Unix milliseconds, the way the database stores times.
+pub fn now_ms() -> i64 {
+    chrono::Utc::now().timestamp_millis()
+}
+
 /// A cheap query that proves the database answers.
 pub async fn ping(pool: &SqlitePool) -> Result<()> {
     sqlx::query("SELECT 1").execute(pool).await?;

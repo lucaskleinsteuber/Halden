@@ -1,20 +1,31 @@
 //! The `halden` command line.
+//!
+//! The account, device and log commands work on the database directly, without the HTTP API,
+//! so they also work while the server is stopped.
+
+mod devices;
+mod log;
+mod pair;
+mod user;
 
 use std::{
+    io::{BufRead, IsTerminal},
     net::{IpAddr, Ipv4Addr, SocketAddr, TcpStream},
     path::{Path, PathBuf},
     process::ExitCode,
     time::Duration,
 };
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
 use clap::{Args, Parser, Subcommand};
+use sqlx::SqlitePool;
 use tracing_subscriber::EnvFilter;
 
 use crate::{
-    API_VERSION, VERSION,
+    API_VERSION, VERSION, accounts,
+    auth::password,
     config::{Config, DEFAULT_CONFIG_PATH},
-    net, server, setup, tls,
+    db, net, server, setup, tls,
 };
 
 #[derive(Parser)]
@@ -40,6 +51,15 @@ enum Command {
     Status,
     /// Run the server (systemd and Docker start it this way).
     Serve,
+    /// Manage accounts.
+    #[command(subcommand)]
+    User(user::UserCommand),
+    /// Show a QR code that adds a device to an account.
+    Pair(pair::PairArgs),
+    /// List the signed-in devices, or sign one out.
+    Devices(devices::DevicesArgs),
+    /// Show the security log: sign-ins, new devices, account changes.
+    Log(log::LogArgs),
 }
 
 #[derive(Args)]
@@ -101,6 +121,10 @@ async fn run(cli: Cli) -> Result<()> {
         Command::Setup(args) => run_setup(&cli.config, args).await,
         Command::Status => run_status(&cli.config).await,
         Command::Serve => server::run(Config::load(&cli.config)?).await,
+        Command::User(command) => user::run(&cli.config, command).await,
+        Command::Pair(args) => pair::run(&cli.config, args).await,
+        Command::Devices(args) => devices::run(&cli.config, args).await,
+        Command::Log(args) => log::run(&cli.config, args).await,
     }
 }
 
@@ -117,6 +141,11 @@ async fn run_setup(config_path: &Path, args: SetupArgs) -> Result<()> {
     )
     .await?;
     let config = &report.config;
+    let first_owner = if report.has_accounts {
+        None
+    } else {
+        create_first_owner(config).await?
+    };
 
     println!("Halden is set up.\n");
     row(
@@ -147,15 +176,183 @@ async fn run_setup(config_path: &Path, args: SetupArgs) -> Result<()> {
         },
     );
     row("Fingerprint", report.fingerprint);
+    if let Some(owner) = &first_owner {
+        row("Owner", owner);
+    }
     for warning in &report.warnings {
         println!("\nWarning: {warning}");
+    }
+    if !report.has_accounts && first_owner.is_none() {
+        println!(
+            "\nThere is no account yet. Create the first one with:\n  \
+             sudo halden user add <name> --owner"
+        );
     }
     println!(
         "\nWhen a device connects for the first time, check that it shows the same fingerprint.\n\
          Start the server with:  sudo systemctl enable --now halden\n\
-         Check on it with:       halden status"
+         Check on it with:       halden status\n\
+         Add a device with:      sudo halden pair"
     );
     Ok(())
+}
+
+/// Asks for the first owner account when setup runs in a terminal. Returns its username.
+async fn create_first_owner(config: &Config) -> Result<Option<String>> {
+    if !std::io::stdin().is_terminal() || !std::io::stdout().is_terminal() {
+        return Ok(None);
+    }
+    println!("Create the first account. It becomes the owner of this server.\n");
+    let username = loop {
+        let name = ask_line("Username: ")?;
+        match accounts::check_username(&name) {
+            Ok(name) => break name,
+            Err(error) => println!("{error}"),
+        }
+    };
+    let password = ask_new_password(&username)?;
+    let hash = password::hash(password).await?;
+    let database = Database::open(config).await?;
+    let result = accounts::create_user(
+        database.pool(),
+        accounts::NewUser {
+            username: &username,
+            display_name: None,
+            role: accounts::Role::Owner,
+            password_hash: Some(hash),
+        },
+    )
+    .await;
+    if let Ok(user) = &result {
+        crate::seclog::Record::new(crate::seclog::Event::UserCreated)
+            .user(&user.id)
+            .detail(format!(
+                "{} as owner in the terminal (setup)",
+                user.username
+            ))
+            .write(database.pool())
+            .await;
+    }
+    database.close().await?;
+    println!();
+    Ok(Some(result?.username))
+}
+
+/// The database, opened by a terminal command. [`Database::close`] gives files that SQLite
+/// created as root back to the server's user.
+pub(crate) struct Database {
+    pool: SqlitePool,
+    config: Config,
+}
+
+impl Database {
+    pub(crate) async fn open(config: &Config) -> Result<Self> {
+        let path = config.db_path();
+        if !path.exists() {
+            bail!(
+                "there is no database at {} yet (run `halden setup` first)",
+                path.display()
+            );
+        }
+        let pool = db::open(&path)
+            .await
+            .context("could not open the database (try with sudo)")?;
+        Ok(Self {
+            pool,
+            config: config.clone(),
+        })
+    }
+
+    pub(crate) fn pool(&self) -> &SqlitePool {
+        &self.pool
+    }
+
+    pub(crate) async fn close(self) -> Result<()> {
+        self.pool.close().await;
+        setup::give_database_back(&self.config)
+    }
+}
+
+/// Opens the database, runs `work`, and closes the database again whatever happened.
+pub(crate) async fn with_database<T>(
+    config_path: &Path,
+    work: impl AsyncFnOnce(&Config, &SqlitePool) -> Result<T>,
+) -> Result<T> {
+    let config = Config::load(config_path)?;
+    let database = Database::open(&config).await?;
+    let result = work(&config, database.pool()).await;
+    database.close().await?;
+    result
+}
+
+/// Reads one line typed in the terminal.
+pub(crate) fn ask_line(prompt: &str) -> Result<String> {
+    use std::io::Write as _;
+    print!("{prompt}");
+    std::io::stdout().flush()?;
+    let mut line = String::new();
+    if std::io::stdin().lock().read_line(&mut line)? == 0 {
+        bail!("no input");
+    }
+    Ok(line.trim().to_string())
+}
+
+/// Asks for a new password twice without showing it. Without a terminal, reads one line from
+/// standard input (for scripts: `echo "$PASSWORD" | halden user add anna`).
+pub(crate) fn ask_new_password(username: &str) -> Result<String> {
+    if !std::io::stdin().is_terminal() {
+        let mut line = String::new();
+        std::io::stdin().lock().read_line(&mut line)?;
+        let password = line.trim_end_matches(['\r', '\n']).to_string();
+        password::check_new(&password, username).map_err(anyhow::Error::msg)?;
+        return Ok(password);
+    }
+    for _ in 0..3 {
+        let first = rpassword::prompt_password(format!("Password for {username}: "))?;
+        if let Err(problem) = password::check_new(&first, username) {
+            println!("{problem}");
+            continue;
+        }
+        let second = rpassword::prompt_password("Same password again: ")?;
+        if first == second {
+            return Ok(first);
+        }
+        println!("The two passwords are different.");
+    }
+    bail!("no password set")
+}
+
+/// A Unix time in milliseconds as local date and time.
+pub(crate) fn local_time(ms: i64) -> String {
+    chrono::DateTime::from_timestamp_millis(ms)
+        .map(|time| {
+            time.with_timezone(&chrono::Local)
+                .format("%Y-%m-%d %H:%M")
+                .to_string()
+        })
+        .unwrap_or_else(|| "?".into())
+}
+
+/// Prints rows as columns, each as wide as its widest cell.
+pub(crate) fn print_table(headers: &[&str], rows: &[Vec<String>]) {
+    let mut widths: Vec<usize> = headers.iter().map(|h| h.chars().count()).collect();
+    for row in rows {
+        for (width, cell) in widths.iter_mut().zip(row) {
+            *width = (*width).max(cell.chars().count());
+        }
+    }
+    let line = |cells: Vec<&str>| {
+        let padded: Vec<String> = cells
+            .iter()
+            .zip(&widths)
+            .map(|(cell, width)| format!("{cell:<width$}"))
+            .collect();
+        println!("  {}", padded.join("  ").trim_end());
+    };
+    line(headers.to_vec());
+    for row in rows {
+        line(row.iter().map(String::as_str).collect());
+    }
 }
 
 async fn run_status(config_path: &Path) -> Result<()> {
@@ -220,7 +417,7 @@ fn row(label: &str, value: impl std::fmt::Display) {
 }
 
 /// Is something listening on this port on this computer?
-fn is_listening(port: u16) -> bool {
+pub(crate) fn is_listening(port: u16) -> bool {
     [
         IpAddr::V4(Ipv4Addr::LOCALHOST),
         IpAddr::V6(std::net::Ipv6Addr::LOCALHOST),
