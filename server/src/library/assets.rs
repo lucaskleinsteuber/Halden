@@ -1,0 +1,400 @@
+//! Photos and videos ("assets") and their files in the database.
+
+use serde::Serialize;
+use sqlx::{Executor, Sqlite, SqliteConnection};
+
+use crate::db::{Db, now_ms};
+
+/// The roles a file can have within an asset.
+pub const ROLES: &[&str] = &[
+    "original",
+    "thumbnail",
+    "preview",
+    "converted",
+    "paired_video",
+    "raw",
+];
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Asset {
+    pub id: String,
+    pub kind: String,
+    /// When it was taken, UTC milliseconds.
+    pub taken_at: i64,
+    /// UTC offset where it was taken, if known.
+    #[serde(rename = "timeZoneOffsetMinutes")]
+    pub tz_offset_min: Option<i64>,
+    pub taken_at_source: String,
+    pub width: Option<i64>,
+    pub height: Option<i64>,
+    pub duration_ms: Option<i64>,
+    pub location: Option<Location>,
+    pub camera: Option<Camera>,
+    pub files: Vec<AssetFile>,
+    pub created_at: i64,
+    pub updated_at: i64,
+    pub seq: i64,
+    pub trashed_at: Option<i64>,
+    pub deleted_at: Option<i64>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct Location {
+    pub latitude: f64,
+    pub longitude: f64,
+    pub altitude: Option<f64>,
+    pub accuracy_meters: Option<f64>,
+    pub heading: Option<f64>,
+    /// `client` (the phone's location service), `exif` (from the file).
+    pub source: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Camera {
+    pub make: Option<String>,
+    pub model: Option<String>,
+    pub lens: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AssetFile {
+    pub role: String,
+    /// Lowercase hex.
+    pub sha256: String,
+    pub size: i64,
+    #[serde(rename = "mimeType")]
+    pub mime: String,
+    pub width: Option<i64>,
+    pub height: Option<i64>,
+}
+
+macro_rules! asset_columns {
+    () => {
+        "a.id, a.kind, a.taken_at, a.tz_offset_min, a.taken_at_source, a.width, \
+         a.height, a.duration_ms, a.camera_make, a.camera_model, a.lens, a.latitude, a.longitude, \
+         a.altitude, a.location_accuracy_m, a.heading, a.location_source, a.created_at, \
+         a.updated_at, a.seq, a.trashed_at, a.deleted_at"
+    };
+}
+
+#[derive(sqlx::FromRow)]
+pub(crate) struct AssetRow {
+    pub id: String,
+    kind: String,
+    taken_at: i64,
+    tz_offset_min: Option<i64>,
+    taken_at_source: String,
+    width: Option<i64>,
+    height: Option<i64>,
+    duration_ms: Option<i64>,
+    camera_make: Option<String>,
+    camera_model: Option<String>,
+    lens: Option<String>,
+    latitude: Option<f64>,
+    longitude: Option<f64>,
+    altitude: Option<f64>,
+    location_accuracy_m: Option<f64>,
+    heading: Option<f64>,
+    location_source: Option<String>,
+    created_at: i64,
+    updated_at: i64,
+    seq: i64,
+    trashed_at: Option<i64>,
+    deleted_at: Option<i64>,
+}
+
+impl AssetRow {
+    pub(crate) fn into_asset(self, files: Vec<AssetFile>) -> Asset {
+        let location = match (self.latitude, self.longitude) {
+            (Some(latitude), Some(longitude)) => Some(Location {
+                latitude,
+                longitude,
+                altitude: self.altitude,
+                accuracy_meters: self.location_accuracy_m,
+                heading: self.heading,
+                source: self.location_source.unwrap_or_else(|| "client".into()),
+            }),
+            _ => None,
+        };
+        let camera =
+            (self.camera_make.is_some() || self.camera_model.is_some() || self.lens.is_some())
+                .then_some(Camera {
+                    make: self.camera_make,
+                    model: self.camera_model,
+                    lens: self.lens,
+                });
+        Asset {
+            id: self.id,
+            kind: self.kind,
+            taken_at: self.taken_at,
+            tz_offset_min: self.tz_offset_min,
+            taken_at_source: self.taken_at_source,
+            width: self.width,
+            height: self.height,
+            duration_ms: self.duration_ms,
+            location,
+            camera,
+            files,
+            created_at: self.created_at,
+            updated_at: self.updated_at,
+            seq: self.seq,
+            trashed_at: self.trashed_at,
+            deleted_at: self.deleted_at,
+        }
+    }
+}
+
+#[derive(sqlx::FromRow)]
+pub(crate) struct FileRow {
+    #[allow(dead_code)] // read by the sync in the next stage
+    pub asset_id: String,
+    pub role: String,
+    pub sha256: Vec<u8>,
+    pub size: i64,
+    pub mime: String,
+    pub width: Option<i64>,
+    pub height: Option<i64>,
+}
+
+impl From<FileRow> for AssetFile {
+    fn from(row: FileRow) -> Self {
+        Self {
+            role: row.role,
+            sha256: hex::encode(row.sha256),
+            size: row.size,
+            mime: row.mime,
+            width: row.width,
+            height: row.height,
+        }
+    }
+}
+
+/// The next number for a change. Call inside the write transaction that makes the change.
+pub async fn next_seq(tx: &mut SqliteConnection) -> Result<i64, sqlx::Error> {
+    let (seq,): (i64,) = sqlx::query_as(
+        "UPDATE counters SET value = value + 1 WHERE name = 'asset_seq' RETURNING value",
+    )
+    .fetch_one(&mut *tx)
+    .await?;
+    Ok(seq)
+}
+
+/// One asset of one account, with its files. Other accounts' assets don't exist for it.
+pub async fn get<'e, E>(db: E, user_id: &str, asset_id: &str) -> Result<Option<Asset>, sqlx::Error>
+where
+    E: Executor<'e, Database = Sqlite> + Copy,
+{
+    let Some(row) = sqlx::query_as::<_, AssetRow>(concat!(
+        "SELECT ",
+        asset_columns!(),
+        " FROM assets a WHERE a.id = ? AND a.user_id = ?"
+    ))
+    .bind(asset_id)
+    .bind(user_id)
+    .fetch_optional(db)
+    .await?
+    else {
+        return Ok(None);
+    };
+    let files = files_of(db, asset_id).await?;
+    Ok(Some(row.into_asset(files)))
+}
+
+async fn files_of<'e, E>(db: E, asset_id: &str) -> Result<Vec<AssetFile>, sqlx::Error>
+where
+    E: Executor<'e, Database = Sqlite>,
+{
+    let rows = sqlx::query_as::<_, FileRow>(
+        "SELECT asset_id, role, sha256, size, mime, width, height FROM asset_files \
+         WHERE asset_id = ? ORDER BY role",
+    )
+    .bind(asset_id)
+    .fetch_all(db)
+    .await?;
+    Ok(rows.into_iter().map(AssetFile::from).collect())
+}
+
+/// Who owns an asset id (any account). Lets uploads refuse an id that another account uses
+/// without telling whose it is.
+pub async fn owner_of(db: &Db, asset_id: &str) -> Result<Option<String>, sqlx::Error> {
+    let owner: Option<(String,)> = sqlx::query_as("SELECT user_id FROM assets WHERE id = ?")
+        .bind(asset_id)
+        .fetch_optional(db.read())
+        .await?;
+    Ok(owner.map(|(user,)| user))
+}
+
+/// The hash of an asset's file in a role.
+pub async fn file_hash(
+    db: &Db,
+    asset_id: &str,
+    role: &str,
+) -> Result<Option<Vec<u8>>, sqlx::Error> {
+    let hash: Option<(Vec<u8>,)> =
+        sqlx::query_as("SELECT sha256 FROM asset_files WHERE asset_id = ? AND role = ?")
+            .bind(asset_id)
+            .bind(role)
+            .fetch_optional(db.read())
+            .await?;
+    Ok(hash.map(|(hash,)| hash))
+}
+
+/// Another asset of this account whose original has exactly this content.
+pub async fn original_with_hash(
+    db: &Db,
+    user_id: &str,
+    sha256: &[u8],
+) -> Result<Option<String>, sqlx::Error> {
+    let found: Option<(String,)> = sqlx::query_as(
+        "SELECT f.asset_id FROM asset_files f JOIN assets a ON a.id = f.asset_id \
+         WHERE f.user_id = ? AND f.sha256 = ? AND f.role = 'original' AND a.deleted_at IS NULL \
+         LIMIT 1",
+    )
+    .bind(user_id)
+    .bind(sha256)
+    .fetch_optional(db.read())
+    .await?;
+    Ok(found.map(|(id,)| id))
+}
+
+/// How many other files point at this derived path (thumbnails are shared by content).
+pub async fn derived_path_users(db: &Db, path: &str) -> Result<i64, sqlx::Error> {
+    let (count,): (i64,) =
+        sqlx::query_as("SELECT count(*) FROM asset_files WHERE storage = 'derived' AND path = ?")
+            .bind(path)
+            .fetch_one(db.read())
+            .await?;
+    Ok(count)
+}
+
+/// What `POST /assets/check` answers for one item.
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase",
+    tag = "status"
+)]
+pub enum CheckResult {
+    /// This asset id has an original with this hash.
+    BackedUp { asset_id: String },
+    /// The content is backed up under another asset id.
+    Duplicate {
+        asset_id: String,
+        existing_asset_id: String,
+    },
+    /// Needs to be uploaded.
+    Missing { asset_id: String },
+    /// This asset id is backed up, but with different content.
+    Conflict { asset_id: String },
+}
+
+/// Answers for many (asset id, hash) pairs with two queries, however many items there are.
+pub async fn check_many(
+    db: &Db,
+    user_id: &str,
+    items: &[(String, [u8; 32])],
+) -> Result<Vec<CheckResult>, sqlx::Error> {
+    use std::collections::HashMap;
+
+    let ids: Vec<&str> = items.iter().map(|(id, _)| id.as_str()).collect();
+    let hashes: Vec<String> = items.iter().map(|(_, hash)| hex::encode(hash)).collect();
+    let ids_json = serde_json::to_string(&ids).unwrap_or_else(|_| "[]".into());
+    let hashes_json = serde_json::to_string(&hashes).unwrap_or_else(|_| "[]".into());
+
+    let by_id: HashMap<String, Vec<u8>> = sqlx::query_as::<_, (String, Vec<u8>)>(
+        "SELECT f.asset_id, f.sha256 FROM asset_files f JOIN assets a ON a.id = f.asset_id \
+         WHERE f.user_id = ?1 AND f.role = 'original' AND a.deleted_at IS NULL \
+           AND f.asset_id IN (SELECT value FROM json_each(?2))",
+    )
+    .bind(user_id)
+    .bind(ids_json)
+    .fetch_all(db.read())
+    .await?
+    .into_iter()
+    .collect();
+    let by_hash: HashMap<Vec<u8>, String> = sqlx::query_as::<_, (Vec<u8>, String)>(
+        "SELECT f.sha256, f.asset_id FROM asset_files f JOIN assets a ON a.id = f.asset_id \
+         WHERE f.user_id = ?1 AND f.role = 'original' AND a.deleted_at IS NULL \
+           AND f.sha256 IN (SELECT unhex(value) FROM json_each(?2))",
+    )
+    .bind(user_id)
+    .bind(hashes_json)
+    .fetch_all(db.read())
+    .await?
+    .into_iter()
+    .collect();
+
+    Ok(items
+        .iter()
+        .map(
+            |(id, hash)| match (by_id.get(id), by_hash.get(hash.as_slice())) {
+                (Some(stored), _) if stored.as_slice() == hash => CheckResult::BackedUp {
+                    asset_id: id.clone(),
+                },
+                (Some(_), _) => CheckResult::Conflict {
+                    asset_id: id.clone(),
+                },
+                (None, Some(existing)) => CheckResult::Duplicate {
+                    asset_id: id.clone(),
+                    existing_asset_id: existing.clone(),
+                },
+                (None, None) => CheckResult::Missing {
+                    asset_id: id.clone(),
+                },
+            },
+        )
+        .collect())
+}
+
+/// Counts for `halden status` and the library overview.
+#[derive(Debug, Clone, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LibraryStats {
+    pub photos: i64,
+    pub videos: i64,
+    pub trashed: i64,
+    /// Bytes of originals and conversions on the library disk.
+    pub library_bytes: i64,
+}
+
+pub async fn stats(db: &Db, user_id: Option<&str>) -> Result<LibraryStats, sqlx::Error> {
+    let (photos, videos, trashed): (i64, i64, i64) = sqlx::query_as(
+        "SELECT \
+             coalesce(sum(kind = 'photo' AND trashed_at IS NULL), 0), \
+             coalesce(sum(kind = 'video' AND trashed_at IS NULL), 0), \
+             coalesce(sum(trashed_at IS NOT NULL), 0) \
+         FROM assets WHERE deleted_at IS NULL AND (?1 IS NULL OR user_id = ?1)",
+    )
+    .bind(user_id)
+    .fetch_one(db.read())
+    .await?;
+    let (library_bytes,): (i64,) = sqlx::query_as(
+        "SELECT coalesce(sum(size), 0) FROM asset_files \
+         WHERE storage = 'library' AND (?1 IS NULL OR user_id = ?1)",
+    )
+    .bind(user_id)
+    .fetch_one(db.read())
+    .await?;
+    Ok(LibraryStats {
+        photos,
+        videos,
+        trashed,
+        library_bytes,
+    })
+}
+
+/// Marks an asset as changed: new `seq`, new `updated_at`.
+pub async fn touch(tx: &mut SqliteConnection, asset_id: &str) -> Result<i64, sqlx::Error> {
+    let seq = next_seq(tx).await?;
+    sqlx::query("UPDATE assets SET seq = ?, updated_at = ? WHERE id = ?")
+        .bind(seq)
+        .bind(now_ms())
+        .bind(asset_id)
+        .execute(&mut *tx)
+        .await?;
+    Ok(seq)
+}

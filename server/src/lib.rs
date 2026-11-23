@@ -11,11 +11,13 @@ pub mod cli;
 pub mod config;
 pub mod db;
 pub mod fsutil;
+pub mod library;
 pub mod net;
 pub mod seclog;
 pub mod server;
 pub mod setup;
 pub mod tls;
+pub mod upload;
 
 /// Version of this build of the server.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");

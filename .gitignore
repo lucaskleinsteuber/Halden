@@ -6,3 +6,6 @@
 
 # Rust build output
 /server/target/
+
+# Rules for Claude Code. Kept on this computer only; other agents get their own file.
+/CLAUDE.md

@@ -4,12 +4,12 @@
 use std::{fmt, net::IpAddr, str::FromStr};
 
 use serde::{Deserialize, Serialize};
-use sqlx::{Executor, Sqlite, SqlitePool};
+use sqlx::{Executor, Sqlite};
 use uuid::Uuid;
 
 use crate::{
     auth::{pairing, token},
-    db::now_ms,
+    db::{Db, now_ms},
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -273,7 +273,7 @@ pub struct NewUser<'a> {
     pub password_hash: Option<String>,
 }
 
-pub async fn create_user(pool: &SqlitePool, new: NewUser<'_>) -> Result<User, AccountError> {
+pub async fn create_user(db: &Db, new: NewUser<'_>) -> Result<User, AccountError> {
     let username = check_username(new.username)?;
     let display_name = match new.display_name {
         Some(name) => check_display_name(name)?,
@@ -290,10 +290,12 @@ pub async fn create_user(pool: &SqlitePool, new: NewUser<'_>) -> Result<User, Ac
     .bind(new.role.as_str())
     .bind(&new.password_hash)
     .bind(now_ms())
-    .execute(pool)
+    .execute(db.write())
     .await;
     match result {
-        Ok(_) => user_by_id(pool, &id).await?.ok_or(AccountError::NotFound),
+        Ok(_) => user_by_id(db.read(), &id)
+            .await?
+            .ok_or(AccountError::NotFound),
         Err(error) if is_unique_violation(&error) => Err(AccountError::UsernameTaken(username)),
         Err(error) => Err(error.into()),
     }
@@ -316,7 +318,7 @@ where
 
 /// The account and its password hash, for signing in.
 pub async fn user_with_password(
-    pool: &SqlitePool,
+    db: &Db,
     username: &str,
 ) -> Result<Option<(User, Option<String>)>, AccountError> {
     let row = sqlx::query_as::<_, UserRow>(concat!(
@@ -325,25 +327,22 @@ pub async fn user_with_password(
         " FROM users WHERE username = ?"
     ))
     .bind(username.trim())
-    .fetch_optional(pool)
+    .fetch_optional(db.read())
     .await?;
     Ok(row.map(UserRow::split))
 }
 
-pub async fn user_by_name(pool: &SqlitePool, username: &str) -> Result<Option<User>, AccountError> {
-    Ok(user_with_password(pool, username)
+pub async fn user_by_name(db: &Db, username: &str) -> Result<Option<User>, AccountError> {
+    Ok(user_with_password(db, username)
         .await?
         .map(|(user, _)| user))
 }
 
-pub async fn password_hash_of(
-    pool: &SqlitePool,
-    user_id: &str,
-) -> Result<Option<String>, AccountError> {
+pub async fn password_hash_of(db: &Db, user_id: &str) -> Result<Option<String>, AccountError> {
     let hash: Option<(Option<String>,)> =
         sqlx::query_as("SELECT password_hash FROM users WHERE id = ?")
             .bind(user_id)
-            .fetch_optional(pool)
+            .fetch_optional(db.read())
             .await?;
     Ok(hash.and_then(|(hash,)| hash))
 }
@@ -357,7 +356,7 @@ pub struct UserSummary {
     pub devices: i64,
 }
 
-pub async fn list_users(pool: &SqlitePool) -> Result<Vec<UserSummary>, AccountError> {
+pub async fn list_users(db: &Db) -> Result<Vec<UserSummary>, AccountError> {
     #[derive(sqlx::FromRow)]
     struct Row {
         #[sqlx(flatten)]
@@ -372,7 +371,7 @@ pub async fn list_users(pool: &SqlitePool) -> Result<Vec<UserSummary>, AccountEr
              AS devices \
          FROM users ORDER BY username COLLATE NOCASE"
     ))
-    .fetch_all(pool)
+    .fetch_all(db.read())
     .await?;
     Ok(rows
         .into_iter()
@@ -383,16 +382,16 @@ pub async fn list_users(pool: &SqlitePool) -> Result<Vec<UserSummary>, AccountEr
         .collect())
 }
 
-pub async fn count_users(pool: &SqlitePool) -> Result<i64, AccountError> {
+pub async fn count_users(db: &Db) -> Result<i64, AccountError> {
     let (count,): (i64,) = sqlx::query_as("SELECT count(*) FROM users")
-        .fetch_one(pool)
+        .fetch_one(db.read())
         .await?;
     Ok(count)
 }
 
 /// Tells "no such account" apart from "refused to protect the last owner".
-async fn not_found_or_last_owner(pool: &SqlitePool, user_id: &str) -> AccountError {
-    match user_by_id(pool, user_id).await {
+async fn not_found_or_last_owner(db: &Db, user_id: &str) -> AccountError {
+    match user_by_id(db.read(), user_id).await {
         Ok(Some(_)) => AccountError::LastOwner,
         Ok(None) => AccountError::NotFound,
         Err(error) => error,
@@ -408,7 +407,7 @@ macro_rules! keeps_an_owner {
     };
 }
 
-pub async fn set_role(pool: &SqlitePool, user_id: &str, role: Role) -> Result<(), AccountError> {
+pub async fn set_role(db: &Db, user_id: &str, role: Role) -> Result<(), AccountError> {
     let result = sqlx::query(concat!(
         "UPDATE users SET role = ?2 WHERE id = ?1 AND (?2 = 'owner' OR ",
         keeps_an_owner!(),
@@ -416,19 +415,15 @@ pub async fn set_role(pool: &SqlitePool, user_id: &str, role: Role) -> Result<()
     ))
     .bind(user_id)
     .bind(role.as_str())
-    .execute(pool)
+    .execute(db.write())
     .await?;
     if result.rows_affected() == 0 {
-        return Err(not_found_or_last_owner(pool, user_id).await);
+        return Err(not_found_or_last_owner(db, user_id).await);
     }
     Ok(())
 }
 
-pub async fn set_disabled(
-    pool: &SqlitePool,
-    user_id: &str,
-    disabled: bool,
-) -> Result<(), AccountError> {
+pub async fn set_disabled(db: &Db, user_id: &str, disabled: bool) -> Result<(), AccountError> {
     let result = sqlx::query(concat!(
         "UPDATE users SET disabled = ?2 WHERE id = ?1 AND (?2 = 0 OR ",
         keeps_an_owner!(),
@@ -436,38 +431,34 @@ pub async fn set_disabled(
     ))
     .bind(user_id)
     .bind(disabled)
-    .execute(pool)
+    .execute(db.write())
     .await?;
     if result.rows_affected() == 0 {
-        return Err(not_found_or_last_owner(pool, user_id).await);
+        return Err(not_found_or_last_owner(db, user_id).await);
     }
     Ok(())
 }
 
-pub async fn delete_user(pool: &SqlitePool, user_id: &str) -> Result<(), AccountError> {
+pub async fn delete_user(db: &Db, user_id: &str) -> Result<(), AccountError> {
     let result = sqlx::query(concat!(
         "DELETE FROM users WHERE id = ?1 AND ",
         keeps_an_owner!()
     ))
     .bind(user_id)
-    .execute(pool)
+    .execute(db.write())
     .await?;
     if result.rows_affected() == 0 {
-        return Err(not_found_or_last_owner(pool, user_id).await);
+        return Err(not_found_or_last_owner(db, user_id).await);
     }
     Ok(())
 }
 
-pub async fn set_display_name(
-    pool: &SqlitePool,
-    user_id: &str,
-    name: &str,
-) -> Result<(), AccountError> {
+pub async fn set_display_name(db: &Db, user_id: &str, name: &str) -> Result<(), AccountError> {
     let name = check_display_name(name)?;
     let result = sqlx::query("UPDATE users SET display_name = ? WHERE id = ?")
         .bind(name)
         .bind(user_id)
-        .execute(pool)
+        .execute(db.write())
         .await?;
     if result.rows_affected() == 0 {
         return Err(AccountError::NotFound);
@@ -476,15 +467,11 @@ pub async fn set_display_name(
 }
 
 /// Stores a new password hash (see [`crate::auth::password::hash`]).
-pub async fn set_password_hash(
-    pool: &SqlitePool,
-    user_id: &str,
-    hash: &str,
-) -> Result<(), AccountError> {
+pub async fn set_password_hash(db: &Db, user_id: &str, hash: &str) -> Result<(), AccountError> {
     let result = sqlx::query("UPDATE users SET password_hash = ? WHERE id = ?")
         .bind(hash)
         .bind(user_id)
-        .execute(pool)
+        .execute(db.write())
         .await?;
     if result.rows_affected() == 0 {
         return Err(AccountError::NotFound);
@@ -558,31 +545,52 @@ where
     Ok(count > 0)
 }
 
-/// The device a token belongs to, revoked or not, and its account.
+/// The device a token belongs to, revoked or not, and its account. One indexed lookup: every
+/// request that needs a signed-in device runs it.
 pub async fn device_for_token(
-    pool: &SqlitePool,
+    db: &Db,
     token: &str,
 ) -> Result<Option<(Device, User)>, AccountError> {
+    #[derive(sqlx::FromRow)]
+    struct Row {
+        #[sqlx(flatten)]
+        device: DeviceRow,
+        u_username: String,
+        u_display_name: String,
+        u_role: String,
+        u_has_password: bool,
+        u_disabled: bool,
+        u_created_at: i64,
+    }
     let hash = token::hash(token);
-    let Some(row) = sqlx::query_as::<_, DeviceRow>(concat!(
+    let row = sqlx::query_as::<_, Row>(concat!(
         "SELECT ",
         device_columns!(),
-        " FROM devices d WHERE d.token_hash = ?"
+        ", u.username AS u_username, u.display_name AS u_display_name, u.role AS u_role, \
+           u.password_hash IS NOT NULL AS u_has_password, u.disabled AS u_disabled, \
+           u.created_at AS u_created_at \
+         FROM devices d JOIN users u ON u.id = d.user_id WHERE d.token_hash = ?"
     ))
     .bind(hash.as_slice())
-    .fetch_optional(pool)
-    .await?
-    else {
-        return Ok(None);
-    };
-    let device = Device::from(row);
-    Ok(user_by_id(pool, &device.user_id)
-        .await?
-        .map(|user| (device, user)))
+    .fetch_optional(db.read())
+    .await?;
+    Ok(row.map(|row| {
+        let device = Device::from(row.device);
+        let user = User {
+            id: device.user_id.clone(),
+            username: row.u_username,
+            display_name: row.u_display_name,
+            role: row.u_role.parse().unwrap_or(Role::Member),
+            disabled: row.u_disabled,
+            has_password: row.u_has_password,
+            created_at: row.u_created_at,
+        };
+        (device, user)
+    }))
 }
 
 pub async fn touch_device(
-    pool: &SqlitePool,
+    db: &Db,
     device_id: &str,
     now: i64,
     ip: Option<IpAddr>,
@@ -591,19 +599,19 @@ pub async fn touch_device(
         .bind(now)
         .bind(ip.map(|ip| ip.to_canonical().to_string()))
         .bind(device_id)
-        .execute(pool)
+        .execute(db.write())
         .await?;
     Ok(())
 }
 
-pub async fn device_by_id(pool: &SqlitePool, id: &str) -> Result<Option<Device>, AccountError> {
+pub async fn device_by_id(db: &Db, id: &str) -> Result<Option<Device>, AccountError> {
     let row = sqlx::query_as::<_, DeviceRow>(concat!(
         "SELECT ",
         device_columns!(),
         " FROM devices d WHERE d.id = ?"
     ))
     .bind(id)
-    .fetch_optional(pool)
+    .fetch_optional(db.read())
     .await?;
     Ok(row.map(Device::from))
 }
@@ -618,7 +626,7 @@ pub struct DeviceListing {
 
 /// Signed-in devices, of one account or of all, newest first.
 pub async fn list_devices(
-    pool: &SqlitePool,
+    db: &Db,
     user_id: Option<&str>,
 ) -> Result<Vec<DeviceListing>, AccountError> {
     #[derive(sqlx::FromRow)]
@@ -635,7 +643,7 @@ pub async fn list_devices(
          ORDER BY d.created_at DESC"
     ))
     .bind(user_id)
-    .fetch_all(pool)
+    .fetch_all(db.read())
     .await?;
     Ok(rows
         .into_iter()
@@ -647,10 +655,7 @@ pub async fn list_devices(
 }
 
 /// Signed-in devices whose id starts with `prefix` (the terminal shows shortened ids).
-pub async fn find_devices_by_prefix(
-    pool: &SqlitePool,
-    prefix: &str,
-) -> Result<Vec<Device>, AccountError> {
+pub async fn find_devices_by_prefix(db: &Db, prefix: &str) -> Result<Vec<Device>, AccountError> {
     let prefix = prefix.trim().to_ascii_lowercase();
     if prefix.is_empty() || !prefix.bytes().all(|b| b.is_ascii_hexdigit() || b == b'-') {
         return Ok(Vec::new());
@@ -662,17 +667,17 @@ pub async fn find_devices_by_prefix(
          WHERE d.revoked_at IS NULL AND substr(d.id, 1, length(?1)) = ?1"
     ))
     .bind(prefix)
-    .fetch_all(pool)
+    .fetch_all(db.read())
     .await?;
     Ok(rows.into_iter().map(Device::from).collect())
 }
 
 /// "That was me": the device is no longer shown as new.
-pub async fn confirm_device(pool: &SqlitePool, device_id: &str) -> Result<(), AccountError> {
+pub async fn confirm_device(db: &Db, device_id: &str) -> Result<(), AccountError> {
     let result =
         sqlx::query("UPDATE devices SET confirmed = 1 WHERE id = ? AND revoked_at IS NULL")
             .bind(device_id)
-            .execute(pool)
+            .execute(db.write())
             .await?;
     if result.rows_affected() == 0 {
         return Err(AccountError::NotFound);
@@ -681,12 +686,12 @@ pub async fn confirm_device(pool: &SqlitePool, device_id: &str) -> Result<(), Ac
 }
 
 /// Signs a device out: its token stops working at once.
-pub async fn revoke_device(pool: &SqlitePool, device_id: &str) -> Result<(), AccountError> {
+pub async fn revoke_device(db: &Db, device_id: &str) -> Result<(), AccountError> {
     let result =
         sqlx::query("UPDATE devices SET revoked_at = ? WHERE id = ? AND revoked_at IS NULL")
             .bind(now_ms())
             .bind(device_id)
-            .execute(pool)
+            .execute(db.write())
             .await?;
     if result.rows_affected() == 0 {
         return Err(AccountError::NotFound);
@@ -695,8 +700,8 @@ pub async fn revoke_device(pool: &SqlitePool, device_id: &str) -> Result<(), Acc
 }
 
 /// Signs a device out and refuses its installation from now on, for sign-in and pairing.
-pub async fn block_device(pool: &SqlitePool, device: &Device) -> Result<(), AccountError> {
-    let mut tx = pool.begin().await?;
+pub async fn block_device(db: &Db, device: &Device) -> Result<(), AccountError> {
+    let mut tx = db.begin().await?;
     let now = now_ms();
     sqlx::query("UPDATE devices SET revoked_at = ? WHERE id = ? AND revoked_at IS NULL")
         .bind(now)
@@ -720,7 +725,7 @@ pub async fn block_device(pool: &SqlitePool, device: &Device) -> Result<(), Acco
 
 /// Signs out every device of the account except `keep`. Returns how many.
 pub async fn revoke_other_devices(
-    pool: &SqlitePool,
+    db: &Db,
     user_id: &str,
     keep: Option<&str>,
 ) -> Result<u64, AccountError> {
@@ -731,7 +736,7 @@ pub async fn revoke_other_devices(
     .bind(now_ms())
     .bind(user_id)
     .bind(keep)
-    .execute(pool)
+    .execute(db.write())
     .await?;
     Ok(result.rows_affected())
 }
@@ -759,7 +764,7 @@ where
 
 /// New devices nobody confirmed yet, other than `except`: of one account, or of all.
 pub async fn unconfirmed_count(
-    pool: &SqlitePool,
+    db: &Db,
     user_id: Option<&str>,
     except: &str,
 ) -> Result<i64, AccountError> {
@@ -770,7 +775,7 @@ pub async fn unconfirmed_count(
     )
     .bind(except)
     .bind(user_id)
-    .fetch_one(pool)
+    .fetch_one(db.read())
     .await?;
     Ok(count)
 }
@@ -787,7 +792,7 @@ pub struct PairingCode {
 /// A new one-time code for adding a device to `user_id`. `created_by` is the device that asked
 /// for it, `None` for the terminal.
 pub async fn create_pairing_code(
-    pool: &SqlitePool,
+    db: &Db,
     user_id: &str,
     created_by: Option<&str>,
 ) -> Result<PairingCode, AccountError> {
@@ -803,7 +808,7 @@ pub async fn create_pairing_code(
     .bind(created_by)
     .bind(now)
     .bind(expires_at)
-    .execute(pool)
+    .execute(db.write())
     .await?;
     Ok(PairingCode { code, expires_at })
 }
@@ -832,10 +837,7 @@ pub struct PairRequest<'a> {
 /// Uses a pairing code to add a device. A code works only once, even if two devices try it at
 /// the same moment: claiming it is the first write, so the second attempt waits and then finds it
 /// used.
-pub async fn pair_device(
-    pool: &SqlitePool,
-    request: PairRequest<'_>,
-) -> Result<PairOutcome, AccountError> {
+pub async fn pair_device(db: &Db, request: PairRequest<'_>) -> Result<PairOutcome, AccountError> {
     // Check the names before the code is spent on a request that can't succeed.
     check_device_name(request.device_name)?;
     if let Some(id) = request.installation_id {
@@ -843,7 +845,7 @@ pub async fn pair_device(
     }
     let code_hash = pairing::hash(request.code);
     let now = now_ms();
-    let mut tx = pool.begin().await?;
+    let mut tx = db.begin().await?;
     let claimed: Option<(String, Option<String>)> = sqlx::query_as(
         "UPDATE pairing_codes SET used_at = ?1 \
          WHERE code_hash = ?2 AND used_at IS NULL AND expires_at > ?1 \
@@ -911,10 +913,7 @@ pub async fn pair_device(
 }
 
 /// The device a code added, once it was used. For `halden pair`, which waits for it.
-pub async fn paired_device_for_code(
-    pool: &SqlitePool,
-    code: &str,
-) -> Result<Option<Device>, AccountError> {
+pub async fn paired_device_for_code(db: &Db, code: &str) -> Result<Option<Device>, AccountError> {
     let row = sqlx::query_as::<_, DeviceRow>(concat!(
         "SELECT ",
         device_columns!(),
@@ -922,29 +921,29 @@ pub async fn paired_device_for_code(
          WHERE p.code_hash = ?"
     ))
     .bind(pairing::hash(code).as_slice())
-    .fetch_optional(pool)
+    .fetch_optional(db.read())
     .await?;
     Ok(row.map(Device::from))
 }
 
 /// Cancels one code if nobody used it yet (`halden pair` stopped with Ctrl-C).
-pub async fn cancel_code(pool: &SqlitePool, code: &str) -> Result<(), AccountError> {
+pub async fn cancel_code(db: &Db, code: &str) -> Result<(), AccountError> {
     sqlx::query("UPDATE pairing_codes SET expires_at = ? WHERE code_hash = ? AND used_at IS NULL")
         .bind(now_ms())
         .bind(pairing::hash(code).as_slice())
-        .execute(pool)
+        .execute(db.write())
         .await?;
     Ok(())
 }
 
 /// Cancels every code that is still open. Returns how many.
-pub async fn cancel_open_codes(pool: &SqlitePool) -> Result<u64, AccountError> {
+pub async fn cancel_open_codes(db: &Db) -> Result<u64, AccountError> {
     let now = now_ms();
     let result = sqlx::query(
         "UPDATE pairing_codes SET expires_at = ?1 WHERE used_at IS NULL AND expires_at > ?1",
     )
     .bind(now)
-    .execute(pool)
+    .execute(db.write())
     .await?;
     Ok(result.rows_affected())
 }
@@ -962,7 +961,7 @@ pub struct Tidied {
 /// Signs out devices unused for `inactive_days` (0: never), removes old pairing codes and
 /// devices that were signed out longer ago than the security log keeps entries.
 pub async fn tidy(
-    pool: &SqlitePool,
+    db: &Db,
     inactive_days: u32,
     log_retention_days: u32,
     now: i64,
@@ -976,17 +975,17 @@ pub async fn tidy(
         )
         .bind(now)
         .bind(now - i64::from(inactive_days) * DAY_MS)
-        .fetch_all(pool)
+        .fetch_all(db.write())
         .await?;
     }
     sqlx::query("DELETE FROM pairing_codes WHERE expires_at < ?")
         .bind(now - DAY_MS)
-        .execute(pool)
+        .execute(db.write())
         .await?;
     if log_retention_days > 0 {
         sqlx::query("DELETE FROM devices WHERE revoked_at < ?")
             .bind(now - i64::from(log_retention_days) * DAY_MS)
-            .execute(pool)
+            .execute(db.write())
             .await?;
     }
     Ok(tidied)
@@ -996,15 +995,13 @@ pub async fn tidy(
 mod tests {
     use super::*;
 
-    async fn pool() -> (tempfile::TempDir, SqlitePool) {
+    async fn pool() -> (tempfile::TempDir, Db) {
         let dir = tempfile::tempdir().unwrap();
-        let pool = crate::db::open(&dir.path().join("halden.db"))
-            .await
-            .unwrap();
+        let pool = Db::open(&dir.path().join("halden.db")).await.unwrap();
         (dir, pool)
     }
 
-    async fn user(pool: &SqlitePool, name: &str, role: Role) -> User {
+    async fn user(pool: &Db, name: &str, role: Role) -> User {
         create_user(
             pool,
             NewUser {
@@ -1098,7 +1095,7 @@ mod tests {
     async fn devices_are_found_by_token_and_revoked() {
         let (_dir, pool) = pool().await;
         let lucas = user(&pool, "lucas", Role::Owner).await;
-        let (phone, token) = add_device(&pool, device(&lucas, Some("install-0001")))
+        let (phone, token) = add_device(pool.write(), device(&lucas, Some("install-0001")))
             .await
             .unwrap();
         let (found, owner) = device_for_token(&pool, &token).await.unwrap().unwrap();
@@ -1106,7 +1103,9 @@ mod tests {
         assert_eq!(owner.id, lucas.id);
         assert!(device_for_token(&pool, "hd1_nope").await.unwrap().is_none());
 
-        let (mac, _) = add_device(&pool, device(&lucas, None)).await.unwrap();
+        let (mac, _) = add_device(pool.write(), device(&lucas, None))
+            .await
+            .unwrap();
         assert_eq!(
             unconfirmed_count(&pool, Some(&lucas.id), &phone.id)
                 .await
@@ -1120,16 +1119,16 @@ mod tests {
         let (found, _) = device_for_token(&pool, &token).await.unwrap().unwrap();
         assert!(found.revoked_at.is_some());
         assert!(
-            is_blocked(&pool, &lucas.id, Some("install-0001"))
+            is_blocked(pool.read(), &lucas.id, Some("install-0001"))
                 .await
                 .unwrap()
         );
         assert!(
-            !is_blocked(&pool, &lucas.id, Some("install-0002"))
+            !is_blocked(pool.read(), &lucas.id, Some("install-0002"))
                 .await
                 .unwrap()
         );
-        assert!(!is_blocked(&pool, &lucas.id, None).await.unwrap());
+        assert!(!is_blocked(pool.read(), &lucas.id, None).await.unwrap());
 
         assert_eq!(list_devices(&pool, Some(&lucas.id)).await.unwrap().len(), 1);
         assert_eq!(
@@ -1144,7 +1143,7 @@ mod tests {
             revoke_other_devices(&pool, &lucas.id, None).await.unwrap(),
             1
         );
-        assert!(!has_active_devices(&pool, &lucas.id).await.unwrap());
+        assert!(!has_active_devices(pool.read(), &lucas.id).await.unwrap());
 
         // Deleting the account removes its devices.
         let anna = user(&pool, "anna", Role::Owner).await;
@@ -1195,7 +1194,7 @@ mod tests {
         let second = create_pairing_code(&pool, &lucas.id, None).await.unwrap();
         sqlx::query("UPDATE pairing_codes SET expires_at = 0 WHERE code_hash = ?")
             .bind(pairing::hash(&second.code).as_slice())
-            .execute(&pool)
+            .execute(pool.write())
             .await
             .unwrap();
         let code = second.code.as_str();
@@ -1217,7 +1216,9 @@ mod tests {
     async fn unused_devices_expire() {
         let (_dir, pool) = pool().await;
         let lucas = user(&pool, "lucas", Role::Owner).await;
-        let (phone, _) = add_device(&pool, device(&lucas, None)).await.unwrap();
+        let (phone, _) = add_device(pool.write(), device(&lucas, None))
+            .await
+            .unwrap();
         let tidied = tidy(&pool, 365, 90, now_ms()).await.unwrap();
         assert!(tidied.expired_devices.is_empty());
         let in_two_years = now_ms() + 2 * 365 * 24 * 60 * 60 * 1000;

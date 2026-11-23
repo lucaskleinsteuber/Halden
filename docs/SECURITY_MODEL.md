@@ -65,6 +65,19 @@ as a new, unconfirmed device. End-to-end encryption is planned for later.
 reinstall the app and sign in again. The password stays the real protection, which is why
 "change password and sign out all other devices" exists.
 
+## Files and paths
+
+- The server makes every path itself: the account name, the capture time and an extension that
+  comes from the MIME type. A device can't name a file, so it can't write outside the library
+  (`../`, absolute paths and odd characters never get in). Paths read back from the database are
+  checked again before use.
+- Partial uploads live in `<library>/.halden/incoming/` with mode `0600` and random names.
+- A file only counts as stored once its SHA-256 matched, it was flushed to disk, moved into place
+  with the move flushed too, and the database transaction committed.
+- Each account sees only its own assets and uploads; another account's ids answer `404`.
+- Duplicates are found per account. The same photo in two accounts is stored twice, so one
+  account can never learn what another one has.
+
 ## Security log
 
 - Records sign-ins (successful, failed, slowed down), pairing, new, confirmed, blocked and

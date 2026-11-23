@@ -18,7 +18,6 @@ use std::{
 
 use anyhow::{Context, Result, bail};
 use clap::{Args, Parser, Subcommand};
-use sqlx::SqlitePool;
 use tracing_subscriber::EnvFilter;
 
 use crate::{
@@ -241,7 +240,7 @@ async fn create_first_owner(config: &Config) -> Result<Option<String>> {
 /// The database, opened by a terminal command. [`Database::close`] gives files that SQLite
 /// created as root back to the server's user.
 pub(crate) struct Database {
-    pool: SqlitePool,
+    pool: db::Db,
     config: Config,
 }
 
@@ -254,7 +253,7 @@ impl Database {
                 path.display()
             );
         }
-        let pool = db::open(&path)
+        let pool = db::Db::open(&path)
             .await
             .context("could not open the database (try with sudo)")?;
         Ok(Self {
@@ -263,7 +262,7 @@ impl Database {
         })
     }
 
-    pub(crate) fn pool(&self) -> &SqlitePool {
+    pub(crate) fn pool(&self) -> &db::Db {
         &self.pool
     }
 
@@ -276,7 +275,7 @@ impl Database {
 /// Opens the database, runs `work`, and closes the database again whatever happened.
 pub(crate) async fn with_database<T>(
     config_path: &Path,
-    work: impl AsyncFnOnce(&Config, &SqlitePool) -> Result<T>,
+    work: impl AsyncFnOnce(&Config, &db::Db) -> Result<T>,
 ) -> Result<T> {
     let config = Config::load(config_path)?;
     let database = Database::open(&config).await?;
@@ -409,7 +408,42 @@ async fn run_status(config_path: &Path) -> Result<()> {
     );
     row("Library", describe_disk(&config.storage.library_dir));
     row("Data", describe_disk(&config.storage.data_dir));
+    match library_numbers(&config).await {
+        Ok((stats, uploads, accounts)) => {
+            row(
+                "Photos",
+                format!(
+                    "{} photos, {} videos, {} in the trash ({})",
+                    stats.photos,
+                    stats.videos,
+                    stats.trashed,
+                    human_bytes(stats.library_bytes.max(0) as u64)
+                ),
+            );
+            row("Uploads", format!("{uploads} unfinished"));
+            row("Accounts", accounts);
+        }
+        Err(_) => row("Photos", "run with sudo to see the library"),
+    }
     Ok(())
+}
+
+async fn library_numbers(
+    config: &Config,
+) -> Result<(crate::library::assets::LibraryStats, i64, i64)> {
+    let database = Database::open(config).await?;
+    let result = async {
+        let stats = crate::library::assets::stats(database.pool(), None).await?;
+        let (uploads,): (i64,) =
+            sqlx::query_as("SELECT count(*) FROM uploads WHERE state = 'receiving'")
+                .fetch_one(database.pool().read())
+                .await?;
+        let accounts = accounts::count_users(database.pool()).await?;
+        Ok::<_, anyhow::Error>((stats, uploads, accounts))
+    }
+    .await;
+    database.close().await?;
+    result
 }
 
 fn row(label: &str, value: impl std::fmt::Display) {

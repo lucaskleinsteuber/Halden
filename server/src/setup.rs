@@ -93,6 +93,7 @@ pub async fn run(config_path: &Path, options: SetupOptions) -> Result<SetupRepor
     };
 
     fsutil::create_dir(&config.storage.data_dir, 0o700)?;
+    fsutil::create_dir(&config.derived_dir(), 0o700)?;
     if !config.storage.library_dir.exists() {
         fsutil::create_dir(&config.storage.library_dir, 0o750)?;
     }
@@ -103,7 +104,7 @@ pub async fn run(config_path: &Path, options: SetupOptions) -> Result<SetupRepor
     let identity_created = tls::ensure_identity(&config)?;
     let fingerprint = tls::identity_fingerprint(&config)?;
 
-    let pool = db::open(&config.db_path()).await?;
+    let pool = db::Db::open(&config.db_path()).await?;
     let server_id = db::server_id(&pool).await?;
     let has_accounts = accounts::count_users(&pool).await? > 0;
     pool.close().await;

@@ -173,6 +173,9 @@ where
     async fn from_request(request: Request, state: &S) -> Result<Self, ApiError> {
         match Json::<T>::from_request(request, state).await {
             Ok(Json(value)) => Ok(Self(value)),
+            Err(rejection) if rejection.status() == axum::http::StatusCode::PAYLOAD_TOO_LARGE => {
+                Err(ApiError::too_large("The request is too big."))
+            }
             Err(rejection) => Err(ApiError::new(
                 rejection.status(),
                 "validation_failed",

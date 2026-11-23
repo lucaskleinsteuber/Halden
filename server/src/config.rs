@@ -57,6 +57,14 @@ pub struct StorageConfig {
     pub data_dir: PathBuf,
     /// Original photos and videos, in readable folders. Usually the big data disk.
     pub library_dir: PathBuf,
+    /// Where an original goes inside the library, without the extension. Placeholders:
+    /// `{user}`, `{year}`, `{month}`, `{day}`, `{date}` (2026-11-23), `{time}` (15-22-10),
+    /// `{hour}`, `{minute}`, `{second}`, all in the local time where the photo was taken.
+    pub path_template: String,
+    /// Refuse uploads that would leave less than this much free space on the library disk.
+    pub min_free_gb: u64,
+    /// Unfinished uploads are thrown away after this many days without progress.
+    pub upload_expiry_days: u32,
 }
 
 impl Default for StorageConfig {
@@ -64,6 +72,9 @@ impl Default for StorageConfig {
         Self {
             data_dir: DEFAULT_DATA_DIR.into(),
             library_dir: DEFAULT_LIBRARY_DIR.into(),
+            path_template: crate::library::paths::DEFAULT_TEMPLATE.into(),
+            min_free_gb: 5,
+            upload_expiry_days: 7,
         }
     }
 }
@@ -167,6 +178,8 @@ impl Config {
         if self.storage.data_dir == self.storage.library_dir {
             bail!("storage.data_dir and storage.library_dir must be different folders");
         }
+        crate::library::paths::PathTemplate::parse(&self.storage.path_template)
+            .map_err(|problem| anyhow::anyhow!("storage.path_template: {problem}"))?;
         if self.tls.cert_file.is_some() != self.tls.key_file.is_some() {
             bail!("tls.cert_file and tls.key_file must be set together");
         }
@@ -219,6 +232,11 @@ impl Config {
     /// Kept on the library disk so a dead system disk loses nothing that can't be restored.
     pub fn library_meta_dir(&self) -> PathBuf {
         self.storage.library_dir.join(".halden")
+    }
+
+    /// Thumbnails and previews, named by their hash, on the fast disk.
+    pub fn derived_dir(&self) -> PathBuf {
+        self.storage.data_dir.join("derived")
     }
 
     pub fn incoming_dir(&self) -> PathBuf {

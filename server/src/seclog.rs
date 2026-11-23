@@ -7,9 +7,8 @@ use std::net::IpAddr;
 
 use anyhow::Result;
 use serde::Serialize;
-use sqlx::SqlitePool;
 
-use crate::db::now_ms;
+use crate::db::{Db, now_ms};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Event {
@@ -109,7 +108,7 @@ impl<'a> Record<'a> {
 
     /// Writes the entry. A failure is reported in the server log but never stops the action
     /// that is being logged.
-    pub async fn write(self, pool: &SqlitePool) {
+    pub async fn write(self, db: &Db) {
         let result = sqlx::query(
             "INSERT INTO security_log (at, event, user_id, device_id, ip, detail) \
              VALUES (?, ?, ?, ?, ?, ?)",
@@ -120,7 +119,7 @@ impl<'a> Record<'a> {
         .bind(self.device_id)
         .bind(self.ip.map(|ip| ip.to_string()))
         .bind(self.detail)
-        .execute(pool)
+        .execute(db.write())
         .await;
         if let Err(error) = result {
             tracing::error!(%error, event = self.event.as_str(), "could not write the security log");
@@ -145,7 +144,7 @@ pub struct LogEntry {
 /// Newest first. `user_id` limits the list to one account; `before` continues after the last
 /// entry of the previous page.
 pub async fn list(
-    pool: &SqlitePool,
+    db: &Db,
     user_id: Option<&str>,
     before: Option<i64>,
     limit: u32,
@@ -162,20 +161,20 @@ pub async fn list(
     .bind(user_id)
     .bind(before)
     .bind(i64::from(limit))
-    .fetch_all(pool)
+    .fetch_all(db.read())
     .await?;
     Ok(entries)
 }
 
 /// Removes entries older than `retention_days` (0 keeps everything). Returns how many went.
-pub async fn prune(pool: &SqlitePool, retention_days: u32, now: i64) -> Result<u64> {
+pub async fn prune(db: &Db, retention_days: u32, now: i64) -> Result<u64> {
     if retention_days == 0 {
         return Ok(0);
     }
     let cutoff = now - i64::from(retention_days) * 24 * 60 * 60 * 1000;
     let result = sqlx::query("DELETE FROM security_log WHERE at < ?")
         .bind(cutoff)
-        .execute(pool)
+        .execute(db.write())
         .await?;
     Ok(result.rows_affected())
 }
@@ -187,9 +186,7 @@ mod tests {
     #[tokio::test]
     async fn entries_are_listed_newest_first_and_pruned() {
         let dir = tempfile::tempdir().unwrap();
-        let pool = crate::db::open(&dir.path().join("halden.db"))
-            .await
-            .unwrap();
+        let pool = Db::open(&dir.path().join("halden.db")).await.unwrap();
         for _ in 0..3 {
             Record::new(Event::LoginFailed)
                 .user("u1")

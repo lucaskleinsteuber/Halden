@@ -102,7 +102,7 @@ pub async fn login(
         return Err(ApiError::forbidden("This account is disabled."));
     }
     let installation_id = request.device.installation_id.as_deref();
-    if accounts::is_blocked(db, &user.id, installation_id).await? {
+    if accounts::is_blocked(db.read(), &user.id, installation_id).await? {
         Record::new(Event::BlockedDeviceRefused)
             .user(&user.id)
             .ip(ip)
@@ -113,9 +113,9 @@ pub async fn login(
     }
 
     // A first device has nobody to confirm it; any later one shows up as new on the others.
-    let confirmed = !accounts::has_active_devices(db, &user.id).await?;
+    let confirmed = !accounts::has_active_devices(db.read(), &user.id).await?;
     let (device, token) = accounts::add_device(
-        db,
+        db.write(),
         NewDevice {
             user_id: &user.id,
             name: &request.device.name,
@@ -345,7 +345,7 @@ pub async fn create_pairing_code(
             auth.require_owner()?;
             auth.confirm_password(&state, request.current_password)
                 .await?;
-            accounts::user_by_id(db, &id)
+            accounts::user_by_id(db.read(), &id)
                 .await?
                 .ok_or_else(ApiError::not_found)?
         }

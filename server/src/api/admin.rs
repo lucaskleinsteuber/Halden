@@ -109,7 +109,7 @@ pub async fn update_user(
 ) -> Result<Json<User>, ApiError> {
     auth.require_owner()?;
     let db = state.db();
-    let target = accounts::user_by_id(db, &id)
+    let target = accounts::user_by_id(db.read(), &id)
         .await?
         .ok_or_else(ApiError::not_found)?;
     if request.role.is_some() || request.password.is_some() {
@@ -178,7 +178,7 @@ pub async fn update_user(
         .await;
     }
 
-    let updated = accounts::user_by_id(db, &target.id)
+    let updated = accounts::user_by_id(db.read(), &target.id)
         .await?
         .ok_or_else(ApiError::not_found)?;
     Ok(Json(updated))
@@ -199,7 +199,7 @@ pub async fn delete_user(
 ) -> Result<StatusCode, ApiError> {
     auth.require_owner()?;
     let db = state.db();
-    let target = accounts::user_by_id(db, &id)
+    let target = accounts::user_by_id(db.read(), &id)
         .await?
         .ok_or_else(ApiError::not_found)?;
     auth.confirm_password(&state, request.current_password)

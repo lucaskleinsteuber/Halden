@@ -27,8 +27,16 @@ Every error has a status code and the same body:
 | `password_required` | 403 | Send `currentPassword` to confirm this change. |
 | `password_login_disabled` | 403 | The server only allows pairing (`[auth] password_login = false`). |
 | `validation_failed` | 400 / 415 / 422 | The request is malformed or breaks a rule (name too long, password too short, …). |
-| `not_found` | 404 | No such route, account or device (or not one you may see). |
+| `not_found` | 404 | No such route, account, device, upload or asset (or not one you may see). |
 | `conflict` | 409 | Username taken, or the change would leave the server without an owner. |
+| `unsupported_media_type` | 415 | Halden doesn't store this file type. |
+| `too_large` | 413 | The request body is bigger than allowed. |
+| `insufficient_storage` | 507 | The library disk is too full for this upload. |
+| `upload_busy` | 409 | Another request is sending this upload right now. |
+| `offset_mismatch` | 409 | `Upload-Offset` is not where the upload stands; the body's `offset` (and the `Upload-Offset` header) says where to continue. |
+| `upload_incomplete` | 409 | `complete` was called before all bytes arrived. |
+| `checksum_mismatch` | 422 | The file that arrived doesn't match its SHA-256. The upload is thrown away. |
+| `upload_failed` | 410 | The upload ended (checksum mismatch, cancelled, expired). Start a new one. |
 | `internal_error` | 500 | Something broke on the server; its log has the details. |
 
 ## Public routes
@@ -209,6 +217,160 @@ Events: `login_succeeded`, `login_failed`, `login_throttled`, `pairing_code_crea
 `device_confirmed`, `device_blocked`, `device_revoked`, `device_expired`, `password_changed`,
 `password_reset`, `password_check_failed`, `user_created`, `user_renamed`, `role_changed`,
 `user_disabled`, `user_enabled`, `user_deleted`.
+
+## Uploads
+
+Originals (and the video of a Live Photo, or the RAW of a RAW+HEIC pair) go up with a resumable
+protocol in the style of tus. Nothing is lost when the connection breaks, the phone sleeps or the
+server is killed: the server keeps every byte that arrived and tells where to continue.
+
+The server makes every file name and path itself; nothing the device sends becomes part of a
+path. Originals land in readable folders, by default
+`<library>/<username>/<year>/<month>/<date>_<time>.<ext>` in the local time where the photo was
+taken (`[storage] path_template`). Two photos from the same second get `_2`, `_3`.
+
+### `POST /uploads`
+
+```json
+{
+  "assetId": "6F9619FF-8B86-D011-B42D-00C04FC964FF",
+  "role": "original",
+  "size": 3145728,
+  "sha256": "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08",
+  "mimeType": "image/heic",
+  "metadata": {
+    "takenAt": 1795443730000,
+    "timeZoneOffsetMinutes": 60,
+    "timeZone": "Europe/Berlin",
+    "location": { "latitude": 50.5558, "longitude": 9.6808, "altitude": 261.0,
+                  "horizontalAccuracy": 4.5, "verticalAccuracy": 3.0,
+                  "heading": 271.5, "headingAccuracy": 10.0 },
+    "width": 4032, "height": 3024, "durationMs": null,
+    "originalFilename": "IMG_0001.HEIC"
+  }
+}
+```
+
+- `assetId`: a UUID the device gives the photo when it is taken. It makes every retry safe.
+- `role`: `original` (default), `paired_video` (Live Photo video) or `raw`. The original has to be
+  there first.
+- `mimeType`: `image/heic`, `image/heif`, `image/jpeg`, `image/png`, `image/tiff`, `image/webp`,
+  `image/gif`, `image/avif`, `image/x-adobe-dng`, `image/x-canon-cr3`, `image/x-fuji-raf`,
+  `video/quicktime`, `video/mp4`, `video/x-matroska`, `video/webm`. Anything else: `415`.
+- `metadata` is optional and every field in it too. Unknown fields are kept but not used. When the
+  device doesn't say when or where, the server reads it from the file (EXIF, QuickTime); for the
+  time the order is device, file, upload time.
+
+Answers:
+
+| Status | Body | Meaning |
+|---|---|---|
+| `201` | `{"state": "receiving", "uploadId": "…", "assetId": "…", "offset": 0, "size": 3145728, "expiresAt": …}` | Send the bytes. |
+| `200` | `{"state": "receiving", …, "offset": 1048576}` | This file was announced before (the app lost the upload id); continue at `offset`. |
+| `200` | `{"state": "completed", "asset": {…}}` | Already stored with this hash. |
+| `200` | `{"state": "duplicate", "existingAssetId": "…"}` | The same content is stored under another asset id of this account; nothing to send. |
+| `409 conflict` | | The asset id is used by another account, or already has a different file in this role. |
+| `507 insufficient_storage` | | The file doesn't fit (free space minus space promised to other uploads minus `[storage] min_free_gb`). |
+
+### `PATCH /uploads/{id}`
+
+```
+Upload-Offset: 1048576
+Content-Type: application/offset+octet-stream
+
+<bytes>
+```
+
+Appends the body at `Upload-Offset`, which must be where the upload stands (otherwise
+`409 offset_mismatch` with the right offset). Any size works, from one piece to many; 8 to 64
+MiB per request suits background uploads on iOS. A request that breaks off keeps what arrived.
+
+Answers `200` with `{"state": "receiving", …, "offset": …}` and an `Upload-Offset` header, or,
+when the last byte arrived, `{"state": "completed", "asset": {…}}`: the SHA-256 was checked, the
+file flushed to disk and moved into the library, and the database updated. A wrong hash gives
+`422 checksum_mismatch` and the upload is thrown away.
+
+Unfinished uploads are thrown away after `[storage] upload_expiry_days` (default 7) without
+progress.
+
+### `GET /uploads/{id}` and `HEAD /uploads/{id}`
+
+The same body as `PATCH`, with `Upload-Offset` and `Upload-Length` headers. Use it after a
+restart of the app or the server to learn where to continue.
+
+### `POST /uploads/{id}/complete`
+
+For retries: finishes an upload whose bytes all arrived, or returns its result if it is finished.
+`409 upload_incomplete` if bytes are missing.
+
+### `DELETE /uploads/{id}`
+
+Gives up on an upload. `204`.
+
+## Assets
+
+### The asset object
+
+```json
+{
+  "id": "6F9619FF-…", "kind": "photo",
+  "takenAt": 1795443730000, "timeZoneOffsetMinutes": 60, "takenAtSource": "client",
+  "width": 4032, "height": 3024, "durationMs": null,
+  "location": { "latitude": 50.5558, "longitude": 9.6808, "altitude": 261.0,
+                "accuracyMeters": 4.5, "heading": 271.5, "source": "client" },
+  "camera": { "make": "Apple", "model": "iPhone 15", "lens": "iPhone 15 back camera 6.1mm f/1.6" },
+  "files": [
+    { "role": "original", "sha256": "…", "size": 3145728, "mimeType": "image/heic",
+      "width": 4032, "height": 3024 },
+    { "role": "thumbnail", "sha256": "…", "size": 31200, "mimeType": "image/jpeg",
+      "width": 512, "height": 384 }
+  ],
+  "createdAt": …, "updatedAt": …, "seq": 1042, "trashedAt": null, "deletedAt": null
+}
+```
+
+`takenAtSource` is `client`, `exif` or `upload`; `location.source` is `client` or `exif`. `seq`
+changes with every change to the asset.
+
+### `GET /assets/{id}`
+
+One asset of the own account. Other accounts' assets answer `404`.
+
+### `POST /assets/check`
+
+Which of these are backed up? Up to 1000 items per request, answered with two database queries.
+
+```json
+{ "items": [ { "assetId": "…", "sha256": "…" } ] }
+```
+
+```json
+{ "results": [
+  { "status": "backedUp", "assetId": "…" },
+  { "status": "duplicate", "assetId": "…", "existingAssetId": "…" },
+  { "status": "missing", "assetId": "…" },
+  { "status": "conflict", "assetId": "…" }
+] }
+```
+
+`conflict`: this asset id is stored with different content.
+
+### `PUT /assets/{id}/files/thumbnail` and `PUT /assets/{id}/files/preview`
+
+The phone makes the thumbnail (grid, about 512 px) and the preview (full screen, about 2048 px)
+and sends each in one request after the original:
+
+```
+Content-Type: image/jpeg
+Halden-Sha256: <hex>
+Halden-Width: 512
+Halden-Height: 384
+
+<bytes>
+```
+
+JPEG, HEIC, PNG or WebP, at most 8 MiB. Answers with the asset. Sending a new one replaces the
+old one.
 
 ## Accounts (owners only)
 

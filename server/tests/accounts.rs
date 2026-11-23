@@ -2,151 +2,10 @@
 
 mod common;
 
-use common::{client, start_server, start_server_with, url};
-use halden::{
-    accounts::{self, NewUser, Role, User},
-    auth::password,
-    config::Config,
-    db,
-    server::RunningServer,
-};
+use common::{ANNA_PASSWORD, Api, LUCAS_PASSWORD, client, device, iphone, mac, start_server, url};
+use halden::accounts::{self, Role};
 use reqwest::Method;
 use serde_json::{Value, json};
-
-const LUCAS_PASSWORD: &str = "correct horse battery";
-const ANNA_PASSWORD: &str = "anna's long password";
-
-struct Api {
-    http: reqwest::Client,
-    server: RunningServer,
-    config: Config,
-    _dir: tempfile::TempDir,
-}
-
-struct Reply {
-    status: u16,
-    body: Value,
-    retry_after: Option<String>,
-}
-
-impl Reply {
-    fn error(&self) -> &str {
-        self.body["error"].as_str().unwrap_or_default()
-    }
-}
-
-impl Api {
-    async fn start() -> Self {
-        Self::start_with(|_| {}).await
-    }
-
-    async fn start_with(change: impl FnOnce(&mut Config)) -> Self {
-        let dir = tempfile::tempdir().unwrap();
-        let (server, config) = start_server_with(dir.path(), change).await;
-        let http = client(*server.fingerprint.as_bytes(), &[&rustls::version::TLS13]);
-        Self {
-            http,
-            server,
-            config,
-            _dir: dir,
-        }
-    }
-
-    async fn call(
-        &self,
-        method: Method,
-        path: &str,
-        token: Option<&str>,
-        body: Option<Value>,
-    ) -> Reply {
-        let mut request = self.http.request(method, url(&self.server, path));
-        if let Some(token) = token {
-            request = request.bearer_auth(token);
-        }
-        if let Some(body) = body {
-            request = request.json(&body);
-        }
-        let response = request.send().await.unwrap();
-        let status = response.status().as_u16();
-        let retry_after = response
-            .headers()
-            .get("retry-after")
-            .map(|value| value.to_str().unwrap().to_string());
-        let text = response.text().await.unwrap();
-        let body = if text.is_empty() {
-            Value::Null
-        } else {
-            serde_json::from_str(&text).unwrap_or_else(|_| panic!("not JSON: {text}"))
-        };
-        Reply {
-            status,
-            body,
-            retry_after,
-        }
-    }
-
-    async fn get(&self, path: &str, token: &str) -> Reply {
-        self.call(Method::GET, path, Some(token), None).await
-    }
-
-    async fn post(&self, path: &str, token: Option<&str>, body: Value) -> Reply {
-        self.call(Method::POST, path, token, Some(body)).await
-    }
-
-    async fn login(&self, username: &str, password: &str, device: Value) -> Reply {
-        self.post(
-            "/api/v1/auth/login",
-            None,
-            json!({ "username": username, "password": password, "device": device }),
-        )
-        .await
-    }
-
-    /// Signs in and returns the token.
-    async fn token(&self, username: &str, password: &str, device: Value) -> String {
-        let reply = self.login(username, password, device).await;
-        assert_eq!(reply.status, 200, "{}", reply.body);
-        reply.body["token"].as_str().unwrap().to_string()
-    }
-
-    async fn pool(&self) -> sqlx::SqlitePool {
-        db::open(&self.config.db_path()).await.unwrap()
-    }
-
-    /// Creates an account directly in the database, like `halden user add` does.
-    async fn add_user(&self, username: &str, password: &str, role: Role) -> User {
-        let pool = self.pool().await;
-        let user = accounts::create_user(
-            &pool,
-            NewUser {
-                username,
-                display_name: None,
-                role,
-                password_hash: Some(password::hash(password.into()).await.unwrap()),
-            },
-        )
-        .await
-        .unwrap();
-        pool.close().await;
-        user
-    }
-
-    async fn stop(self) {
-        self.server.shutdown().await.unwrap();
-    }
-}
-
-fn device(name: &str, installation: &str) -> Value {
-    json!({ "name": name, "platform": "ios", "installationId": installation })
-}
-
-fn iphone() -> Value {
-    device("Lucas' iPhone", "install-lucas-iphone")
-}
-
-fn mac() -> Value {
-    json!({ "name": "Lucas' Mac", "platform": "macos", "installationId": "install-lucas-mac" })
-}
 
 #[tokio::test]
 async fn login_gives_a_token_that_opens_me() {
@@ -312,7 +171,7 @@ async fn a_pairing_code_works_once() {
         .await;
     let pool = api.pool().await;
     sqlx::query("UPDATE pairing_codes SET expires_at = 0 WHERE used_at IS NULL")
-        .execute(&pool)
+        .execute(pool.write())
         .await
         .unwrap();
     pool.close().await;

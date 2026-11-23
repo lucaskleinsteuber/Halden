@@ -5,16 +5,21 @@
 use std::{path::Path, sync::Arc};
 
 use halden::{
+    accounts::{self, NewUser, Role, User},
+    auth::password,
     config::Config,
+    db,
     server::{self, RunningServer},
     setup::{self, SetupOptions},
 };
+use reqwest::Method;
 use rustls::{
     DigitallySignedStruct, SignatureScheme,
     client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier},
     crypto::CryptoProvider,
     pki_types::{CertificateDer, ServerName, UnixTime},
 };
+use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 
 /// Trusts exactly one certificate, identified by its SHA-256, like the iPhone app does.
@@ -130,4 +135,151 @@ pub async fn start_server_with(
 
 pub fn url(server: &RunningServer, path: &str) -> String {
     format!("https://127.0.0.1:{}{path}", server.addr.port())
+}
+
+pub const LUCAS_PASSWORD: &str = "correct horse battery";
+pub const ANNA_PASSWORD: &str = "anna's long password";
+
+/// A real server in a temporary folder, plus a client that talks to it like the app.
+pub struct Api {
+    pub http: reqwest::Client,
+    pub server: RunningServer,
+    pub config: Config,
+    pub dir: tempfile::TempDir,
+}
+
+pub struct Reply {
+    pub status: u16,
+    pub body: Value,
+    pub retry_after: Option<String>,
+    pub headers: reqwest::header::HeaderMap,
+}
+
+impl Reply {
+    pub fn error(&self) -> &str {
+        self.body["error"].as_str().unwrap_or_default()
+    }
+}
+
+impl Api {
+    pub async fn start() -> Self {
+        Self::start_with(|_| {}).await
+    }
+
+    pub async fn start_with(change: impl FnOnce(&mut Config)) -> Self {
+        let dir = tempfile::tempdir().unwrap();
+        let (server, config) = start_server_with(dir.path(), change).await;
+        let http = client(*server.fingerprint.as_bytes(), &[&rustls::version::TLS13]);
+        Self {
+            http,
+            server,
+            config,
+            dir,
+        }
+    }
+
+    pub async fn call(
+        &self,
+        method: Method,
+        path: &str,
+        token: Option<&str>,
+        body: Option<Value>,
+    ) -> Reply {
+        let mut request = self.http.request(method, url(&self.server, path));
+        if let Some(token) = token {
+            request = request.bearer_auth(token);
+        }
+        if let Some(body) = body {
+            request = request.json(&body);
+        }
+        Self::reply(request.send().await.unwrap()).await
+    }
+
+    /// Reads a response the way [`Api::call`] does.
+    pub async fn reply(response: reqwest::Response) -> Reply {
+        let status = response.status().as_u16();
+        let headers = response.headers().clone();
+        let retry_after = response
+            .headers()
+            .get("retry-after")
+            .map(|value| value.to_str().unwrap().to_string());
+        let text = response.text().await.unwrap();
+        let body = if text.is_empty() {
+            Value::Null
+        } else {
+            serde_json::from_str(&text).unwrap_or_else(|_| panic!("not JSON: {text}"))
+        };
+        Reply {
+            status,
+            body,
+            retry_after,
+            headers,
+        }
+    }
+
+    pub async fn get(&self, path: &str, token: &str) -> Reply {
+        self.call(Method::GET, path, Some(token), None).await
+    }
+
+    pub async fn post(&self, path: &str, token: Option<&str>, body: Value) -> Reply {
+        self.call(Method::POST, path, token, Some(body)).await
+    }
+
+    pub async fn login(&self, username: &str, password: &str, device: Value) -> Reply {
+        self.post(
+            "/api/v1/auth/login",
+            None,
+            json!({ "username": username, "password": password, "device": device }),
+        )
+        .await
+    }
+
+    /// Signs in and returns the token.
+    pub async fn token(&self, username: &str, password: &str, device: Value) -> String {
+        let reply = self.login(username, password, device).await;
+        assert_eq!(reply.status, 200, "{}", reply.body);
+        reply.body["token"].as_str().unwrap().to_string()
+    }
+
+    pub async fn pool(&self) -> db::Db {
+        db::Db::open(&self.config.db_path()).await.unwrap()
+    }
+
+    /// Creates an account directly in the database, like `halden user add` does.
+    pub async fn add_user(&self, username: &str, password: &str, role: Role) -> User {
+        let pool = self.pool().await;
+        let user = accounts::create_user(
+            &pool,
+            NewUser {
+                username,
+                display_name: None,
+                role,
+                password_hash: Some(password::hash(password.into()).await.unwrap()),
+            },
+        )
+        .await
+        .unwrap();
+        pool.close().await;
+        user
+    }
+
+    pub fn url(&self, path: &str) -> String {
+        url(&self.server, path)
+    }
+
+    pub async fn stop(self) {
+        self.server.shutdown().await.unwrap();
+    }
+}
+
+pub fn device(name: &str, installation: &str) -> Value {
+    json!({ "name": name, "platform": "ios", "installationId": installation })
+}
+
+pub fn iphone() -> Value {
+    device("Lucas' iPhone", "install-lucas-iphone")
+}
+
+pub fn mac() -> Value {
+    json!({ "name": "Lucas' Mac", "platform": "macos", "installationId": "install-lucas-mac" })
 }

@@ -1,24 +1,29 @@
 //! The HTTP API the apps talk to. All routes live under `/api/v1`; see `docs/PROTOCOL.md`.
 
 mod admin;
+mod assets;
 mod auth;
 mod devices;
 mod error;
 mod extract;
+mod uploads;
 
-use std::{sync::Arc, time::Duration};
+use std::{path::PathBuf, sync::Arc, time::Duration};
 
 use axum::{
     Json, Router,
-    extract::State,
+    extract::{DefaultBodyLimit, State},
     http::StatusCode,
     response::{IntoResponse, Response},
-    routing::{get, patch, post, put},
+    routing::{delete, get, patch, post, put},
 };
 use serde::Serialize;
 use serde_json::json;
-use sqlx::SqlitePool;
-use tower_http::{limit::RequestBodyLimitLayer, timeout::TimeoutLayer, trace::TraceLayer};
+use tower_http::{
+    compression::{CompressionLayer, CompressionLevel, predicate::SizeAbove},
+    timeout::TimeoutLayer,
+    trace::TraceLayer,
+};
 use uuid::Uuid;
 
 pub use self::{
@@ -29,13 +34,17 @@ use crate::{
     API_VERSION, VERSION,
     auth::ratelimit::RateLimiter,
     config::{AuthConfig, Config},
-    db,
+    db::{self, Db},
     tls::Fingerprint,
+    upload::Uploads,
 };
 
-/// Requests other than uploads are small; anything bigger is refused early.
-const MAX_BODY_BYTES: usize = 64 * 1024;
+/// JSON requests are small (the biggest is a check of 1000 hashes, about 110 KB); anything
+/// bigger is refused before it is read.
+const MAX_BODY_BYTES: usize = 256 * 1024;
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
+/// JSON smaller than this isn't worth compressing.
+const COMPRESS_ABOVE_BYTES: u64 = 1024;
 
 #[derive(Clone)]
 pub struct AppState(Arc<Inner>);
@@ -46,9 +55,12 @@ struct Inner {
     fingerprint: Fingerprint,
     /// The port the server really listens on (the config may say 0 in tests).
     port: u16,
-    db: SqlitePool,
+    db: Db,
     auth: AuthConfig,
     limiter: RateLimiter,
+    uploads: Arc<Uploads>,
+    library_dir: PathBuf,
+    derived_dir: PathBuf,
 }
 
 impl AppState {
@@ -57,7 +69,8 @@ impl AppState {
         server_id: Uuid,
         fingerprint: Fingerprint,
         port: u16,
-        db: SqlitePool,
+        db: Db,
+        uploads: Arc<Uploads>,
     ) -> Self {
         Self(Arc::new(Inner {
             server_id,
@@ -67,10 +80,25 @@ impl AppState {
             db,
             auth: config.auth.clone(),
             limiter: RateLimiter::new(),
+            uploads,
+            library_dir: config.storage.library_dir.clone(),
+            derived_dir: config.derived_dir(),
         }))
     }
 
-    pub fn db(&self) -> &SqlitePool {
+    pub fn uploads(&self) -> &Uploads {
+        &self.0.uploads
+    }
+
+    pub fn library_dir(&self) -> &std::path::Path {
+        &self.0.library_dir
+    }
+
+    pub fn derived_dir(&self) -> &std::path::Path {
+        &self.0.derived_dir
+    }
+
+    pub fn db(&self) -> &Db {
         &self.0.db
     }
 
@@ -83,8 +111,12 @@ impl AppState {
     }
 }
 
+/// Two kinds of routes. Small JSON requests get a 30 s limit, a 256 KiB body limit and
+/// compressed answers. File transfers get none of that: a 2 GB video may take an hour over a slow
+/// link, and its bytes are streamed and limited by the upload's declared size instead. Transfers
+/// still stop when nothing arrives for a minute.
 pub fn router(state: AppState) -> Router {
-    Router::new()
+    let json = Router::new()
         .route("/api/v1/health", get(health))
         .route("/api/v1/server", get(server_info))
         .route("/api/v1/auth/login", post(auth::login))
@@ -94,10 +126,7 @@ pub fn router(state: AppState) -> Router {
         .route("/api/v1/me/password", put(auth::change_password))
         .route("/api/v1/pairing-codes", post(auth::create_pairing_code))
         .route("/api/v1/devices", get(devices::list))
-        .route(
-            "/api/v1/devices/{id}",
-            axum::routing::delete(devices::revoke),
-        )
+        .route("/api/v1/devices/{id}", delete(devices::revoke))
         .route("/api/v1/devices/{id}/confirm", post(devices::confirm))
         .route("/api/v1/devices/{id}/block", post(devices::block))
         .route("/api/v1/security-log", get(devices::security_log))
@@ -109,12 +138,33 @@ pub fn router(state: AppState) -> Router {
             "/api/v1/admin/users/{id}",
             patch(admin::update_user).delete(admin::delete_user),
         )
-        .fallback(not_found)
-        .layer(RequestBodyLimitLayer::new(MAX_BODY_BYTES))
+        .route("/api/v1/uploads", post(uploads::create))
+        .route(
+            "/api/v1/uploads/{id}",
+            get(uploads::status).delete(uploads::cancel),
+        )
+        .route("/api/v1/uploads/{id}/complete", post(uploads::complete))
+        .route("/api/v1/assets/check", post(assets::check))
+        .route("/api/v1/assets/{id}", get(assets::get))
+        .layer(
+            CompressionLayer::new()
+                .gzip(true)
+                .br(true)
+                .quality(CompressionLevel::Fastest)
+                .compress_when(SizeAbove::new(COMPRESS_ABOVE_BYTES)),
+        )
+        .layer(DefaultBodyLimit::max(MAX_BODY_BYTES))
         .layer(TimeoutLayer::with_status_code(
             StatusCode::REQUEST_TIMEOUT,
             REQUEST_TIMEOUT,
-        ))
+        ));
+
+    let transfers = Router::new()
+        .route("/api/v1/uploads/{id}", patch(uploads::send))
+        .route("/api/v1/assets/{id}/files/{role}", put(assets::put_file));
+
+    json.merge(transfers)
+        .fallback(not_found)
         .layer(TraceLayer::new_for_http())
         .with_state(state)
 }

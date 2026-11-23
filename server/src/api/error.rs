@@ -17,6 +17,8 @@ pub struct ApiError {
     code: &'static str,
     message: String,
     retry_after: Option<u64>,
+    /// Where an upload stands; sent as `Upload-Offset` and as `offset` in the body.
+    offset: Option<u64>,
 }
 
 impl ApiError {
@@ -26,7 +28,13 @@ impl ApiError {
             code,
             message: message.into(),
             retry_after: None,
+            offset: None,
         }
+    }
+
+    pub fn with_offset(mut self, offset: u64) -> Self {
+        self.offset = Some(offset);
+        self
     }
 
     pub fn status(&self) -> StatusCode {
@@ -120,6 +128,26 @@ impl ApiError {
         Self::new(StatusCode::CONFLICT, "conflict", message)
     }
 
+    pub fn unsupported_media_type(message: impl Into<String>) -> Self {
+        Self::new(
+            StatusCode::UNSUPPORTED_MEDIA_TYPE,
+            "unsupported_media_type",
+            message,
+        )
+    }
+
+    pub fn too_large(message: impl Into<String>) -> Self {
+        Self::new(StatusCode::PAYLOAD_TOO_LARGE, "too_large", message)
+    }
+
+    pub fn insufficient_storage(message: impl Into<String>) -> Self {
+        Self::new(
+            StatusCode::INSUFFICIENT_STORAGE,
+            "insufficient_storage",
+            message,
+        )
+    }
+
     pub fn internal() -> Self {
         Self::new(
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -157,11 +185,16 @@ impl From<anyhow::Error> for ApiError {
 
 impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
-        let mut response = (
-            self.status,
-            Json(json!({ "error": self.code, "message": self.message })),
-        )
-            .into_response();
+        let mut body = json!({ "error": self.code, "message": self.message });
+        if let Some(offset) = self.offset {
+            body["offset"] = json!(offset);
+        }
+        let mut response = (self.status, Json(body)).into_response();
+        if let Some(offset) = self.offset {
+            response
+                .headers_mut()
+                .insert(super::uploads::UPLOAD_OFFSET, HeaderValue::from(offset));
+        }
         if let Some(seconds) = self.retry_after {
             response
                 .headers_mut()

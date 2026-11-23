@@ -6,14 +6,14 @@ Halden is a native iPhone camera with your own self-hosted photo library. You ta
 video, it is saved on the phone right away and uploaded to your own server in the background, in
 full quality, without you having to think about it. No cloud, no subscription, no jank.
 
-> **Status:** early development. The server foundation, accounts and device pairing are in
-> place; uploads and the iPhone app come next. Nothing here is ready for your only copy of your photos yet.
+> **Status:** early development. The server has accounts, device pairing and resumable uploads;
+> sync, the library view and the iPhone app come next. Nothing here is ready for your only copy of your photos yet.
 
 ## How it fits together
 
 | Part | Built with | State |
 |---|---|---|
-| Server | Rust (Axum, Tokio, rustls, SQLite) for Linux | foundation, accounts and pairing done |
+| Server | Rust (Axum, Tokio, rustls, SQLite) for Linux | accounts, pairing and uploads done |
 | iPhone app | Swift, SwiftUI, AVFoundation | planned |
 | Mac app | Swift | later |
 
@@ -73,7 +73,7 @@ until someone confirms it.
 | Command | What it does |
 |---|---|
 | `halden setup` | Set up config, folders, certificate and database |
-| `halden status` | Show state, fingerprint, addresses and free space |
+| `halden status` | Show state, fingerprint, addresses, free space and the library's numbers |
 | `halden serve` | Run the server (systemd does this for you) |
 | `halden user add <name> [--owner]` | Create an account (asks for its password) |
 | `halden user list` | List the accounts |
@@ -88,9 +88,14 @@ until someone confirms it.
 ### Settings
 
 Everything lives in `/etc/halden/config.toml`; every key is optional. Restart the server after
-changes. Besides `[server]`, `[storage]`, `[network]` and `[tls]`:
+changes. Besides `[server]`, `[network]` and `[tls]`:
 
 ```toml
+[storage]
+path_template = "{user}/{year}/{month}/{date}_{time}"  # where originals go in the library
+min_free_gb = 5              # refuse uploads that would leave less free space
+upload_expiry_days = 7       # throw away unfinished uploads after this long
+
 [auth]
 password_login = true        # false: devices can only be added by pairing
 device_inactive_days = 365   # sign out devices unused this long (0 = never)
@@ -98,6 +103,14 @@ device_inactive_days = 365   # sign out devices unused this long (0 = never)
 [security]
 log_retention_days = 90      # keep security log entries this long (0 = forever)
 ```
+
+### Speed
+
+The server is built to stay fast with a big library: one database connection writes while
+several read in parallel, every request checks its token with a single indexed lookup, HTTP/2
+flow-control windows are sized for uploads over Wi-Fi and Tailscale, uploads are hashed while
+they are written (never read twice), and JSON answers are compressed. `cargo run --release
+--example loadtest` measures it against a library of 100,000 photos.
 
 ### More
 
