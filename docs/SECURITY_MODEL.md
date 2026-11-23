@@ -75,6 +75,9 @@ reinstall the app and sign in again. The password stays the real protection, whi
 - A file only counts as stored once its SHA-256 matched, it was flushed to disk, moved into place
   with the move flushed too, and the database transaction committed.
 - Each account sees only its own assets and uploads; another account's ids answer `404`.
+- Thumbnails of formats Rust can't read are made by `ffmpeg` and libheif. They are started
+  directly (never through a shell), with file paths the server made, at the lowest priority, with
+  a time limit, and they write only into a private temporary folder.
 - Duplicates are found per account. The same photo in two accounts is stored twice, so one
   account can never learn what another one has.
 

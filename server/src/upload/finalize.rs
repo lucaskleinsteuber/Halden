@@ -22,6 +22,7 @@ use crate::{
     accounts::User,
     db::{Db, now_ms},
     fsutil,
+    jobs::{self, JobKind},
     library::{
         assets::{self, Asset},
         metadata::{self, FileMetadata},
@@ -87,6 +88,7 @@ pub(super) async fn finish(
     place(&part, &target, &uploads.incoming).await?;
 
     let recorded = record(
+        uploads,
         db,
         user,
         row,
@@ -105,6 +107,7 @@ pub(super) async fn finish(
         return Err(error);
     }
     drop(placing);
+    uploads.wake.notify_waiters();
 
     assets::get(db.read(), &user.id, &row.asset_id)
         .await?
@@ -230,6 +233,7 @@ async fn place(part: &Path, target: &Path, incoming: &Path) -> Result<(), Upload
 
 #[allow(clippy::too_many_arguments)]
 async fn record(
+    uploads: &Uploads,
     db: &Db,
     user: &User,
     row: &UploadRow,
@@ -332,6 +336,17 @@ async fn record(
         .bind(&row.id)
         .execute(&mut *tx)
         .await?;
+    if row.role() == UploadRole::Original {
+        // Made only if the phone hasn't sent its own thumbnails by then.
+        jobs::enqueue(
+            &mut tx,
+            JobKind::Thumbnail,
+            &row.asset_id,
+            &user.id,
+            uploads.thumbnail_delay_ms,
+        )
+        .await?;
+    }
     tx.commit().await?;
     Ok(())
 }

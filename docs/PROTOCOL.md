@@ -332,9 +332,66 @@ Gives up on an upload. `204`.
 `takenAtSource` is `client`, `exif` or `upload`; `location.source` is `client` or `exif`. `seq`
 changes with every change to the asset.
 
+`takenAt`, `timeZoneOffsetMinutes` and `location` are the *effective* values: a correction if
+there is one, otherwise the original. `takenAtSource` is then `manual`; `location.source` is
+`manual` or `estimated`. `title` and `description` are `null` until set.
+
 ### `GET /assets/{id}`
 
-One asset of the own account. Other accounts' assets answer `404`.
+Everything about one asset of the own account (other accounts' assets answer `404`): the asset
+object plus
+
+```json
+{
+  "original": { "takenAt": …, "timeZoneOffsetMinutes": 60, "takenAtSource": "client",
+                "location": { … } },
+  "exif": { "fNumber": "1.6", "exposureTime": "1/120", "iso": "64", "focalLength": "6.1", … },
+  "client": { …what the phone sent with the upload… },
+  "edits": [ { "at": …, "field": "location", "deviceId": "…", "old": { … }, "new": { … } } ]
+}
+```
+
+### `PATCH /assets/{id}`
+
+Corrections. The original values are never changed; every correction is kept in `edits`.
+
+```json
+{
+  "takenAt": 1795440130000,
+  "timeZoneOffsetMinutes": 120,
+  "location": { "latitude": 48.137, "longitude": 11.575, "altitude": null, "estimated": false },
+  "title": "Munich",
+  "description": null,
+  "restore": []
+}
+```
+
+Every field is optional. `location: null` removes the place (the original stays stored but is not
+shown); `title: null` and `description: null` remove them. `restore: ["takenAt", "location"]`
+drops corrections and shows the originals again. Answers with the asset.
+
+### `POST /assets/location`
+
+One place for many photos (the "Without location" view):
+`{"ids": ["…", "…"], "location": {"latitude": …, "longitude": …, "estimated": true}}` →
+`{"changed": 2}`. Up to 1000 ids; unknown ids are skipped.
+
+### `GET /assets/without-location?before=<takenAt>&limit=200`
+
+Photos and videos without a place, newest first, each with a suggestion:
+
+```json
+{ "assets": [ { …asset…, "suggestion": { "latitude": 50.55, "longitude": 9.68,
+                                         "fromAssetId": "…", "minutesApart": 10 } } ] }
+```
+
+The suggestion is the place of the nearest photo in time (before or after) that has one, at most
+`[library] location_suggest_minutes` (default 120) away; `null` if there is none. Accept it with
+`PATCH` or `POST /assets/location` and `"estimated": true`.
+
+### `GET /assets/{id}/location-suggestion`
+
+`{"suggestion": {…} | null}` for one asset.
 
 ### `POST /assets/check`
 
@@ -371,6 +428,68 @@ Halden-Height: 384
 
 JPEG, HEIC, PNG or WebP, at most 8 MiB. Answers with the asset. Sending a new one replaces the
 old one.
+
+## Sync
+
+### `GET /sync?since=0&limit=1000`
+
+Everything that changed in the own account after `since`, oldest change first:
+
+```json
+{ "assets": [ {…asset…} ], "nextSince": 1042, "hasMore": false, "resetRequired": false }
+```
+
+Every change to an asset (new, corrected, new thumbnail, trashed, restored, deleted) gives it the
+next number from one counter (`seq`). A device stores `nextSince` and asks with it next time; while
+`hasMore` is true it asks again right away. An asset that changed several times comes once, in
+its latest state. Deleted assets come once more with `deletedAt` set and no files ("tombstones")
+and are kept for `[library] tombstone_days` (default 90). A device that asks with a `since` from
+before that gets `resetRequired: true` and must sync again from `since=0`.
+
+`limit` is 1 to 5000 (default 1000). Answers are compressed (gzip or brotli) when the device
+accepts it; a page of 1000 assets is a few dozen KB.
+
+## Files
+
+### `GET /files/{sha256}`
+
+Any file of the own account by its content (the `sha256` from an asset's `files`). The answer
+never changes, so it carries `Cache-Control: private, max-age=31536000, immutable` and
+`ETag: "<sha256>"`: download once, keep forever.
+
+### `GET /assets/{id}/files/{role}`
+
+The current file in a role (`original`, `thumbnail`, `preview`, `converted`, `paired_video`,
+`raw`), with `Cache-Control: private, no-cache` (a thumbnail can be replaced) and the same
+`ETag`. Originals carry `Content-Disposition` with their name from the library.
+
+Both support:
+
+- `Range: bytes=start-end`, `bytes=start-` and `bytes=-suffix` → `206` with `Content-Range`;
+  outside the file → `416`. Several ranges in one request get the whole file.
+- `If-None-Match` → `304`, `If-Range` (send the whole file if the ETag changed), `HEAD`.
+
+### `POST /thumbnails`
+
+Up to 500 thumbnails (or previews) in one answer: `{"ids": ["…", …], "role": "thumbnail"}`.
+The answer (`Content-Type: application/vnd.halden.files`) is a stream of entries in the order of
+`ids`:
+
+```
+16 bytes   asset UUID
+ 4 bytes   length n, big-endian (0: no such file)
+ n bytes   the file
+```
+
+It is streamed, so the first thumbnails arrive before the last ones are read.
+
+## Thumbnails the server makes
+
+The phone makes thumbnails and previews and sends them. If it hasn't after
+`[jobs] thumbnail_delay_minutes` (default 10), the server makes them itself (512 and 2048 px long
+edge, JPEG) in the background: JPEG, PNG, TIFF, WebP and GIF directly, HEIC/HEIF/AVIF with
+libheif (`heif-dec`), videos with `ffmpeg`. A thumbnail the phone sent is never replaced by one
+the server made. The new files show up through `/sync`.
 
 ## Accounts (owners only)
 

@@ -15,6 +15,8 @@ pub const ROLES: &[&str] = &[
     "raw",
 ];
 
+/// An asset as devices see it: the *effective* metadata (corrections where there are any, the
+/// original otherwise). The original values stay stored; `GET /assets/{id}` shows them.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Asset {
@@ -25,12 +27,15 @@ pub struct Asset {
     /// UTC offset where it was taken, if known.
     #[serde(rename = "timeZoneOffsetMinutes")]
     pub tz_offset_min: Option<i64>,
+    /// `client`, `exif`, `upload`, or `manual` when corrected.
     pub taken_at_source: String,
     pub width: Option<i64>,
     pub height: Option<i64>,
     pub duration_ms: Option<i64>,
     pub location: Option<Location>,
     pub camera: Option<Camera>,
+    pub title: Option<String>,
+    pub description: Option<String>,
     pub files: Vec<AssetFile>,
     pub created_at: i64,
     pub updated_at: i64,
@@ -47,7 +52,8 @@ pub struct Location {
     pub altitude: Option<f64>,
     pub accuracy_meters: Option<f64>,
     pub heading: Option<f64>,
-    /// `client` (the phone's location service), `exif` (from the file).
+    /// `client` (the phone's location service), `exif` (from the file), `manual` (corrected by
+    /// hand) or `estimated` (taken from a neighbouring photo).
     pub source: String,
 }
 
@@ -63,7 +69,7 @@ pub struct Camera {
 #[serde(rename_all = "camelCase")]
 pub struct AssetFile {
     pub role: String,
-    /// Lowercase hex.
+    /// Lowercase hex. Also the file's URL: `/api/v1/files/{sha256}`.
     pub sha256: String,
     pub size: i64,
     #[serde(rename = "mimeType")]
@@ -77,17 +83,20 @@ macro_rules! asset_columns {
         "a.id, a.kind, a.taken_at, a.tz_offset_min, a.taken_at_source, a.width, \
          a.height, a.duration_ms, a.camera_make, a.camera_model, a.lens, a.latitude, a.longitude, \
          a.altitude, a.location_accuracy_m, a.heading, a.location_source, a.created_at, \
-         a.updated_at, a.seq, a.trashed_at, a.deleted_at"
+         a.updated_at, a.seq, a.trashed_at, a.deleted_at, a.title, a.description, \
+         a.edit_taken_at, a.edit_tz_offset_min, a.edit_latitude, a.edit_longitude, \
+         a.edit_altitude, a.edit_location_source, a.location_hidden"
     };
 }
+pub(crate) use asset_columns;
 
-#[derive(sqlx::FromRow)]
+#[derive(sqlx::FromRow, Clone)]
 pub(crate) struct AssetRow {
     pub id: String,
     kind: String,
-    taken_at: i64,
-    tz_offset_min: Option<i64>,
-    taken_at_source: String,
+    pub taken_at: i64,
+    pub tz_offset_min: Option<i64>,
+    pub taken_at_source: String,
     width: Option<i64>,
     height: Option<i64>,
     duration_ms: Option<i64>,
@@ -105,20 +114,63 @@ pub(crate) struct AssetRow {
     seq: i64,
     trashed_at: Option<i64>,
     deleted_at: Option<i64>,
+    title: Option<String>,
+    description: Option<String>,
+    pub edit_taken_at: Option<i64>,
+    pub edit_tz_offset_min: Option<i64>,
+    edit_latitude: Option<f64>,
+    edit_longitude: Option<f64>,
+    edit_altitude: Option<f64>,
+    edit_location_source: Option<String>,
+    location_hidden: bool,
 }
 
 impl AssetRow {
-    pub(crate) fn into_asset(self, files: Vec<AssetFile>) -> Asset {
-        let location = match (self.latitude, self.longitude) {
+    /// The location as recorded, before any correction.
+    pub(crate) fn original_location(&self) -> Option<Location> {
+        Some(Location {
+            latitude: self.latitude?,
+            longitude: self.longitude?,
+            altitude: self.altitude,
+            accuracy_meters: self.location_accuracy_m,
+            heading: self.heading,
+            source: self
+                .location_source
+                .clone()
+                .unwrap_or_else(|| "client".into()),
+        })
+    }
+
+    /// The location devices should show.
+    pub(crate) fn effective_location(&self) -> Option<Location> {
+        if self.location_hidden {
+            return None;
+        }
+        match (self.edit_latitude, self.edit_longitude) {
             (Some(latitude), Some(longitude)) => Some(Location {
                 latitude,
                 longitude,
-                altitude: self.altitude,
-                accuracy_meters: self.location_accuracy_m,
-                heading: self.heading,
-                source: self.location_source.unwrap_or_else(|| "client".into()),
+                altitude: self.edit_altitude,
+                accuracy_meters: None,
+                heading: None,
+                source: self
+                    .edit_location_source
+                    .clone()
+                    .unwrap_or_else(|| "manual".into()),
             }),
-            _ => None,
+            _ => self.original_location(),
+        }
+    }
+
+    pub(crate) fn into_asset(self, files: Vec<AssetFile>) -> Asset {
+        let location = self.effective_location();
+        let (taken_at, tz_offset_min, taken_at_source) = match self.edit_taken_at {
+            Some(edited) => (
+                edited,
+                self.edit_tz_offset_min.or(self.tz_offset_min),
+                "manual".to_string(),
+            ),
+            None => (self.taken_at, self.tz_offset_min, self.taken_at_source),
         };
         let camera =
             (self.camera_make.is_some() || self.camera_model.is_some() || self.lens.is_some())
@@ -130,14 +182,16 @@ impl AssetRow {
         Asset {
             id: self.id,
             kind: self.kind,
-            taken_at: self.taken_at,
-            tz_offset_min: self.tz_offset_min,
-            taken_at_source: self.taken_at_source,
+            taken_at,
+            tz_offset_min,
+            taken_at_source,
             width: self.width,
             height: self.height,
             duration_ms: self.duration_ms,
             location,
             camera,
+            title: self.title,
+            description: self.description,
             files,
             created_at: self.created_at,
             updated_at: self.updated_at,
@@ -150,7 +204,6 @@ impl AssetRow {
 
 #[derive(sqlx::FromRow)]
 pub(crate) struct FileRow {
-    #[allow(dead_code)] // read by the sync in the next stage
     pub asset_id: String,
     pub role: String,
     pub sha256: Vec<u8>,
@@ -171,6 +224,72 @@ impl From<FileRow> for AssetFile {
             height: row.height,
         }
     }
+}
+
+/// The files of many assets in one query, by asset id.
+pub(crate) async fn files_for<'e, E>(
+    db: E,
+    asset_ids: &[&str],
+) -> Result<std::collections::HashMap<String, Vec<AssetFile>>, sqlx::Error>
+where
+    E: Executor<'e, Database = Sqlite>,
+{
+    let mut by_asset: std::collections::HashMap<String, Vec<AssetFile>> =
+        std::collections::HashMap::with_capacity(asset_ids.len());
+    if asset_ids.is_empty() {
+        return Ok(by_asset);
+    }
+    let ids = serde_json::to_string(asset_ids).unwrap_or_else(|_| "[]".into());
+    let rows = sqlx::query_as::<_, FileRow>(
+        "SELECT asset_id, role, sha256, size, mime, width, height FROM asset_files \
+         WHERE asset_id IN (SELECT value FROM json_each(?)) ORDER BY asset_id, role",
+    )
+    .bind(ids)
+    .fetch_all(db)
+    .await?;
+    for row in rows {
+        by_asset
+            .entry(row.asset_id.clone())
+            .or_default()
+            .push(row.into());
+    }
+    Ok(by_asset)
+}
+
+/// Turns rows into assets, loading all their files with one more query.
+pub(crate) async fn with_files<'e, E>(db: E, rows: Vec<AssetRow>) -> Result<Vec<Asset>, sqlx::Error>
+where
+    E: Executor<'e, Database = Sqlite>,
+{
+    let ids: Vec<&str> = rows.iter().map(|row| row.id.as_str()).collect();
+    let mut files = files_for(db, &ids).await?;
+    Ok(rows
+        .into_iter()
+        .map(|row| {
+            let files = files.remove(&row.id).unwrap_or_default();
+            row.into_asset(files)
+        })
+        .collect())
+}
+
+/// The raw row of one asset of one account.
+pub(crate) async fn row<'e, E>(
+    db: E,
+    user_id: &str,
+    asset_id: &str,
+) -> Result<Option<AssetRow>, sqlx::Error>
+where
+    E: Executor<'e, Database = Sqlite>,
+{
+    sqlx::query_as::<_, AssetRow>(concat!(
+        "SELECT ",
+        asset_columns!(),
+        " FROM assets a WHERE a.id = ? AND a.user_id = ?"
+    ))
+    .bind(asset_id)
+    .bind(user_id)
+    .fetch_optional(db)
+    .await
 }
 
 /// The next number for a change. Call inside the write transaction that makes the change.
@@ -216,6 +335,107 @@ where
     .fetch_all(db)
     .await?;
     Ok(rows.into_iter().map(AssetFile::from).collect())
+}
+
+/// Where a file of the account lives on disk, for sending it.
+#[derive(Debug, Clone, sqlx::FromRow)]
+pub struct StoredFile {
+    pub storage: String,
+    pub path: String,
+    pub mime: String,
+    pub sha256: Vec<u8>,
+    pub size: i64,
+}
+
+impl StoredFile {
+    /// The absolute path, checked to stay inside its root.
+    pub fn resolve(
+        &self,
+        library: &std::path::Path,
+        derived: &std::path::Path,
+    ) -> Option<std::path::PathBuf> {
+        let root = if self.storage == "library" {
+            library
+        } else {
+            derived
+        };
+        crate::library::paths::resolve(root, &self.path)
+    }
+
+    /// A file name for saving: the readable library name, or the hash for thumbnails.
+    pub fn download_name(&self) -> Option<String> {
+        (self.storage == "library")
+            .then(|| {
+                std::path::Path::new(&self.path)
+                    .file_name()?
+                    .to_str()
+                    .map(str::to_string)
+            })
+            .flatten()
+    }
+}
+
+/// An asset's file in a role (only the account's own assets).
+pub async fn stored_file(
+    db: &Db,
+    user_id: &str,
+    asset_id: &str,
+    role: &str,
+) -> Result<Option<StoredFile>, sqlx::Error> {
+    sqlx::query_as(
+        "SELECT storage, path, mime, sha256, size FROM asset_files \
+         WHERE asset_id = ? AND role = ? AND user_id = ?",
+    )
+    .bind(asset_id)
+    .bind(role)
+    .bind(user_id)
+    .fetch_optional(db.read())
+    .await
+}
+
+/// Any file of the account with this content.
+pub async fn stored_file_by_hash(
+    db: &Db,
+    user_id: &str,
+    sha256: &[u8],
+) -> Result<Option<StoredFile>, sqlx::Error> {
+    sqlx::query_as(
+        "SELECT storage, path, mime, sha256, size FROM asset_files \
+         WHERE user_id = ? AND sha256 = ? LIMIT 1",
+    )
+    .bind(user_id)
+    .bind(sha256)
+    .fetch_optional(db.read())
+    .await
+}
+
+/// The files in one role of many assets, in one query: asset id → file.
+pub async fn stored_files_for(
+    db: &Db,
+    user_id: &str,
+    asset_ids: &[String],
+    role: &str,
+) -> Result<std::collections::HashMap<String, StoredFile>, sqlx::Error> {
+    #[derive(sqlx::FromRow)]
+    struct Row {
+        asset_id: String,
+        #[sqlx(flatten)]
+        file: StoredFile,
+    }
+    let ids = serde_json::to_string(asset_ids).unwrap_or_else(|_| "[]".into());
+    let rows = sqlx::query_as::<_, Row>(
+        "SELECT asset_id, storage, path, mime, sha256, size FROM asset_files \
+         WHERE user_id = ?1 AND role = ?2 AND asset_id IN (SELECT value FROM json_each(?3))",
+    )
+    .bind(user_id)
+    .bind(role)
+    .bind(ids)
+    .fetch_all(db.read())
+    .await?;
+    Ok(rows
+        .into_iter()
+        .map(|row| (row.asset_id, row.file))
+        .collect())
 }
 
 /// Who owns an asset id (any account). Lets uploads refuse an id that another account uses

@@ -16,12 +16,13 @@ base64 = "0.23.1"
 bytes = "1.12.2"
 chrono = { version = "0.4.45", default-features = false, features = ["clock", "serde", "std"] }
 clap = { version = "4.6.9", features = ["derive", "env"] }
+fast_image_resize = { version = "6.2.0", features = ["image"] }
 fs4 = "1.1.0"
 futures-util = "0.3.34"
 gethostname = "1.1.0"
 hex = "0.4.3"
 if-addrs = "0.15.0"
-mimalloc = "0.1.52"
+image = { version = "0.25.10", default-features = false, features = ["jpeg", "png", "tiff", "webp", "gif"] }
 nom-exif = "3.8.0"
 qrcode = { version = "0.15.0", default-features = false }
 rand = "0.10.4"
@@ -33,13 +34,20 @@ serde_json = "1.0.154"
 sha2 = "0.11.1"
 sqlx = { version = "0.9.1", default-features = false, features = ["runtime-tokio", "sqlite", "migrate", "macros"] }
 thiserror = "2.0.21"
-tokio = { version = "1.54.1", features = ["rt-multi-thread", "macros", "net", "signal", "fs", "time", "sync"] }
+thread-priority = "3.1.1"
+tokio = { version = "1.54.1", features = ["rt-multi-thread", "macros", "net", "signal", "fs", "time", "sync", "process", "io-util"] }
 tokio-util = { version = "0.7.20", features = ["io"] }
 toml = "1.2.2"
 tower-http = { version = "0.7.1", features = ["timeout", "trace", "compression-gzip", "compression-br"] }
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
 uuid = { version = "1.29.3", features = ["v4", "serde"] }
+
+# On Linux, mimalloc returns freed memory to the system quickly and avoids the fragmentation
+# glibc's allocator shows in long-running, many-threaded servers. On macOS the system allocator
+# measured best (see examples/loadtest.rs), so it stays.
+[target.'cfg(target_os = "linux")'.dependencies]
+mimalloc = "0.1.52"
 
 [dev-dependencies]
 reqwest = { version = "0.13.5", default-features = false, features = ["rustls-no-provider", "json", "http2", "stream"] }

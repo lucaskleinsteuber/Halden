@@ -14,8 +14,10 @@ use sqlx::{
 };
 use uuid::Uuid;
 
-/// Page cache per connection, in KiB (negative numbers mean KiB to SQLite).
-const CACHE_KIB: &str = "-65536";
+/// Page cache per connection, in KiB (negative numbers mean KiB to SQLite). Reads mostly go
+/// through the memory map below, which the operating system shares between all connections, so
+/// a modest private cache per connection keeps memory flat even after a full sync.
+const CACHE_KIB: &str = "-16384";
 /// Memory-mapped reading, in bytes.
 const MMAP_BYTES: &str = "268435456";
 const MAX_READERS: u32 = 8;

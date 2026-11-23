@@ -63,7 +63,8 @@ pub struct NewDerived {
     pub data: Bytes,
 }
 
-/// Stores a thumbnail or preview for one of the account's assets, replacing an older one.
+/// Stores a thumbnail or preview the phone sent for one of the account's assets, replacing an
+/// older one. The hash must match.
 pub async fn store(
     db: &Db,
     root: &Path,
@@ -71,16 +72,6 @@ pub async fn store(
     asset_id: &str,
     new: NewDerived,
 ) -> Result<Asset, DerivedError> {
-    let exists: Option<(i64,)> =
-        sqlx::query_as("SELECT 1 FROM assets WHERE id = ? AND user_id = ? AND deleted_at IS NULL")
-            .bind(asset_id)
-            .bind(user_id)
-            .fetch_optional(db.read())
-            .await?;
-    if exists.is_none() {
-        return Err(DerivedError::NotFound);
-    }
-
     let data = new.data.clone();
     let digest: [u8; 32] = if data.len() > 256 * 1024 {
         tokio::task::spawn_blocking(move || Sha256::digest(&data).into())
@@ -92,22 +83,84 @@ pub async fn store(
     if digest != new.sha256 {
         return Err(DerivedError::ChecksumMismatch);
     }
+    put(
+        db,
+        root,
+        Derived {
+            user_id,
+            asset_id,
+            role: new.role,
+            media: new.media,
+            sha256: digest,
+            width: new.width,
+            height: new.height,
+            data: new.data,
+        },
+        Replace::Always,
+    )
+    .await?;
+    assets::get(db.read(), user_id, asset_id)
+        .await?
+        .ok_or(DerivedError::NotFound)
+}
 
-    let hex = hex::encode(digest);
-    let relative = paths::derived_path(&hex, new.media.extension);
-    let full = root.join(&relative);
-    let size = new.data.len() as i64;
-    write_once(full, new.data).await?;
+/// A derived file ready to be stored, its hash already known.
+pub struct Derived<'a> {
+    pub user_id: &'a str,
+    pub asset_id: &'a str,
+    pub role: DerivedRole,
+    pub media: MediaType,
+    pub sha256: [u8; 32],
+    pub width: Option<u32>,
+    pub height: Option<u32>,
+    pub data: Bytes,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Replace {
+    /// The phone's own file replaces whatever is there.
+    Always,
+    /// A file the server made is only kept if the phone hasn't sent one meanwhile.
+    IfMissing,
+}
+
+/// Writes a derived file and records it. Returns false if it was not needed (`IfMissing` and
+/// there is one already) or the asset is gone.
+pub async fn put(
+    db: &Db,
+    root: &Path,
+    file: Derived<'_>,
+    replace: Replace,
+) -> Result<bool, DerivedError> {
+    let exists: Option<(i64,)> =
+        sqlx::query_as("SELECT 1 FROM assets WHERE id = ? AND user_id = ? AND deleted_at IS NULL")
+            .bind(file.asset_id)
+            .bind(file.user_id)
+            .fetch_optional(db.read())
+            .await?;
+    if exists.is_none() {
+        return Err(DerivedError::NotFound);
+    }
+
+    let hex = hex::encode(file.sha256);
+    let relative = paths::derived_path(&hex, file.media.extension);
+    let size = file.data.len() as i64;
+    write_once(root.join(&relative), file.data).await?;
 
     let relative_text = relative.to_string_lossy().into_owned();
     let mut tx = db.begin().await?;
     let previous: Option<(String,)> = sqlx::query_as(
         "SELECT path FROM asset_files WHERE asset_id = ? AND role = ? AND storage = 'derived'",
     )
-    .bind(asset_id)
-    .bind(new.role.as_str())
+    .bind(file.asset_id)
+    .bind(file.role.as_str())
     .fetch_optional(&mut *tx)
     .await?;
+    if previous.is_some() && replace == Replace::IfMissing {
+        tx.rollback().await?;
+        remove_if_unused(db, root, &relative_text).await?;
+        return Ok(false);
+    }
     sqlx::query(
         "INSERT INTO asset_files (asset_id, role, user_id, sha256, size, mime, storage, path, \
              width, height, created_at) \
@@ -116,19 +169,19 @@ pub async fn store(
              size = excluded.size, mime = excluded.mime, path = excluded.path, \
              width = excluded.width, height = excluded.height, created_at = excluded.created_at",
     )
-    .bind(asset_id)
-    .bind(new.role.as_str())
-    .bind(user_id)
-    .bind(digest.as_slice())
+    .bind(file.asset_id)
+    .bind(file.role.as_str())
+    .bind(file.user_id)
+    .bind(file.sha256.as_slice())
     .bind(size)
-    .bind(new.media.mime)
+    .bind(file.media.mime)
     .bind(&relative_text)
-    .bind(new.width.map(i64::from))
-    .bind(new.height.map(i64::from))
+    .bind(file.width.map(i64::from))
+    .bind(file.height.map(i64::from))
     .bind(now_ms())
     .execute(&mut *tx)
     .await?;
-    assets::touch(&mut tx, asset_id).await?;
+    assets::touch(&mut tx, file.asset_id).await?;
     tx.commit().await?;
 
     if let Some((old,)) = previous
@@ -136,9 +189,7 @@ pub async fn store(
     {
         remove_if_unused(db, root, &old).await?;
     }
-    assets::get(db.read(), user_id, asset_id)
-        .await?
-        .ok_or(DerivedError::NotFound)
+    Ok(true)
 }
 
 /// Writes a content-named file unless it is there already (same name, same content).

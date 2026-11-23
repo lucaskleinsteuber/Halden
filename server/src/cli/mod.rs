@@ -96,8 +96,11 @@ pub fn main() -> ExitCode {
         .with_ansi(std::io::IsTerminal::is_terminal(&std::io::stderr()))
         .init();
 
+    // Blocking work (file reads, hashing, password checks) runs on extra threads. Capping them
+    // keeps memory flat under load: every thread keeps some memory for reuse.
     let runtime = match tokio::runtime::Builder::new_multi_thread()
         .enable_all()
+        .max_blocking_threads(64)
         .build()
     {
         Ok(runtime) => runtime,
@@ -421,11 +424,24 @@ async fn run_status(config_path: &Path) -> Result<()> {
                 ),
             );
             row("Uploads", format!("{uploads} unfinished"));
+            if let Ok(queue) = jobs_numbers(&config).await {
+                row(
+                    "Jobs",
+                    format!("{} waiting, {} failed", queue.waiting, queue.failed),
+                );
+            }
             row("Accounts", accounts);
         }
         Err(_) => row("Photos", "run with sudo to see the library"),
     }
     Ok(())
+}
+
+async fn jobs_numbers(config: &Config) -> Result<crate::jobs::QueueStats> {
+    let database = Database::open(config).await?;
+    let stats = crate::jobs::stats(database.pool()).await;
+    database.close().await?;
+    Ok(stats?)
 }
 
 async fn library_numbers(

@@ -128,6 +128,31 @@ impl Server {
     }
 }
 
+/// What the process really occupies (dirty memory; on macOS `footprint`), without file pages the
+/// system can drop at any time (the memory-mapped database).
+fn footprint_mb(pid: u32) -> Option<f64> {
+    // Linux: anonymous resident memory (heap, stacks), without file pages.
+    if let Ok(status) = std::fs::read_to_string(format!("/proc/{pid}/status")) {
+        let line = status.lines().find(|l| l.starts_with("RssAnon:"))?;
+        let kib: f64 = line.split_whitespace().nth(1)?.parse().ok()?;
+        return Some(kib / 1024.0);
+    }
+    let out = Command::new("footprint")
+        .arg(pid.to_string())
+        .output()
+        .ok()?;
+    let text = String::from_utf8(out.stdout).ok()?;
+    let line = text.lines().find(|l| l.contains("phys_footprint:"))?;
+    let value = line.split(':').nth(1)?.trim();
+    let (number, unit) = value.split_once(' ')?;
+    let number: f64 = number.parse().ok()?;
+    Some(match unit.trim() {
+        "KB" => number / 1024.0,
+        "GB" => number * 1024.0,
+        _ => number,
+    })
+}
+
 fn rss_mb(pid: u32) -> f64 {
     Command::new("ps")
         .args(["-o", "rss=", "-p", &pid.to_string()])
@@ -262,7 +287,11 @@ async fn main() -> Result<()> {
     report.row("Library", format!("{LIBRARY_SIZE} photos"), "");
     report.row(
         "Server memory at rest",
-        format!("{:.0} MB", server.rss_mb()),
+        format!(
+            "{:.0} MB resident, {:.0} MB own",
+            server.rss_mb(),
+            footprint_mb(server.0.id()).unwrap_or(0.0)
+        ),
         "",
     );
 
@@ -334,6 +363,140 @@ async fn main() -> Result<()> {
         "< 20 ms",
     );
 
+    // Sync: a device that starts from zero, in pages of 1000.
+    let mut samples = Vec::new();
+    let mut since = 0;
+    let started = Instant::now();
+    let mut synced = 0;
+    loop {
+        let start = Instant::now();
+        let page: Value = http
+            .get(format!("{base}/api/v1/sync?since={since}&limit=1000"))
+            .bearer_auth(&token)
+            .send()
+            .await?
+            .json()
+            .await?;
+        samples.push(start.elapsed());
+        synced += page["assets"].as_array().map_or(0, Vec::len);
+        since = page["nextSince"].as_i64().unwrap_or(since);
+        if page["hasMore"] != true {
+            break;
+        }
+    }
+    let whole = started.elapsed();
+    report.row(
+        "Sync page of 1000 (of 100,000)",
+        format!(
+            "p50 {} · p99 {}",
+            ms(percentile(&mut samples, 0.5)),
+            ms(percentile(&mut samples, 0.99))
+        ),
+        "< 20 ms",
+    );
+    report.row(
+        "Whole library from zero",
+        format!("{synced} assets in {:.2} s", whole.as_secs_f64()),
+        "",
+    );
+    let plain = http
+        .get(format!("{base}/api/v1/sync?since=0&limit=1000"))
+        .bearer_auth(&token)
+        .send()
+        .await?
+        .bytes()
+        .await?
+        .len();
+    let compressed = http
+        .get(format!("{base}/api/v1/sync?since=0&limit=1000"))
+        .bearer_auth(&token)
+        .header("accept-encoding", "br")
+        .send()
+        .await?
+        .bytes()
+        .await?
+        .len();
+    report.row(
+        "Sync page size, plain → brotli",
+        format!("{} KB → {} KB", plain / 1000, compressed / 1000),
+        "",
+    );
+
+    // Thumbnails: one by one, many at once, and in bulk.
+    let thumbnails = seed_thumbnails(&db, &config, &user.id, 1000).await?;
+    let mut samples = Vec::new();
+    for sha in thumbnails.iter().cycle().take(2000) {
+        let start = Instant::now();
+        http.get(format!("{base}/api/v1/files/{sha}"))
+            .bearer_auth(&token)
+            .send()
+            .await?
+            .bytes()
+            .await?;
+        samples.push(start.elapsed());
+    }
+    report.row(
+        "One thumbnail (30 KB)",
+        format!(
+            "p50 {} · p99 {}",
+            ms(percentile(&mut samples, 0.5)),
+            ms(percentile(&mut samples, 0.99))
+        ),
+        "p99 < 2 ms",
+    );
+    let started = Instant::now();
+    let mut tasks = tokio::task::JoinSet::new();
+    let shared = Arc::new(thumbnails.clone());
+    for worker in 0..64 {
+        let (http, base, token, shared) =
+            (http.clone(), base.clone(), token.clone(), shared.clone());
+        tasks.spawn(async move {
+            for sha in shared.iter().skip(worker).step_by(64) {
+                http.get(format!("{base}/api/v1/files/{sha}"))
+                    .bearer_auth(&token)
+                    .send()
+                    .await
+                    .unwrap()
+                    .bytes()
+                    .await
+                    .unwrap();
+            }
+        });
+    }
+    while tasks.join_next().await.is_some() {}
+    let rate = thumbnails.len() as f64 / started.elapsed().as_secs_f64();
+    report.row(
+        "Thumbnails, 64 at once",
+        format!("{rate:.0} per second"),
+        "",
+    );
+
+    let ids: Vec<String> = (1..=200).map(seed_id).collect();
+    let mut samples = Vec::new();
+    let mut bytes = 0;
+    for _ in 0..50 {
+        let start = Instant::now();
+        bytes = http
+            .post(format!("{base}/api/v1/thumbnails"))
+            .bearer_auth(&token)
+            .json(&json!({ "ids": ids }))
+            .send()
+            .await?
+            .bytes()
+            .await?
+            .len();
+        samples.push(start.elapsed());
+    }
+    report.row(
+        "200 thumbnails in one request",
+        format!(
+            "p50 {} ({} MB)",
+            ms(percentile(&mut samples, 0.5)),
+            bytes / 1_000_000
+        ),
+        "< 20 ms",
+    );
+
     // Small photos, one after the other: announce + one PATCH each.
     let photo = random(3 * MIB);
     let started = Instant::now();
@@ -383,6 +546,7 @@ async fn main() -> Result<()> {
     }
     let elapsed = started.elapsed();
     let peak = memory.peak();
+    let own_after = footprint_mb(server.0.id()).unwrap_or(0.0);
     if last["state"] != "completed" {
         bail!("the big upload did not complete: {last}");
     }
@@ -393,9 +557,56 @@ async fn main() -> Result<()> {
     );
     report.row(
         "Server memory during that upload (peak)",
-        format!("{peak:.0} MB (before: {before:.0} MB)"),
+        format!("{peak:.0} MB resident (before: {before:.0} MB), {own_after:.0} MB own after"),
         "< 100 MB",
     );
+
+    // More rounds of the heaviest reads: if memory keeps growing, something leaks.
+    let rounds: usize = std::env::var("ROUNDS")
+        .ok()
+        .and_then(|r| r.parse().ok())
+        .unwrap_or(3);
+    let only = std::env::var("ONLY").unwrap_or_default();
+    for _ in 0..rounds {
+        let mut since = 0;
+        #[allow(clippy::while_immutable_condition)] // ends with `break`
+        while only != "bulk" {
+            // The compressed answer is only fetched (the client here can't unpack brotli).
+            http.get(format!("{base}/api/v1/sync?since={since}&limit=1000"))
+                .bearer_auth(&token)
+                .header("accept-encoding", "br")
+                .send()
+                .await?
+                .bytes()
+                .await?;
+            let plain: Value = http
+                .get(format!("{base}/api/v1/sync?since={since}&limit=1000"))
+                .bearer_auth(&token)
+                .send()
+                .await?
+                .json()
+                .await?;
+            let next = plain["nextSince"].as_i64().unwrap_or(since);
+            if plain["hasMore"] != true || next == since {
+                break;
+            }
+            since = next;
+        }
+        for _ in 0..if only == "sync" { 0 } else { 20 } {
+            http.post(format!("{base}/api/v1/thumbnails"))
+                .bearer_auth(&token)
+                .json(&json!({ "ids": ids }))
+                .send()
+                .await?
+                .bytes()
+                .await?;
+        }
+        report.row(
+            "Own memory after another full round",
+            format!("{:.0} MB", footprint_mb(server.0.id()).unwrap_or(0.0)),
+            "stays flat",
+        );
+    }
 
     if let Some(out) = out {
         let text = format!(
@@ -452,6 +663,39 @@ async fn upload(
 
 fn seed_id(i: i64) -> String {
     format!("{i:08x}-0000-4000-8000-{i:012x}")
+}
+
+/// Thumbnails of 30 KB for the first `count` seeded photos, as files plus database rows.
+async fn seed_thumbnails(
+    db: &Db,
+    config: &Config,
+    user_id: &str,
+    count: i64,
+) -> Result<Vec<String>> {
+    let mut hashes = Vec::new();
+    let mut tx = db.begin().await?;
+    for i in 1..=count {
+        let data = random(30_000);
+        let sha = hex::encode(Sha256::digest(&data));
+        let relative = format!("{}/{}/{sha}.jpg", &sha[..2], &sha[2..4]);
+        let path = config.derived_dir().join(&relative);
+        std::fs::create_dir_all(path.parent().context("no parent")?)?;
+        std::fs::write(&path, &data)?;
+        sqlx::query(
+            "INSERT INTO asset_files (asset_id, role, user_id, sha256, size, mime, storage, path, \
+                 width, height, created_at) \
+             VALUES (?, 'thumbnail', ?, unhex(?), 30000, 'image/jpeg', 'derived', ?, 512, 384, 0)",
+        )
+        .bind(seed_id(i))
+        .bind(user_id)
+        .bind(&sha)
+        .bind(&relative)
+        .execute(&mut *tx)
+        .await?;
+        hashes.push(sha);
+    }
+    tx.commit().await?;
+    Ok(hashes)
 }
 
 /// 100,000 photos straight into the database, spread over five years, most with a location.

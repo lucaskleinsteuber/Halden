@@ -6,14 +6,15 @@ Halden is a native iPhone camera with your own self-hosted photo library. You ta
 video, it is saved on the phone right away and uploaded to your own server in the background, in
 full quality, without you having to think about it. No cloud, no subscription, no jank.
 
-> **Status:** early development. The server has accounts, device pairing and resumable uploads;
-> sync, the library view and the iPhone app come next. Nothing here is ready for your only copy of your photos yet.
+> **Status:** early development. The server has accounts, device pairing, resumable uploads,
+> sync, file delivery and metadata corrections; trash, conversions, backup and the iPhone app come
+> next. Nothing here is ready for your only copy of your photos yet.
 
 ## How it fits together
 
 | Part | Built with | State |
 |---|---|---|
-| Server | Rust (Axum, Tokio, rustls, SQLite) for Linux | accounts, pairing and uploads done |
+| Server | Rust (Axum, Tokio, rustls, SQLite) for Linux | accounts, uploads, sync and library done |
 | iPhone app | Swift, SwiftUI, AVFoundation | planned |
 | Mac app | Swift | later |
 
@@ -37,6 +38,12 @@ cargo build --release
 ```
 
 ### Set up on Ubuntu Server
+
+For thumbnails of videos and HEIC photos the server uses `ffmpeg` and libheif:
+
+```sh
+sudo apt install ffmpeg libheif-examples
+```
 
 ```sh
 sudo install -m 755 server/target/release/halden /usr/local/bin/halden
@@ -96,6 +103,16 @@ path_template = "{user}/{year}/{month}/{date}_{time}"  # where originals go in t
 min_free_gb = 5              # refuse uploads that would leave less free space
 upload_expiry_days = 7       # throw away unfinished uploads after this long
 
+[library]
+location_suggest_minutes = 120  # suggest a place from photos at most this far apart in time
+trash_days = 30              # deleted photos stay in the trash this long
+tombstone_days = 90          # devices learn about deletions within this time
+
+[jobs]
+workers = 1                  # background jobs at once (lowest priority)
+thumbnail_delay_minutes = 10 # make thumbnails the phone didn't send after this long
+external_timeout_minutes = 30
+
 [auth]
 password_login = true        # false: devices can only be added by pairing
 device_inactive_days = 365   # sign out devices unused this long (0 = never)
@@ -109,7 +126,9 @@ log_retention_days = 90      # keep security log entries this long (0 = forever)
 The server is built to stay fast with a big library: one database connection writes while
 several read in parallel, every request checks its token with a single indexed lookup, HTTP/2
 flow-control windows are sized for uploads over Wi-Fi and Tailscale, uploads are hashed while
-they are written (never read twice), and JSON answers are compressed. `cargo run --release
+they are written (never read twice), sync reads one index range however big the library is,
+thumbnails come 500 at a time, files are cached by their hash forever, JSON answers are
+compressed, and background work runs at the lowest priority. `cargo run --release
 --example loadtest` measures it against a library of 100,000 photos.
 
 ### More

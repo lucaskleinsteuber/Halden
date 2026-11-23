@@ -45,18 +45,6 @@ impl From<sqlx::Error> for ApiError {
     }
 }
 
-/// `GET /assets/{id}`.
-pub async fn get(
-    State(state): State<AppState>,
-    auth: Auth,
-    Path(id): Path<String>,
-) -> Result<Json<Asset>, ApiError> {
-    let asset = assets::get(state.db().read(), &auth.user.id, &id)
-        .await?
-        .ok_or_else(ApiError::not_found)?;
-    Ok(Json(asset))
-}
-
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct CheckItem {

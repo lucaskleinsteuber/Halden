@@ -6,6 +6,7 @@ mod auth;
 mod devices;
 mod error;
 mod extract;
+mod library;
 mod uploads;
 
 use std::{path::PathBuf, sync::Arc, time::Duration};
@@ -61,6 +62,7 @@ struct Inner {
     uploads: Arc<Uploads>,
     library_dir: PathBuf,
     derived_dir: PathBuf,
+    suggest_window_ms: i64,
 }
 
 impl AppState {
@@ -83,6 +85,7 @@ impl AppState {
             uploads,
             library_dir: config.storage.library_dir.clone(),
             derived_dir: config.derived_dir(),
+            suggest_window_ms: i64::from(config.library.location_suggest_minutes) * 60_000,
         }))
     }
 
@@ -96,6 +99,10 @@ impl AppState {
 
     pub fn derived_dir(&self) -> &std::path::Path {
         &self.0.derived_dir
+    }
+
+    pub fn suggest_window_ms(&self) -> i64 {
+        self.0.suggest_window_ms
     }
 
     pub fn db(&self) -> &Db {
@@ -145,7 +152,20 @@ pub fn router(state: AppState) -> Router {
         )
         .route("/api/v1/uploads/{id}/complete", post(uploads::complete))
         .route("/api/v1/assets/check", post(assets::check))
-        .route("/api/v1/assets/{id}", get(assets::get))
+        .route("/api/v1/assets/location", post(library::set_location))
+        .route(
+            "/api/v1/assets/without-location",
+            get(library::without_location),
+        )
+        .route(
+            "/api/v1/assets/{id}",
+            get(library::detail).patch(library::correct),
+        )
+        .route(
+            "/api/v1/assets/{id}/location-suggestion",
+            get(library::suggestion),
+        )
+        .route("/api/v1/sync", get(library::changes))
         .layer(
             CompressionLayer::new()
                 .gzip(true)
@@ -161,7 +181,12 @@ pub fn router(state: AppState) -> Router {
 
     let transfers = Router::new()
         .route("/api/v1/uploads/{id}", patch(uploads::send))
-        .route("/api/v1/assets/{id}/files/{role}", put(assets::put_file));
+        .route(
+            "/api/v1/assets/{id}/files/{role}",
+            get(library::file_by_role).put(assets::put_file),
+        )
+        .route("/api/v1/files/{sha256}", get(library::file_by_hash))
+        .route("/api/v1/thumbnails", post(library::bulk));
 
     json.merge(transfers)
         .fallback(not_found)

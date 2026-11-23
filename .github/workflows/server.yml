@@ -28,11 +28,19 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: server
+      - name: Install ffmpeg and libheif
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends ffmpeg libheif-examples \
+            libheif-plugin-libde265 libheif-plugin-x265
       - name: Format
         run: cargo fmt --check
       - name: Lint
         run: cargo clippy --all-targets --locked -- -D warnings
       - name: Test
         run: cargo test --locked
+        env:
+          # Tests for thumbnails of videos and HEIC photos must really run here.
+          HALDEN_REQUIRE_TOOLS: "1"
       - name: Build release
         run: cargo build --release --locked

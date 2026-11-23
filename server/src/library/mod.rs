@@ -3,6 +3,8 @@
 
 pub mod assets;
 pub mod derived;
+pub mod edits;
 pub mod metadata;
 pub mod paths;
 pub mod space;
+pub mod sync;

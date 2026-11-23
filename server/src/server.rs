@@ -18,7 +18,7 @@ use crate::{
     api::{self, AppState},
     auth::password,
     config::Config,
-    db,
+    db, jobs,
     net::{HomeNetworkAcceptor, NetworkPolicy},
     seclog::{self, Event, Record},
     tls::{self, Fingerprint},
@@ -38,6 +38,7 @@ pub struct RunningServer {
     handle: Handle<SocketAddr>,
     task: JoinHandle<io::Result<()>>,
     tidying: JoinHandle<()>,
+    workers: jobs::Workers,
 }
 
 impl RunningServer {
@@ -45,6 +46,7 @@ impl RunningServer {
     pub async fn shutdown(self) -> Result<()> {
         self.handle.graceful_shutdown(Some(SHUTDOWN_GRACE));
         self.tidying.abort();
+        self.workers.stop();
         self.task
             .await
             .context("the server task failed")?
@@ -63,8 +65,10 @@ pub async fn start(config: &Config) -> Result<RunningServer> {
     let server_id = db::server_id(&pool).await?;
     password::warm_up().await;
 
-    let uploads = std::sync::Arc::new(Uploads::new(config)?);
+    let wake = std::sync::Arc::new(tokio::sync::Notify::new());
+    let uploads = std::sync::Arc::new(Uploads::new(config, wake.clone())?);
     uploads.recover(&pool).await?;
+    let workers = jobs::Workers::start(config, pool.clone(), wake).await?;
 
     let listener = bind(config.server.bind, config.server.port)?;
     let addr = listener.local_addr()?;
@@ -94,6 +98,7 @@ pub async fn start(config: &Config) -> Result<RunningServer> {
         handle,
         task,
         tidying,
+        workers,
     })
 }
 
@@ -157,6 +162,11 @@ pub async fn tidy(pool: &db::Db, config: &Config) {
             }
         }
         Err(error) => tracing::error!(%error, "could not tidy up accounts and devices"),
+    }
+    match crate::library::sync::purge_tombstones(pool, config.library.tombstone_days, now).await {
+        Ok(0) => {}
+        Ok(removed) => tracing::info!(removed, "removed old tombstones of deleted photos"),
+        Err(error) => tracing::error!(%error, "could not remove old tombstones"),
     }
     match seclog::prune(pool, config.security.log_retention_days, now).await {
         Ok(0) => {}

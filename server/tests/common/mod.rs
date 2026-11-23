@@ -283,3 +283,63 @@ pub fn iphone() -> Value {
 pub fn mac() -> Value {
     json!({ "name": "Lucas' Mac", "platform": "macos", "installationId": "install-lucas-mac" })
 }
+
+pub fn sha_hex(data: &[u8]) -> String {
+    hex::encode(<sha2::Sha256 as sha2::Digest>::digest(data))
+}
+
+pub fn random_bytes(len: usize) -> Vec<u8> {
+    let mut data = vec![0u8; len];
+    rand::fill(data.as_mut_slice());
+    data
+}
+
+impl Api {
+    /// Announces a file and sends it in one piece; returns the finished asset.
+    pub async fn upload(
+        &self,
+        token: &str,
+        asset_id: &str,
+        data: &[u8],
+        mime: &str,
+        metadata: Value,
+    ) -> Value {
+        let created = self
+            .post(
+                "/api/v1/uploads",
+                Some(token),
+                json!({ "assetId": asset_id, "size": data.len(), "sha256": sha_hex(data),
+                        "mimeType": mime, "metadata": metadata }),
+            )
+            .await;
+        assert_eq!(created.status, 201, "{}", created.body);
+        let id = created.body["uploadId"].as_str().unwrap();
+        let response = self
+            .http
+            .patch(self.url(&format!("/api/v1/uploads/{id}")))
+            .bearer_auth(token)
+            .header("upload-offset", "0")
+            .body(data.to_vec())
+            .send()
+            .await
+            .unwrap();
+        let done = Self::reply(response).await;
+        assert_eq!(done.body["state"], "completed", "{}", done.body);
+        done.body["asset"].clone()
+    }
+
+    /// Sends a thumbnail or preview.
+    pub async fn put_derived(&self, token: &str, asset_id: &str, role: &str, data: &[u8]) -> Reply {
+        let response = self
+            .http
+            .put(self.url(&format!("/api/v1/assets/{asset_id}/files/{role}")))
+            .bearer_auth(token)
+            .header("content-type", "image/jpeg")
+            .header("halden-sha256", sha_hex(data))
+            .body(data.to_vec())
+            .send()
+            .await
+            .unwrap();
+        Self::reply(response).await
+    }
+}

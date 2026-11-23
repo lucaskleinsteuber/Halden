@@ -243,10 +243,14 @@ pub struct Uploads {
     /// Choosing a name and moving a file into the library happen one at a time, so two uploads
     /// taken in the same second can't pick the same name.
     placing: tokio::sync::Mutex<()>,
+    /// The server makes thumbnails the phone didn't send after this long.
+    thumbnail_delay_ms: i64,
+    /// Wakes the background workers when a finished upload queued work for them.
+    wake: Arc<tokio::sync::Notify>,
 }
 
 impl Uploads {
-    pub fn new(config: &Config) -> anyhow::Result<Self> {
+    pub fn new(config: &Config, wake: Arc<tokio::sync::Notify>) -> anyhow::Result<Self> {
         let template = PathTemplate::parse(&config.storage.path_template)
             .map_err(|problem| anyhow::anyhow!("storage.path_template: {problem}"))?;
         Ok(Self {
@@ -260,6 +264,8 @@ impl Uploads {
             ),
             slots: Mutex::new(HashMap::new()),
             placing: tokio::sync::Mutex::new(()),
+            thumbnail_delay_ms: i64::from(config.jobs.thumbnail_delay_minutes) * 60_000,
+            wake,
         })
     }
 

@@ -8,6 +8,20 @@ There are no version numbers yet; entries are grouped by date until the first re
 
 ### Added
 
+- Server: sync (`GET /sync?since=N`): every change gives an asset the next number, a device asks
+  for everything after the last number it saw; one index range per page, tombstones for deleted
+  photos, and a reset signal for devices that are too far behind.
+- Server: files by their hash (`GET /files/{sha256}`, cached forever) and by role, with Range
+  for seeking in videos, ETag and `304`; up to 500 thumbnails in one streamed answer
+  (`POST /thumbnails`).
+- Server: corrections of time, time zone, place, title and description (`PATCH /assets/{id}`)
+  that never touch the original values, with a history; one place for many photos at once.
+- Server: photos without a place get one suggested from the nearest photo in time
+  (`GET /assets/without-location`).
+- Server: background job queue in the database with retries; workers run at the lowest priority.
+  If the phone hasn't sent thumbnails after 10 minutes, the server makes them (JPEG, PNG, TIFF,
+  WebP, GIF directly; HEIC with libheif; videos with ffmpeg).
+- `halden status` shows waiting and failed background jobs.
 - Server: resumable uploads (`POST /uploads`, `PATCH /uploads/{id}` with `Upload-Offset`). A
   broken connection or a killed server loses nothing; the next request continues where the
   bytes stopped. The last piece finishes the upload: SHA-256 check, flush to disk, atomic move
@@ -43,7 +57,8 @@ There are no version numbers yet; entries are grouped by date until the first re
 - Server: the database uses one writing and several reading connections, with a larger cache
   and memory-mapped reads; signing a request in takes one indexed lookup.
 - Server: HTTP/2 flow-control windows of 4 MiB per stream (instead of 64 KiB), keepalive pings,
-  JSON answers compressed with gzip or brotli, and mimalloc as the memory allocator.
+  JSON answers compressed with gzip or brotli, small files read in one go, a cap on helper
+  threads, and mimalloc as the memory allocator on Linux (memory stays flat under load).
 
 ## 22.11.2026
 

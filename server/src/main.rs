@@ -1,5 +1,7 @@
-/// mimalloc instead of the system allocator: faster, and it keeps a long-running server's memory
-/// from fragmenting and slowly growing over weeks.
+/// mimalloc on Linux: fast, and it keeps a long-running server's memory from fragmenting and
+/// slowly growing over weeks. Elsewhere the system allocator is used (it measured better on
+/// macOS).
+#[cfg(target_os = "linux")]
 #[global_allocator]
 static ALLOCATOR: mimalloc::MiMalloc = mimalloc::MiMalloc;
 

@@ -27,6 +27,8 @@ pub struct Config {
     pub tls: TlsConfig,
     pub auth: AuthConfig,
     pub security: SecurityConfig,
+    pub library: LibraryConfig,
+    pub jobs: JobsConfig,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -130,6 +132,51 @@ impl Default for SecurityConfig {
     fn default() -> Self {
         Self {
             log_retention_days: 90,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct LibraryConfig {
+    /// A photo without a location gets one suggested from the nearest photo in time with one,
+    /// at most this many minutes before or after.
+    pub location_suggest_minutes: u32,
+    /// Photos stay in the trash this many days, then they are deleted for good.
+    pub trash_days: u32,
+    /// Devices learn about deletions for this many days; a device that syncs later starts over.
+    pub tombstone_days: u32,
+}
+
+impl Default for LibraryConfig {
+    fn default() -> Self {
+        Self {
+            location_suggest_minutes: 120,
+            trash_days: 30,
+            tombstone_days: 90,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct JobsConfig {
+    /// Background jobs (thumbnails, conversions, mirroring) running at the same time. They run at
+    /// the lowest priority, so uploads and the library stay fast.
+    pub workers: u32,
+    /// The phone sends thumbnails itself. Only if it hasn't after this many minutes does the
+    /// server make them.
+    pub thumbnail_delay_minutes: u32,
+    /// An external tool (ffmpeg, libheif) is stopped after this many minutes.
+    pub external_timeout_minutes: u32,
+}
+
+impl Default for JobsConfig {
+    fn default() -> Self {
+        Self {
+            workers: 1,
+            thumbnail_delay_minutes: 10,
+            external_timeout_minutes: 30,
         }
     }
 }
