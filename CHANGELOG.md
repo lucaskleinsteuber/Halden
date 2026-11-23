@@ -8,6 +8,21 @@ There are no version numbers yet; entries are grouped by date until the first re
 
 ### Added
 
+- iPhone app skeleton (`ios/`, Swift 6 and SwiftUI, iOS 26): connect by scanning the QR code
+  from `halden pair` (or with username and password after comparing the certificate
+  fingerprint), the token in the Keychain; camera (back main camera, HEIC in the best quality,
+  place with accuracy and direction, also written into the file); every photo saved on the
+  phone first and uploaded in 8 MiB pieces from a queue that survives app restarts and
+  continues where the server stands; thumbnail and preview made on the phone; the grid with a
+  check mark once a photo is on the server; settings with the server, the "only one copy"
+  warning and signing out. No design yet.
+- `HaldenKit` (Swift package for iOS and macOS): API client trusting only the pinned
+  certificate, pairing, local database (GRDB), uploader, sync, thumbnails. Its tests run the
+  whole chain against the real Rust server: sign in and pair, an upload cut off and continued,
+  sync to a second device, bulk thumbnails, the trash, signing out, duplicates.
+- CI for iOS (`ios.yml`): HaldenKit tests against the server, the app build and UI tests in the
+  simulator, and a check that the Xcode project matches `project.yml`.
+- `ios/install-on-iphone.sh` builds the app and installs it on a connected iPhone.
 - Server: `halden config list|get|set|reset` changes settings in the config file and keeps its
   comments. The server picks up a changed file by itself within a few seconds (or on
   `systemctl reload halden`) and starts again with it inside the same process, on the same port;

@@ -1,0 +1,500 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		1507F9546D33EB1C65CC511B /* HaldenKit in Frameworks */ = {isa = PBXBuildFile; productRef = 39727BD7D6BBCF314DCA2E69 /* HaldenKit */; };
+		442C9FD29309011799EB92F9 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 80A08A19CFB7DE203B87EE2F /* SettingsView.swift */; };
+		49FC6542BD2AE2DE9BB10B29 /* HaldenUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 330BB49007FE4A8212AE2A53 /* HaldenUITests.swift */; };
+		6C81587E953704F0F75FDAF2 /* QRScannerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2A22B1AB05CB50CEC82682F9 /* QRScannerView.swift */; };
+		9051085D202825975E1E609C /* OnboardingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BD8F20F7C6963AF7826E38E6 /* OnboardingView.swift */; };
+		97449D449BB9B1DC96C1267A /* RootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1FE32D68F3EDCDF19843B399 /* RootView.swift */; };
+		9F64B285C463AC47333BECF3 /* CameraModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = DBEEA719E7976B95C7A812F2 /* CameraModel.swift */; };
+		C6F2BAB2216CDFB906390167 /* HaldenApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5C56DCD1A8AC3F879F869CCE /* HaldenApp.swift */; };
+		F208962660CBA8090DB0272F /* AppModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = BBE86FE0737D0847976455E0 /* AppModel.swift */; };
+		F43C263C31DC78D082C53F87 /* PhotosView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C765E5168916BA5A5355EF98 /* PhotosView.swift */; };
+		F8830ED6BB782B9C28EFCDE6 /* CameraView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7368EE0AAA9CEC128CA2A49F /* CameraView.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		D351D595EA7466155A49631A /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = D7ED80BA36B44780943CC093 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 336BA6A641D2B4A71A4216DE;
+			remoteInfo = Halden;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXFileReference section */
+		1FE32D68F3EDCDF19843B399 /* RootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RootView.swift; sourceTree = "<group>"; };
+		2A22B1AB05CB50CEC82682F9 /* QRScannerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QRScannerView.swift; sourceTree = "<group>"; };
+		330BB49007FE4A8212AE2A53 /* HaldenUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HaldenUITests.swift; sourceTree = "<group>"; };
+		55672CECD6E6AE01CA6058FE /* HaldenKit */ = {isa = PBXFileReference; lastKnownFileType = folder; name = HaldenKit; path = HaldenKit; sourceTree = SOURCE_ROOT; };
+		5C56DCD1A8AC3F879F869CCE /* HaldenApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HaldenApp.swift; sourceTree = "<group>"; };
+		7368EE0AAA9CEC128CA2A49F /* CameraView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraView.swift; sourceTree = "<group>"; };
+		80A08A19CFB7DE203B87EE2F /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
+		84E944B12B866D15937D76FD /* HaldenUITests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = HaldenUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		8B87BE49FB107498769D1FDA /* Base.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Base.xcconfig; sourceTree = "<group>"; };
+		BBE86FE0737D0847976455E0 /* AppModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppModel.swift; sourceTree = "<group>"; };
+		BD8F20F7C6963AF7826E38E6 /* OnboardingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingView.swift; sourceTree = "<group>"; };
+		C06E109E4E6B69033341E2A7 /* Halden.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = Halden.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		C24C0EE92119A576C7B20EEF /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+		C765E5168916BA5A5355EF98 /* PhotosView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotosView.swift; sourceTree = "<group>"; };
+		DBEEA719E7976B95C7A812F2 /* CameraModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraModel.swift; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		08D1B4227C1A6CD0A32D27CF /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				1507F9546D33EB1C65CC511B /* HaldenKit in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		1CB52E6F41434C026F97955B /* Camera */ = {
+			isa = PBXGroup;
+			children = (
+				DBEEA719E7976B95C7A812F2 /* CameraModel.swift */,
+				7368EE0AAA9CEC128CA2A49F /* CameraView.swift */,
+				2A22B1AB05CB50CEC82682F9 /* QRScannerView.swift */,
+			);
+			path = Camera;
+			sourceTree = "<group>";
+		};
+		6BDBA3E07DB8913CDDCA7D72 /* Views */ = {
+			isa = PBXGroup;
+			children = (
+				BD8F20F7C6963AF7826E38E6 /* OnboardingView.swift */,
+				C765E5168916BA5A5355EF98 /* PhotosView.swift */,
+				1FE32D68F3EDCDF19843B399 /* RootView.swift */,
+				80A08A19CFB7DE203B87EE2F /* SettingsView.swift */,
+			);
+			path = Views;
+			sourceTree = "<group>";
+		};
+		6F4250144ED86013C844DEA5 /* App */ = {
+			isa = PBXGroup;
+			children = (
+				BBE86FE0737D0847976455E0 /* AppModel.swift */,
+				5C56DCD1A8AC3F879F869CCE /* HaldenApp.swift */,
+				C24C0EE92119A576C7B20EEF /* Info.plist */,
+				1CB52E6F41434C026F97955B /* Camera */,
+				6BDBA3E07DB8913CDDCA7D72 /* Views */,
+			);
+			path = App;
+			sourceTree = "<group>";
+		};
+		B19AEB1285F84C88FDC5B412 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				C06E109E4E6B69033341E2A7 /* Halden.app */,
+				84E944B12B866D15937D76FD /* HaldenUITests.xctest */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		CC1470ECBE831B370A35BC46 = {
+			isa = PBXGroup;
+			children = (
+				6F4250144ED86013C844DEA5 /* App */,
+				DC5EA0A09FD1E1F88C2C8BF1 /* Config */,
+				F7A10466C5D7F0690B9736D8 /* Packages */,
+				FCCA5C149461772F16CC8813 /* UITests */,
+				B19AEB1285F84C88FDC5B412 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		DC5EA0A09FD1E1F88C2C8BF1 /* Config */ = {
+			isa = PBXGroup;
+			children = (
+				8B87BE49FB107498769D1FDA /* Base.xcconfig */,
+			);
+			path = Config;
+			sourceTree = "<group>";
+		};
+		F7A10466C5D7F0690B9736D8 /* Packages */ = {
+			isa = PBXGroup;
+			children = (
+				55672CECD6E6AE01CA6058FE /* HaldenKit */,
+			);
+			name = Packages;
+			sourceTree = "<group>";
+		};
+		FCCA5C149461772F16CC8813 /* UITests */ = {
+			isa = PBXGroup;
+			children = (
+				330BB49007FE4A8212AE2A53 /* HaldenUITests.swift */,
+			);
+			path = UITests;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		336BA6A641D2B4A71A4216DE /* Halden */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = C4430F1D5FC3BEDC018F6644 /* Build configuration list for PBXNativeTarget "Halden" */;
+			buildPhases = (
+				D6F825FFDF84E51412CB347D /* Sources */,
+				08D1B4227C1A6CD0A32D27CF /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = Halden;
+			packageProductDependencies = (
+				39727BD7D6BBCF314DCA2E69 /* HaldenKit */,
+			);
+			productName = Halden;
+			productReference = C06E109E4E6B69033341E2A7 /* Halden.app */;
+			productType = "com.apple.product-type.application";
+		};
+		6A3A237C4F3CBAAA25847E72 /* HaldenUITests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 19678A46E388B7293A2F5828 /* Build configuration list for PBXNativeTarget "HaldenUITests" */;
+			buildPhases = (
+				F9027BDAA2D9539DA75B8D4D /* Sources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				8609F16C692DE0603010B464 /* PBXTargetDependency */,
+			);
+			name = HaldenUITests;
+			packageProductDependencies = (
+			);
+			productName = HaldenUITests;
+			productReference = 84E944B12B866D15937D76FD /* HaldenUITests.xctest */;
+			productType = "com.apple.product-type.bundle.ui-testing";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		D7ED80BA36B44780943CC093 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = YES;
+				LastUpgradeCheck = 1430;
+				TargetAttributes = {
+					336BA6A641D2B4A71A4216DE = {
+						ProvisioningStyle = Automatic;
+					};
+					6A3A237C4F3CBAAA25847E72 = {
+						TestTargetID = 336BA6A641D2B4A71A4216DE;
+					};
+				};
+			};
+			buildConfigurationList = E2687FCF8CF2A0A55B892A2A /* Build configuration list for PBXProject "Halden" */;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				Base,
+				en,
+			);
+			mainGroup = CC1470ECBE831B370A35BC46;
+			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				FFEE9288824848AF98204ED1 /* XCLocalSwiftPackageReference "HaldenKit" */,
+			);
+			preferredProjectObjectVersion = 77;
+			productRefGroup = B19AEB1285F84C88FDC5B412 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				336BA6A641D2B4A71A4216DE /* Halden */,
+				6A3A237C4F3CBAAA25847E72 /* HaldenUITests */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXSourcesBuildPhase section */
+		D6F825FFDF84E51412CB347D /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				F208962660CBA8090DB0272F /* AppModel.swift in Sources */,
+				9F64B285C463AC47333BECF3 /* CameraModel.swift in Sources */,
+				F8830ED6BB782B9C28EFCDE6 /* CameraView.swift in Sources */,
+				C6F2BAB2216CDFB906390167 /* HaldenApp.swift in Sources */,
+				9051085D202825975E1E609C /* OnboardingView.swift in Sources */,
+				F43C263C31DC78D082C53F87 /* PhotosView.swift in Sources */,
+				6C81587E953704F0F75FDAF2 /* QRScannerView.swift in Sources */,
+				97449D449BB9B1DC96C1267A /* RootView.swift in Sources */,
+				442C9FD29309011799EB92F9 /* SettingsView.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		F9027BDAA2D9539DA75B8D4D /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				49FC6542BD2AE2DE9BB10B29 /* HaldenUITests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		8609F16C692DE0603010B464 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 336BA6A641D2B4A71A4216DE /* Halden */;
+			targetProxy = D351D595EA7466155A49631A /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
+/* Begin XCBuildConfiguration section */
+		48F5A59B92F33F3978F3623E /* Release */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReference = 8B87BE49FB107498769D1FDA /* Base.xcconfig */;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_STRICT_CONCURRENCY = complete;
+				SWIFT_TREAT_WARNINGS_AS_ERRORS = YES;
+				SWIFT_VERSION = 6.0;
+			};
+			name = Release;
+		};
+		632433E6F6A33B090EE2F266 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				CODE_SIGN_STYLE = Automatic;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = App/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.lucas.halden.ios;
+				PRODUCT_NAME = Halden;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Debug;
+		};
+		B16159C5A99A8766D189489F /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.lucas.halden.ios.uitests;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = Halden;
+			};
+			name = Debug;
+		};
+		B4438BD539AB7A66F3AE8EBA /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.lucas.halden.ios.uitests;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = Halden;
+			};
+			name = Release;
+		};
+		C61BB3B67F200B176B3E0E6D /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				CODE_SIGN_STYLE = Automatic;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = App/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.lucas.halden.ios;
+				PRODUCT_NAME = Halden;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Release;
+		};
+		D04BB10E5F044E411A83C5BB /* Debug */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReference = 8B87BE49FB107498769D1FDA /* Base.xcconfig */;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"$(inherited)",
+					"DEBUG=1",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_STRICT_CONCURRENCY = complete;
+				SWIFT_TREAT_WARNINGS_AS_ERRORS = YES;
+				SWIFT_VERSION = 6.0;
+			};
+			name = Debug;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		19678A46E388B7293A2F5828 /* Build configuration list for PBXNativeTarget "HaldenUITests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				B16159C5A99A8766D189489F /* Debug */,
+				B4438BD539AB7A66F3AE8EBA /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		C4430F1D5FC3BEDC018F6644 /* Build configuration list for PBXNativeTarget "Halden" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				632433E6F6A33B090EE2F266 /* Debug */,
+				C61BB3B67F200B176B3E0E6D /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		E2687FCF8CF2A0A55B892A2A /* Build configuration list for PBXProject "Halden" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				D04BB10E5F044E411A83C5BB /* Debug */,
+				48F5A59B92F33F3978F3623E /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+/* End XCConfigurationList section */
+
+/* Begin XCLocalSwiftPackageReference section */
+		FFEE9288824848AF98204ED1 /* XCLocalSwiftPackageReference "HaldenKit" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = HaldenKit;
+		};
+/* End XCLocalSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		39727BD7D6BBCF314DCA2E69 /* HaldenKit */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = HaldenKit;
+		};
+/* End XCSwiftPackageProductDependency section */
+	};
+	rootObject = D7ED80BA36B44780943CC093 /* Project object */;
+}

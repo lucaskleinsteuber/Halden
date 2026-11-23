@@ -6,16 +6,19 @@ Halden is a native iPhone camera with your own self-hosted photo library. You ta
 video, it is saved on the phone right away and uploaded to your own server in the background, in
 full quality, without you having to think about it. No cloud, no subscription, no jank.
 
-> **Status:** early development. The server has accounts, device pairing, resumable uploads,
-> sync, file delivery, metadata corrections, the trash, format conversions, database backups and
-> a mirror to a second disk; signed updates, Docker and the iPhone app come next. Nothing here is ready for your only copy of your photos yet.
+> **Status:** early development, no release yet. The server is complete for a first version:
+> accounts, pairing, resumable uploads, sync, file delivery, corrections, the trash, format
+> conversions, backups, a mirror to a second disk, settings from the app, `halden doctor`,
+> Bonjour, signed updates and Docker. The iPhone app is a working skeleton (connect, take a
+> photo, upload, see it backed up) without its design yet. Nothing here is ready for your only
+> copy of your photos yet.
 
 ## How it fits together
 
 | Part | Built with | State |
 |---|---|---|
-| Server | Rust (Axum, Tokio, rustls, SQLite) for Linux | accounts, uploads, sync, library and backup done |
-| iPhone app | Swift, SwiftUI, AVFoundation | planned |
+| Server | Rust (Axum, Tokio, rustls, SQLite) for Linux | complete for a first version |
+| iPhone app | Swift, SwiftUI, AVFoundation, GRDB | skeleton: pairing, camera, uploads, grid ([docs/IOS_APP.md](docs/IOS_APP.md)) |
 | Mac app | Swift | later |
 
 ### Principles

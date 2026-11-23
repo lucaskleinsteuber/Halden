@@ -1,0 +1,7 @@
+Config/Local.xcconfig
+.build/
+HaldenKit/.build/
+HaldenKit/.swiftpm/
+*.xcuserdatad/
+xcuserdata/
+DerivedData/
