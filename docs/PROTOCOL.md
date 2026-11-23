@@ -143,8 +143,17 @@ Signs this device out. `204`.
 ### `GET /me`
 
 ```json
-{ "user": { … }, "device": { … }, "unconfirmedDevices": 1 }
+{
+  "user": { … }, "device": { … }, "unconfirmedDevices": 1,
+  "backup": { "mirror": "ok", "onlyOneCopy": false, "filesWaiting": 0,
+              "mirrorOnSameDisk": false, "lastDatabaseBackupAt": 1795443720061 }
+}
 ```
+
+`backup.mirror` is `none` (no second copy), `ok`, `behind` (copies are being made) or
+`unreachable` (the mirror disk is missing). While `onlyOneCopy` is true, the app shows a lasting
+warning that a broken disk would lose the photos and recommends keeping local copies on the
+phone. The status is refreshed hourly in the background.
 
 `unconfirmedDevices` counts new devices waiting for confirmation: the account's own, and for
 owners those of every account. The asking device is never counted.

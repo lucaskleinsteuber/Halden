@@ -445,6 +445,16 @@ async fn record(
     .execute(&mut *tx)
     .await?;
     assets::touch(&mut tx, &job.asset_id).await?;
+    if ctx.mirror.is_some() {
+        super::enqueue(
+            &mut tx,
+            super::JobKind::Mirror,
+            &job.asset_id,
+            &job.user_id,
+            0,
+        )
+        .await?;
+    }
     tx.commit().await?;
     Ok(previous.map(|(path,)| path))
 }

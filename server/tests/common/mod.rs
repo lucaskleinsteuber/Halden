@@ -267,6 +267,12 @@ impl Api {
         url(&self.server, path)
     }
 
+    /// Stops the server but keeps its folders (returned; they go when it is dropped).
+    pub async fn stop_keeping_files(self) -> tempfile::TempDir {
+        self.server.shutdown().await.unwrap();
+        self.dir
+    }
+
     pub async fn stop(self) {
         self.server.shutdown().await.unwrap();
     }

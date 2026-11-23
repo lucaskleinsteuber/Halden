@@ -64,8 +64,7 @@ pub async fn restore(db: &Db, user_id: &str, ids: &[String]) -> Result<u64, sqlx
 /// to nowhere.
 pub async fn delete(
     db: &Db,
-    library: &Path,
-    derived_root: &Path,
+    roots: Roots<'_>,
     user_id: &str,
     ids: &[String],
 ) -> Result<u64, sqlx::Error> {
@@ -79,14 +78,21 @@ pub async fn delete(
     .fetch_all(db.read())
     .await?;
     let ids: Vec<String> = trashed.into_iter().map(|(id,)| id).collect();
-    purge(db, library, derived_root, &ids).await
+    purge(db, roots, &ids).await
+}
+
+/// Where an asset's files can be: the library, the derived folder, the mirror.
+#[derive(Clone, Copy)]
+pub struct Roots<'a> {
+    pub library: &'a Path,
+    pub derived: &'a Path,
+    pub mirror: Option<&'a Path>,
 }
 
 /// Deletes everything that has been in the trash longer than `days`.
 pub async fn purge_expired(
     db: &Db,
-    library: &Path,
-    derived_root: &Path,
+    roots: Roots<'_>,
     days: u32,
     now: i64,
 ) -> Result<u64, sqlx::Error> {
@@ -99,17 +105,12 @@ pub async fn purge_expired(
     .fetch_all(db.read())
     .await?;
     let ids: Vec<String> = expired.into_iter().map(|(id,)| id).collect();
-    purge(db, library, derived_root, &ids).await
+    purge(db, roots, &ids).await
 }
 
 /// Turns assets into tombstones and removes their files. The database goes first: if the server
 /// stops halfway, some files are left over, but no record ever points at a missing file.
-async fn purge(
-    db: &Db,
-    library: &Path,
-    derived_root: &Path,
-    ids: &[String],
-) -> Result<u64, sqlx::Error> {
+async fn purge(db: &Db, roots: Roots<'_>, ids: &[String]) -> Result<u64, sqlx::Error> {
     let mut purged = 0;
     for id in ids {
         let mut tx = db.begin().await?;
@@ -149,13 +150,14 @@ async fn purge(
 
         for (storage, path) in files {
             if storage == "library" {
-                if let Some(full) = paths::resolve(library, &path) {
+                if let Some(full) = paths::resolve(roots.library, &path) {
                     let _ = tokio::fs::remove_file(full).await;
                 }
-            } else if let Err(error) = derived::remove_if_unused(db, derived_root, &path).await {
+            } else if let Err(error) = derived::remove_if_unused(db, roots.derived, &path).await {
                 tracing::warn!(%error, "could not remove a thumbnail of a deleted photo");
             }
         }
+        crate::backup::mirror::forget(db, roots.mirror, id).await?;
     }
     Ok(purged)
 }

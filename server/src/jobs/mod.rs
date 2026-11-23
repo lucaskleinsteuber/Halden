@@ -32,6 +32,7 @@ const IDLE_CHECK: Duration = Duration::from_secs(30);
 pub enum JobKind {
     Thumbnail,
     Convert,
+    Mirror,
 }
 
 impl JobKind {
@@ -39,6 +40,7 @@ impl JobKind {
         match self {
             Self::Thumbnail => "thumbnail",
             Self::Convert => "convert",
+            Self::Mirror => "mirror",
         }
     }
 
@@ -46,6 +48,7 @@ impl JobKind {
         match text {
             "thumbnail" => Some(Self::Thumbnail),
             "convert" => Some(Self::Convert),
+            "mirror" => Some(Self::Mirror),
             _ => None,
         }
     }
@@ -126,6 +129,8 @@ pub struct JobContext {
     pub placing: Arc<tokio::sync::Mutex<()>>,
     /// Same disk as the library, so finished conversions move into place atomically.
     pub incoming: PathBuf,
+    /// The mirror folder, if one is set up.
+    pub mirror: Option<PathBuf>,
 }
 
 impl JobContext {
@@ -173,6 +178,7 @@ impl Workers {
             ),
             placing,
             incoming: config.incoming_dir(),
+            mirror: config.mirror.path.clone(),
         });
         let tasks = (0..workers)
             .map(|_| tokio::spawn(work(context.clone(), wake.clone())))
@@ -229,6 +235,7 @@ async fn work(ctx: Arc<JobContext>, wake: Arc<Notify>) {
         let result = match JobKind::parse(&job.kind) {
             Some(JobKind::Thumbnail) => thumbnail::run(&ctx, &job).await,
             Some(JobKind::Convert) => convert::run(&ctx, &job).await,
+            Some(JobKind::Mirror) => crate::backup::mirror::mirror_asset(&ctx, &job.asset_id).await,
             None => Err(format!("unknown job kind {}", job.kind)),
         };
         if let Err(error) = finish(&ctx.db, &job, result).await {

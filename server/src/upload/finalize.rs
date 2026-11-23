@@ -332,6 +332,9 @@ async fn record(
             jobs::enqueue(&mut tx, JobKind::Convert, &row.asset_id, &user.id, 0).await?;
         }
     }
+    if uploads.mirror {
+        jobs::enqueue(&mut tx, JobKind::Mirror, &row.asset_id, &user.id, 0).await?;
+    }
     tx.commit().await?;
     Ok(())
 }

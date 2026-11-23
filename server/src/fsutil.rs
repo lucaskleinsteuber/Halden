@@ -55,6 +55,32 @@ pub fn create_dir(path: &Path, mode: u32) -> Result<()> {
         .with_context(|| format!("could not set permissions on {}", path.display()))
 }
 
+/// Holds `halden.lock` in the data folder while a server runs, so two servers (or a restore and a
+/// server) never work on the same database. The lock goes away with the process, even after
+/// `kill -9`.
+pub struct DataLock(#[allow(dead_code)] File);
+
+pub fn lock_data_dir(data_dir: &Path) -> Result<DataLock> {
+    let path = data_dir.join("halden.lock");
+    let file = OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .write(true)
+        .mode(0o600)
+        .open(&path)
+        .with_context(|| format!("could not open {}", path.display()))?;
+    match file.try_lock() {
+        Ok(()) => Ok(DataLock(file)),
+        Err(std::fs::TryLockError::WouldBlock) => anyhow::bail!(
+            "a Halden server is running on {} (stop it first: sudo systemctl stop halden)",
+            data_dir.display()
+        ),
+        Err(std::fs::TryLockError::Error(error)) => {
+            Err(error).with_context(|| format!("could not lock {}", path.display()))
+        }
+    }
+}
+
 /// Flushes a folder's entries (new, renamed or removed files) to disk.
 pub fn sync_dir(dir: &Path) -> Result<()> {
     File::open(dir)

@@ -354,8 +354,11 @@ pub async fn delete(
     check_ids(&body.ids)?;
     let changed = crate::library::trash::delete(
         state.db(),
-        state.library_dir(),
-        state.derived_dir(),
+        crate::library::trash::Roots {
+            library: state.library_dir(),
+            derived: state.derived_dir(),
+            mirror: state.mirror_dir(),
+        },
         &auth.user.id,
         &body.ids,
     )

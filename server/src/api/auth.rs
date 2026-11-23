@@ -255,6 +255,8 @@ pub struct Me {
     /// New devices waiting for "That was me" or "Block": the account's own, and for owners
     /// those of every account.
     unconfirmed_devices: i64,
+    /// Whether the photos exist a second time. Apps warn while `onlyOneCopy` is true.
+    backup: crate::backup::mirror::BackupStatus,
 }
 
 pub async fn me(State(state): State<AppState>, auth: Auth) -> Result<Json<Me>, ApiError> {
@@ -265,6 +267,7 @@ pub async fn me(State(state): State<AppState>, auth: Auth) -> Result<Json<Me>, A
         user: auth.user,
         device: auth.device,
         unconfirmed_devices,
+        backup: state.backup_status(),
     }))
 }
 

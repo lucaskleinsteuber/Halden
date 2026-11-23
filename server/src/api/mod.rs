@@ -64,31 +64,39 @@ struct Inner {
     derived_dir: PathBuf,
     suggest_window_ms: i64,
     wake: Arc<tokio::sync::Notify>,
+    mirror_dir: Option<PathBuf>,
+    backup_status: Arc<crate::backup::mirror::StatusCell>,
+}
+
+/// What the running server hands to the API.
+pub struct Services {
+    pub server_id: Uuid,
+    pub fingerprint: Fingerprint,
+    /// The port the server really listens on.
+    pub port: u16,
+    pub db: Db,
+    pub uploads: Arc<Uploads>,
+    pub wake: Arc<tokio::sync::Notify>,
+    pub backup_status: Arc<crate::backup::mirror::StatusCell>,
 }
 
 impl AppState {
-    pub fn new(
-        config: &Config,
-        server_id: Uuid,
-        fingerprint: Fingerprint,
-        port: u16,
-        db: Db,
-        uploads: Arc<Uploads>,
-        wake: Arc<tokio::sync::Notify>,
-    ) -> Self {
+    pub fn new(config: &Config, services: Services) -> Self {
         Self(Arc::new(Inner {
-            server_id,
+            server_id: services.server_id,
             name: config.server.name.clone(),
-            fingerprint,
-            port,
-            db,
+            fingerprint: services.fingerprint,
+            port: services.port,
+            db: services.db,
             auth: config.auth.clone(),
             limiter: RateLimiter::new(),
-            uploads,
+            uploads: services.uploads,
             library_dir: config.storage.library_dir.clone(),
             derived_dir: config.derived_dir(),
             suggest_window_ms: i64::from(config.library.location_suggest_minutes) * 60_000,
-            wake,
+            wake: services.wake,
+            mirror_dir: config.mirror.path.clone(),
+            backup_status: services.backup_status,
         }))
     }
 
@@ -102,6 +110,15 @@ impl AppState {
 
     pub fn derived_dir(&self) -> &std::path::Path {
         &self.0.derived_dir
+    }
+
+    pub fn mirror_dir(&self) -> Option<&std::path::Path> {
+        self.0.mirror_dir.as_deref()
+    }
+
+    /// The backup status, refreshed in the background.
+    pub fn backup_status(&self) -> crate::backup::mirror::BackupStatus {
+        self.0.backup_status.get()
     }
 
     /// Tells the background workers that new jobs are waiting.

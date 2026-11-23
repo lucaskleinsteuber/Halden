@@ -247,6 +247,8 @@ pub struct Uploads {
     thumbnail_delay_ms: i64,
     /// Wakes the background workers when a finished upload queued work for them.
     wake: Arc<tokio::sync::Notify>,
+    /// Copy finished uploads to the mirror.
+    mirror: bool,
 }
 
 impl Uploads {
@@ -270,6 +272,7 @@ impl Uploads {
             placing,
             thumbnail_delay_ms: i64::from(config.jobs.thumbnail_delay_minutes) * 60_000,
             wake,
+            mirror: config.mirror.path.is_some(),
         })
     }
 

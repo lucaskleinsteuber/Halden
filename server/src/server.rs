@@ -31,6 +31,8 @@ const STREAM_WINDOW: u32 = 4 * 1024 * 1024;
 const CONNECTION_WINDOW: u32 = 16 * 1024 * 1024;
 /// How often old log entries, codes and unused devices are cleaned up (also once at start).
 const TIDY_EVERY: Duration = Duration::from_secs(24 * 60 * 60);
+/// How often the mirror catches up and the backup status is refreshed (also once at start).
+const BACKUP_EVERY: Duration = Duration::from_secs(60 * 60);
 
 pub struct RunningServer {
     pub addr: SocketAddr,
@@ -38,7 +40,9 @@ pub struct RunningServer {
     handle: Handle<SocketAddr>,
     task: JoinHandle<io::Result<()>>,
     tidying: JoinHandle<()>,
+    backing_up: JoinHandle<()>,
     workers: jobs::Workers,
+    _lock: crate::fsutil::DataLock,
 }
 
 impl RunningServer {
@@ -46,6 +50,7 @@ impl RunningServer {
     pub async fn shutdown(self) -> Result<()> {
         self.handle.graceful_shutdown(Some(SHUTDOWN_GRACE));
         self.tidying.abort();
+        self.backing_up.abort();
         self.workers.stop();
         self.task
             .await
@@ -57,6 +62,7 @@ impl RunningServer {
 /// Opens the database, loads the certificate and starts listening. Returns once the port is open.
 pub async fn start(config: &Config) -> Result<RunningServer> {
     config.validate()?;
+    let lock = crate::fsutil::lock_data_dir(&config.storage.data_dir)?;
     let (tls_config, fingerprint) = tls::server_config(config)?;
     let pool = db::Db::open(&config.db_path()).await?;
     if let Err(error) = pool.optimize().await {
@@ -71,16 +77,21 @@ pub async fn start(config: &Config) -> Result<RunningServer> {
     uploads.recover(&pool).await?;
     let workers = jobs::Workers::start(config, pool.clone(), wake.clone(), placing).await?;
 
+    let backup_status = std::sync::Arc::new(crate::backup::mirror::StatusCell::default());
+
     let listener = bind(config.server.bind, config.server.port)?;
     let addr = listener.local_addr()?;
     let state = AppState::new(
         config,
-        server_id,
-        fingerprint,
-        addr.port(),
-        pool.clone(),
-        uploads.clone(),
-        wake,
+        api::Services {
+            server_id,
+            fingerprint,
+            port: addr.port(),
+            db: pool.clone(),
+            uploads: uploads.clone(),
+            wake: wake.clone(),
+            backup_status: backup_status.clone(),
+        },
     );
     let app = api::router(state).into_make_service_with_connect_info::<SocketAddr>();
     let acceptor = RustlsAcceptor::new(RustlsConfig::from_config(tls_config)).acceptor(
@@ -92,7 +103,8 @@ pub async fn start(config: &Config) -> Result<RunningServer> {
         .handle(handle.clone());
     tune_http(&mut server);
     let task = tokio::spawn(async move { server.serve(app).await });
-    let tidying = tokio::spawn(keep_tidy(pool, config.clone(), uploads));
+    let tidying = tokio::spawn(keep_tidy(pool.clone(), config.clone(), uploads));
+    let backing_up = tokio::spawn(keep_backed_up(pool, config.clone(), backup_status, wake));
 
     Ok(RunningServer {
         addr,
@@ -100,7 +112,9 @@ pub async fn start(config: &Config) -> Result<RunningServer> {
         handle,
         task,
         tidying,
+        backing_up,
         workers,
+        _lock: lock,
     })
 }
 
@@ -121,6 +135,60 @@ fn tune_http<A>(server: &mut axum_server::Server<SocketAddr, A>) {
         .max_send_buf_size(1024 * 1024)
         .keep_alive_interval(Duration::from_secs(20))
         .keep_alive_timeout(Duration::from_secs(20));
+}
+
+/// Makes the daily database backup (copied to the mirror too), lets the mirror catch up, and
+/// refreshes the backup status the apps show.
+async fn keep_backed_up(
+    pool: db::Db,
+    config: Config,
+    status: std::sync::Arc<crate::backup::mirror::StatusCell>,
+    wake: std::sync::Arc<tokio::sync::Notify>,
+) {
+    let mut every_hour = tokio::time::interval(BACKUP_EVERY);
+    loop {
+        every_hour.tick().await;
+        back_up(&pool, &config, &status, &wake).await;
+    }
+}
+
+/// One round of [`keep_backed_up`]; public for tests.
+pub async fn back_up(
+    pool: &db::Db,
+    config: &Config,
+    status: &crate::backup::mirror::StatusCell,
+    wake: &tokio::sync::Notify,
+) {
+    use crate::backup::{database, mirror};
+    if database::due(config, db::now_ms()) {
+        match database::make(pool, config).await {
+            Ok(backup) => {
+                tracing::info!(file = %backup.name, bytes = backup.size, "database backed up");
+                if let Err(error) = mirror::mirror_backup(config, &backup.path).await {
+                    tracing::warn!(%error, "could not copy the database backup to the mirror");
+                }
+            }
+            Err(error) => tracing::error!(error = format!("{error:#}"), "database backup failed"),
+        }
+    }
+    if config.mirror.path.is_some() {
+        match mirror::sweep(pool).await {
+            Ok(0) => {}
+            Ok(queued) => {
+                tracing::info!(queued, "copying missing files to the mirror");
+                wake.notify_waiters();
+            }
+            Err(error) => tracing::error!(%error, "could not check the mirror"),
+        }
+    }
+    let current = mirror::compute_status(pool, config).await;
+    if current.only_one_copy {
+        tracing::warn!(
+            mirror = ?current.mirror,
+            "there is only one copy of the photos; set up a mirror with `halden mirror set`"
+        );
+    }
+    status.set(current);
 }
 
 async fn keep_tidy(pool: db::Db, config: Config, uploads: std::sync::Arc<Uploads>) {
@@ -165,15 +233,13 @@ pub async fn tidy(pool: &db::Db, config: &Config) {
         }
         Err(error) => tracing::error!(%error, "could not tidy up accounts and devices"),
     }
-    match crate::library::trash::purge_expired(
-        pool,
-        &config.storage.library_dir,
-        &config.derived_dir(),
-        config.library.trash_days,
-        now,
-    )
-    .await
-    {
+    let derived = config.derived_dir();
+    let roots = crate::library::trash::Roots {
+        library: &config.storage.library_dir,
+        derived: &derived,
+        mirror: config.mirror.path.as_deref(),
+    };
+    match crate::library::trash::purge_expired(pool, roots, config.library.trash_days, now).await {
         Ok(0) => {}
         Ok(deleted) => tracing::info!(deleted, "deleted photos that were in the trash too long"),
         Err(error) => tracing::error!(%error, "could not empty the trash"),

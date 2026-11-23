@@ -7,8 +7,8 @@
 #   sudo install -m 644 halden.service /etc/systemd/system/halden.service
 #   sudo systemctl daemon-reload && sudo systemctl enable --now halden
 #
-# If your library is not under /srv/halden, add its folder to ReadWritePaths below
-# (or in `sudo systemctl edit halden`).
+# If your library is not under /srv/halden, or you set up a mirror (`halden mirror set`), add
+# those folders to ReadWritePaths below (or in `sudo systemctl edit halden`).
 
 [Unit]
 Description=Halden photo server

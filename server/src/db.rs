@@ -27,6 +27,7 @@ const MAX_READERS: u32 = 8;
 pub struct Db {
     read: SqlitePool,
     write: SqlitePool,
+    path: std::path::PathBuf,
 }
 
 impl Db {
@@ -67,7 +68,16 @@ impl Db {
             .connect_with(base.read_only(true))
             .await
             .with_context(|| format!("could not open the database {}", path.display()))?;
-        Ok(Self { read, write })
+        Ok(Self {
+            read,
+            write,
+            path: path.to_path_buf(),
+        })
+    }
+
+    /// The database file.
+    pub fn path(&self) -> &Path {
+        &self.path
     }
 
     /// For queries that only read. They run in parallel.

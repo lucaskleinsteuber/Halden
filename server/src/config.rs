@@ -29,6 +29,8 @@ pub struct Config {
     pub security: SecurityConfig,
     pub library: LibraryConfig,
     pub jobs: JobsConfig,
+    pub backup: BackupConfig,
+    pub mirror: MirrorConfig,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -181,6 +183,28 @@ impl Default for JobsConfig {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct BackupConfig {
+    /// Database backups kept in `<library>/.halden/backups/` (one is made every day).
+    pub keep: u32,
+}
+
+impl Default for BackupConfig {
+    fn default() -> Self {
+        Self { keep: 14 }
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct MirrorConfig {
+    /// A second copy of every original, conversion and database backup, e.g. a USB disk or a
+    /// mounted NAS folder. Set it with `halden mirror set <folder>`. Empty: no mirror, and the
+    /// apps warn that there is only one copy.
+    pub path: Option<PathBuf>,
+}
+
 /// The computer's host name without a domain, or "Halden" when the host name is empty or a
 /// machine-made id (some containers and VMs are named like `946e80f9-0794-…`).
 pub fn default_server_name() -> String {
@@ -227,6 +251,19 @@ impl Config {
         }
         crate::library::paths::PathTemplate::parse(&self.storage.path_template)
             .map_err(|problem| anyhow::anyhow!("storage.path_template: {problem}"))?;
+        if let Some(mirror) = &self.mirror.path {
+            if !mirror.is_absolute() {
+                bail!(
+                    "mirror.path must be an absolute path, not {}",
+                    mirror.display()
+                );
+            }
+            if mirror.starts_with(&self.storage.library_dir)
+                || self.storage.library_dir.starts_with(mirror)
+            {
+                bail!("mirror.path must not be inside the library (or the other way round)");
+            }
+        }
         if self.tls.cert_file.is_some() != self.tls.key_file.is_some() {
             bail!("tls.cert_file and tls.key_file must be set together");
         }

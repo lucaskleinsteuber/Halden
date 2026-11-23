@@ -7,14 +7,14 @@ video, it is saved on the phone right away and uploaded to your own server in th
 full quality, without you having to think about it. No cloud, no subscription, no jank.
 
 > **Status:** early development. The server has accounts, device pairing, resumable uploads,
-> sync, file delivery, metadata corrections, the trash and format conversions; backup and the
-> iPhone app come next. Nothing here is ready for your only copy of your photos yet.
+> sync, file delivery, metadata corrections, the trash, format conversions, database backups and
+> a mirror to a second disk; signed updates, Docker and the iPhone app come next. Nothing here is ready for your only copy of your photos yet.
 
 ## How it fits together
 
 | Part | Built with | State |
 |---|---|---|
-| Server | Rust (Axum, Tokio, rustls, SQLite) for Linux | accounts, uploads, sync and library done |
+| Server | Rust (Axum, Tokio, rustls, SQLite) for Linux | accounts, uploads, sync, library and backup done |
 | iPhone app | Swift, SwiftUI, AVFoundation | planned |
 | Mac app | Swift | later |
 
@@ -64,6 +64,22 @@ and password for the first account, which becomes the server's owner. Running it
 When a device connects for the first time, compare the fingerprint it shows with the one from
 `halden status`.
 
+### A second copy
+
+Every day the server backs up its database to `<library>/.halden/backups/` (14 are kept). The
+photos themselves exist only once until you set up a **mirror** on another disk, and the app
+warns about that. With a USB disk or a NAS folder mounted at `/mnt/backup`:
+
+```sh
+sudo halden mirror set /mnt/backup/halden
+sudo systemctl edit halden      # add:  [Service]  ReadWritePaths=/mnt/backup/halden
+sudo systemctl restart halden
+```
+
+Every original, conversion and database backup is then copied there in the same readable
+layout and checked by its SHA-256. If the disk is unplugged, Halden waits and catches up when it
+is back.
+
 ### Add a device
 
 ```sh
@@ -92,6 +108,9 @@ until someone confirms it.
 | `halden devices [--user <name>]` | List signed-in devices |
 | `halden devices revoke <id>` | Sign a device out |
 | `halden log [--limit 50]` | Show the security log |
+| `halden backup now\|list` | Back up the database now, or list the backups |
+| `halden backup restore <file>` | Put a backup in place of the database (server stopped) |
+| `halden mirror set <folder>\|off\|status` | Mirror everything to a second disk |
 
 ### Settings
 
@@ -113,6 +132,12 @@ tombstone_days = 90          # devices learn about deletions within this time
 workers = 1                  # background jobs at once (lowest priority)
 thumbnail_delay_minutes = 10 # make thumbnails the phone didn't send after this long
 external_timeout_minutes = 30
+
+[backup]
+keep = 14                    # database backups kept
+
+[mirror]
+path = "/mnt/backup/halden"  # set with `halden mirror set`; leave out for no mirror
 
 [auth]
 password_login = true        # false: devices can only be added by pairing

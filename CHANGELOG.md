@@ -8,6 +8,13 @@ There are no version numbers yet; entries are grouped by date until the first re
 
 ### Added
 
+- Server: daily database backups on the library disk (checked, 14 kept), also made at start;
+  `halden backup now|list|restore`. A restore sets the current database aside first.
+- Server: mirror to a second disk (`halden mirror set <folder>`): every original, conversion
+  and database backup is copied, checked by SHA-256, and caught up hourly after the disk was
+  away. A marker file keeps an unplugged disk's empty mount point from being filled. The apps
+  get the backup state in `GET /me` and warn while there is only one copy.
+- Server: only one server at a time can use a data folder.
 - Server: trash (`POST /assets/trash`, `/restore`, `/delete`). Deleting for good only works from
   the trash; after 30 days in the trash photos are deleted automatically. Tombstones keep no
   place, time or metadata of the deleted photo.

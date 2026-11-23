@@ -3,8 +3,10 @@
 //! The account, device and log commands work on the database directly, without the HTTP API,
 //! so they also work while the server is stopped.
 
+mod backup;
 mod devices;
 mod log;
+mod mirror;
 mod pair;
 mod user;
 
@@ -59,6 +61,12 @@ enum Command {
     Devices(devices::DevicesArgs),
     /// Show the security log: sign-ins, new devices, account changes.
     Log(log::LogArgs),
+    /// Database backups: make one, list them, restore one.
+    #[command(subcommand)]
+    Backup(backup::BackupCommand),
+    /// The mirror: a second copy of everything on another disk.
+    #[command(subcommand)]
+    Mirror(mirror::MirrorCommand),
 }
 
 #[derive(Args)]
@@ -127,6 +135,8 @@ async fn run(cli: Cli) -> Result<()> {
         Command::Pair(args) => pair::run(&cli.config, args).await,
         Command::Devices(args) => devices::run(&cli.config, args).await,
         Command::Log(args) => log::run(&cli.config, args).await,
+        Command::Backup(command) => backup::run(&cli.config, command).await,
+        Command::Mirror(command) => mirror::run(&cli.config, command).await,
     }
 }
 
@@ -424,6 +434,11 @@ async fn run_status(config_path: &Path) -> Result<()> {
                 ),
             );
             row("Uploads", format!("{uploads} unfinished"));
+            if let Ok(database) = Database::open(&config).await {
+                let status = crate::backup::mirror::compute_status(database.pool(), &config).await;
+                let _ = database.close().await;
+                mirror::print_status(&config, &status);
+            }
             if let Ok(queue) = jobs_numbers(&config).await {
                 row(
                     "Jobs",
@@ -462,7 +477,7 @@ async fn library_numbers(
     result
 }
 
-fn row(label: &str, value: impl std::fmt::Display) {
+pub(crate) fn row(label: &str, value: impl std::fmt::Display) {
     println!("  {label:<12} {value}");
 }
 

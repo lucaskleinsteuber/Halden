@@ -81,6 +81,18 @@ reinstall the app and sign in again. The password stays the real protection, whi
 - Duplicates are found per account. The same photo in two accounts is stored twice, so one
   account can never learn what another one has.
 
+## Backups
+
+- The database is backed up daily (`VACUUM INTO`, checked with `PRAGMA quick_check`) onto the
+  library disk, so losing the system disk loses nothing that can't be restored.
+- The mirror copies every original, conversion and database backup to another folder and checks
+  each copy by SHA-256 after flushing it. It writes only into a folder that carries Halden's
+  marker file, so an unplugged USB disk never makes Halden fill the system disk.
+- Only one server can use a data folder at a time (`halden.lock`); a restore needs the server
+  stopped.
+- Honest limit: the mirror mirrors. A photo deleted for good (from the trash) is removed from the
+  mirror too. It protects against a broken disk, not against deleting.
+
 ## Security log
 
 - Records sign-ins (successful, failed, slowed down), pairing, new, confirmed, blocked and

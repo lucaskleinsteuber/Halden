@@ -116,7 +116,11 @@ async fn setup_twice_keeps_identity() {
 #[tokio::test]
 async fn port_in_use_is_reported() {
     let dir = tempfile::tempdir().unwrap();
-    let (server, mut config) = start_server(dir.path()).await;
+    let (server, _) = start_server(dir.path()).await;
+    // Another server with its own folders, on the same port.
+    let other = tempfile::tempdir().unwrap();
+    let (second, mut config) = start_server(other.path()).await;
+    second.shutdown().await.unwrap();
     config.server.port = server.addr.port();
     let error = server::start(&config)
         .await
@@ -124,4 +128,20 @@ async fn port_in_use_is_reported() {
         .expect("second start must fail");
     assert!(format!("{error:#}").contains("already in use"), "{error:#}");
     server.shutdown().await.unwrap();
+}
+
+#[tokio::test]
+async fn two_servers_never_share_a_data_folder() {
+    let dir = tempfile::tempdir().unwrap();
+    let (server, mut config) = start_server(dir.path()).await;
+    config.server.port = 0;
+    let error = server::start(&config)
+        .await
+        .err()
+        .expect("a second server on the same folders must not start");
+    assert!(format!("{error:#}").contains("is running"), "{error:#}");
+    server.shutdown().await.unwrap();
+    // Once the first is gone, the folder is free again.
+    let again = server::start(&config).await.unwrap();
+    again.shutdown().await.unwrap();
 }
