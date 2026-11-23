@@ -429,6 +429,40 @@ Halden-Height: 384
 JPEG, HEIC, PNG or WebP, at most 8 MiB. Answers with the asset. Sending a new one replaces the
 old one.
 
+## Trash
+
+Deleting in the app moves photos to the trash; restoring works on every device. All three
+calls take up to 1000 ids, answer `{"changed": n}`, and can be repeated safely (a deletion made
+offline is simply sent again later):
+
+- `POST /assets/trash` `{"ids": [...]}`: move to the trash (`trashedAt` is set).
+- `POST /assets/restore` `{"ids": [...]}`: take out of the trash.
+- `POST /assets/delete` `{"ids": [...]}`: delete for good, **only assets that are in the trash**.
+  The original, its conversions and its thumbnails are removed; a tombstone stays for sync.
+
+After `[library] trash_days` (default 30) in the trash, photos are deleted for good
+automatically. An asset id that was deleted can't be used again; a phone that still has the photo
+gives it a new id to back it up again.
+
+## Settings of the account
+
+### `GET /me/settings` and `PUT /me/settings`
+
+```json
+{ "photoFormat": "original", "videoFormat": "mp4" }
+```
+
+An extra copy of every photo or video in the preferred format, next to the original in the
+library (same name, other extension), as the asset's `converted` file. `photoFormat`:
+`original` (no copy), `jpeg`, `heic`, `png`, `tiff`; `videoFormat`: `original`, `mp4`, `mov`,
+`mkv`. Videos only change their container (`ffmpeg -c copy`, no quality lost); photos are
+converted with libheif or in-process, keeping EXIF and colour profile where the format allows.
+RAW files get no copy.
+
+`PUT` takes either field and answers with the settings and `queuedConversions`: after a change,
+all existing photos or videos are converted in the background at the lowest priority. Switching
+back to `original` removes the copies.
+
 ## Sync
 
 ### `GET /sync?since=0&limit=1000`

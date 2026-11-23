@@ -26,7 +26,8 @@ use crate::{
     library::{
         assets::{self, Asset},
         metadata::{self, FileMetadata},
-        paths::{self, MediaType},
+        paths::{MediaKind, MediaType},
+        settings::{self, PhotoFormat, VideoFormat},
     },
 };
 
@@ -82,7 +83,7 @@ pub(super) async fn finish(
         // A Live Photo's video or a RAW sits next to its original, with the same name.
         _ => original_base(db, &row.asset_id).await?,
     };
-    let relative = free_name(db, uploads.library(), &base, media.extension).await?;
+    let relative = assets::free_library_name(db, uploads.library(), &base, media.extension).await?;
     let relative_text = relative.to_string_lossy().into_owned();
     let target = uploads.library().join(&relative);
     place(&part, &target, &uploads.incoming).await?;
@@ -181,30 +182,6 @@ async fn original_base(db: &Db, asset_id: &str) -> Result<PathBuf, UploadError> 
             .await?
             .ok_or(UploadError::NotFound)?;
     Ok(Path::new(&path).with_extension(""))
-}
-
-/// The first name that is free on disk and in the database.
-async fn free_name(
-    db: &Db,
-    library: &Path,
-    base: &Path,
-    extension: &str,
-) -> Result<PathBuf, UploadError> {
-    let mut number = 1u32;
-    loop {
-        let candidate = paths::numbered(base, number, extension);
-        let text = candidate.to_string_lossy();
-        let on_disk = std::fs::symlink_metadata(library.join(&candidate)).is_ok();
-        let in_db: Option<(i64,)> =
-            sqlx::query_as("SELECT 1 FROM asset_files WHERE storage = 'library' AND path = ?")
-                .bind(text.as_ref())
-                .fetch_optional(db.read())
-                .await?;
-        if !on_disk && in_db.is_none() {
-            return Ok(candidate);
-        }
-        number += 1;
-    }
 }
 
 /// Moves the flushed partial file to its place and flushes both folders, so the move survives
@@ -346,6 +323,14 @@ async fn record(
             uploads.thumbnail_delay_ms,
         )
         .await?;
+        let wanted = settings::get(db, &user.id).await?;
+        let copy_wanted = match media.kind {
+            MediaKind::Photo => wanted.photo_format != PhotoFormat::Original,
+            MediaKind::Video => wanted.video_format != VideoFormat::Original,
+        };
+        if copy_wanted {
+            jobs::enqueue(&mut tx, JobKind::Convert, &row.asset_id, &user.id, 0).await?;
+        }
     }
     tx.commit().await?;
     Ok(())

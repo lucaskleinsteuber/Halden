@@ -438,6 +438,31 @@ pub async fn stored_files_for(
         .collect())
 }
 
+/// The first library name that is free on disk and in the database. Call while holding the
+/// placing lock, so nobody else takes the name before the file is moved there.
+pub async fn free_library_name(
+    db: &Db,
+    library: &std::path::Path,
+    base: &std::path::Path,
+    extension: &str,
+) -> Result<std::path::PathBuf, sqlx::Error> {
+    let mut number = 1u32;
+    loop {
+        let candidate = crate::library::paths::numbered(base, number, extension);
+        let text = candidate.to_string_lossy();
+        let on_disk = std::fs::symlink_metadata(library.join(&candidate)).is_ok();
+        let in_db: Option<(i64,)> =
+            sqlx::query_as("SELECT 1 FROM asset_files WHERE storage = 'library' AND path = ?")
+                .bind(text.as_ref())
+                .fetch_optional(db.read())
+                .await?;
+        if !on_disk && in_db.is_none() {
+            return Ok(candidate);
+        }
+        number += 1;
+    }
+}
+
 /// Who owns an asset id (any account). Lets uploads refuse an id that another account uses
 /// without telling whose it is.
 pub async fn owner_of(db: &Db, asset_id: &str) -> Result<Option<String>, sqlx::Error> {

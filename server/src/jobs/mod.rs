@@ -6,6 +6,7 @@
 //! uploads: there are few of them (`[jobs] workers`, default 1), heavy work runs on
 //! lowest-priority threads, and external tools run with `nice`/`ionice`.
 
+pub mod convert;
 mod lowprio;
 pub mod thumbnail;
 pub mod tools;
@@ -30,18 +31,21 @@ const IDLE_CHECK: Duration = Duration::from_secs(30);
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum JobKind {
     Thumbnail,
+    Convert,
 }
 
 impl JobKind {
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Thumbnail => "thumbnail",
+            Self::Convert => "convert",
         }
     }
 
     fn parse(text: &str) -> Option<Self> {
         match text {
             "thumbnail" => Some(Self::Thumbnail),
+            "convert" => Some(Self::Convert),
             _ => None,
         }
     }
@@ -83,6 +87,32 @@ pub async fn enqueue(
     Ok(())
 }
 
+/// Adds a job of `kind` for every asset of a kind (`photo`/`video`) of the account, in one
+/// statement. Returns how many were queued.
+pub async fn enqueue_for_kind(
+    tx: &mut SqliteConnection,
+    kind: JobKind,
+    user_id: &str,
+    asset_kind: &str,
+) -> Result<u64, sqlx::Error> {
+    let now = now_ms();
+    let result = sqlx::query(
+        "INSERT INTO jobs (kind, asset_id, user_id, state, run_after, created_at, updated_at) \
+         SELECT ?1, id, user_id, 'queued', ?4, ?4, ?4 FROM assets \
+         WHERE user_id = ?2 AND kind = ?3 AND deleted_at IS NULL AND true \
+         ON CONFLICT (kind, asset_id) DO UPDATE SET state = 'queued', attempts = 0, \
+             run_after = excluded.run_after, last_error = NULL, updated_at = excluded.updated_at \
+         WHERE jobs.state = 'failed'",
+    )
+    .bind(kind.as_str())
+    .bind(user_id)
+    .bind(asset_kind)
+    .bind(now)
+    .execute(&mut *tx)
+    .await?;
+    Ok(result.rows_affected())
+}
+
 /// Everything a job needs.
 pub struct JobContext {
     pub db: Db,
@@ -92,6 +122,10 @@ pub struct JobContext {
     pub tools: Tools,
     pub background: Arc<LowPriority>,
     pub external_timeout: Duration,
+    /// Shared with uploads: only one file at a time gets a name in the library.
+    pub placing: Arc<tokio::sync::Mutex<()>>,
+    /// Same disk as the library, so finished conversions move into place atomically.
+    pub incoming: PathBuf,
 }
 
 impl JobContext {
@@ -109,7 +143,12 @@ pub struct Workers {
 }
 
 impl Workers {
-    pub async fn start(config: &Config, db: Db, wake: Arc<Notify>) -> anyhow::Result<Self> {
+    pub async fn start(
+        config: &Config,
+        db: Db,
+        wake: Arc<Notify>,
+        placing: Arc<tokio::sync::Mutex<()>>,
+    ) -> anyhow::Result<Self> {
         // Jobs that were running when the server stopped start over.
         sqlx::query("UPDATE jobs SET state = 'queued' WHERE state = 'running'")
             .execute(db.write())
@@ -132,6 +171,8 @@ impl Workers {
             external_timeout: Duration::from_secs(
                 u64::from(config.jobs.external_timeout_minutes.max(1)) * 60,
             ),
+            placing,
+            incoming: config.incoming_dir(),
         });
         let tasks = (0..workers)
             .map(|_| tokio::spawn(work(context.clone(), wake.clone())))
@@ -187,6 +228,7 @@ async fn work(ctx: Arc<JobContext>, wake: Arc<Notify>) {
         };
         let result = match JobKind::parse(&job.kind) {
             Some(JobKind::Thumbnail) => thumbnail::run(&ctx, &job).await,
+            Some(JobKind::Convert) => convert::run(&ctx, &job).await,
             None => Err(format!("unknown job kind {}", job.kind)),
         };
         if let Err(error) = finish(&ctx.db, &job, result).await {

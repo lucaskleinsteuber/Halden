@@ -66,9 +66,10 @@ pub async fn start(config: &Config) -> Result<RunningServer> {
     password::warm_up().await;
 
     let wake = std::sync::Arc::new(tokio::sync::Notify::new());
-    let uploads = std::sync::Arc::new(Uploads::new(config, wake.clone())?);
+    let placing = std::sync::Arc::new(tokio::sync::Mutex::new(()));
+    let uploads = std::sync::Arc::new(Uploads::new(config, wake.clone(), placing.clone())?);
     uploads.recover(&pool).await?;
-    let workers = jobs::Workers::start(config, pool.clone(), wake).await?;
+    let workers = jobs::Workers::start(config, pool.clone(), wake.clone(), placing).await?;
 
     let listener = bind(config.server.bind, config.server.port)?;
     let addr = listener.local_addr()?;
@@ -79,6 +80,7 @@ pub async fn start(config: &Config) -> Result<RunningServer> {
         addr.port(),
         pool.clone(),
         uploads.clone(),
+        wake,
     );
     let app = api::router(state).into_make_service_with_connect_info::<SocketAddr>();
     let acceptor = RustlsAcceptor::new(RustlsConfig::from_config(tls_config)).acceptor(
@@ -162,6 +164,19 @@ pub async fn tidy(pool: &db::Db, config: &Config) {
             }
         }
         Err(error) => tracing::error!(%error, "could not tidy up accounts and devices"),
+    }
+    match crate::library::trash::purge_expired(
+        pool,
+        &config.storage.library_dir,
+        &config.derived_dir(),
+        config.library.trash_days,
+        now,
+    )
+    .await
+    {
+        Ok(0) => {}
+        Ok(deleted) => tracing::info!(deleted, "deleted photos that were in the trash too long"),
+        Err(error) => tracing::error!(%error, "could not empty the trash"),
     }
     match crate::library::sync::purge_tombstones(pool, config.library.tombstone_days, now).await {
         Ok(0) => {}

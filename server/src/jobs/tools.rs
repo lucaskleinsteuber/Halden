@@ -119,6 +119,34 @@ impl Tools {
     }
 }
 
+impl Tools {
+    /// Runs a quick tool (like `ffprobe`) and returns what it printed.
+    pub async fn output(
+        &self,
+        program: &Path,
+        args: &[OsString],
+        timeout: Duration,
+    ) -> Result<String, ToolError> {
+        let mut command = Command::new(program);
+        command
+            .args(args)
+            .stdin(Stdio::null())
+            .stderr(Stdio::null())
+            .kill_on_drop(true);
+        match tokio::time::timeout(timeout, command.output()).await {
+            Err(_) => Err(ToolError::Timeout(program.display().to_string())),
+            Ok(Ok(output)) if output.status.success() => {
+                Ok(String::from_utf8_lossy(&output.stdout).into_owned())
+            }
+            Ok(Ok(output)) => Err(ToolError::Failed {
+                tool: program.display().to_string(),
+                message: output.status.to_string(),
+            }),
+            Ok(Err(error)) => Err(ToolError::Io(error)),
+        }
+    }
+}
+
 pub fn args(items: &[&(dyn AsRef<std::ffi::OsStr> + Sync)]) -> Vec<OsString> {
     items
         .iter()

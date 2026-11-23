@@ -3,9 +3,10 @@
 
 mod common;
 
-use std::time::Duration;
-
-use common::{ANNA_PASSWORD, Api, LUCAS_PASSWORD, device, iphone, random_bytes, sha_hex};
+use common::{
+    ANNA_PASSWORD, Api, LUCAS_PASSWORD, device, gradient_jpeg, iphone, random_bytes, sha_hex, tool,
+    wait_for_files,
+};
 use halden::accounts::Role;
 use reqwest::Method;
 use serde_json::{Value, json};
@@ -454,44 +455,6 @@ async fn photos_without_a_place_get_one_suggested() {
         .await;
     assert_eq!(asset.body["location"]["source"], "estimated");
     api.stop().await;
-}
-
-/// A real JPEG: a 1600×1200 colour gradient.
-fn gradient_jpeg() -> Vec<u8> {
-    let image = image::RgbImage::from_fn(1600, 1200, |x, y| {
-        image::Rgb([(x % 256) as u8, (y % 256) as u8, ((x + y) % 256) as u8])
-    });
-    let mut out = std::io::Cursor::new(Vec::new());
-    image::DynamicImage::ImageRgb8(image)
-        .write_to(&mut out, image::ImageFormat::Jpeg)
-        .unwrap();
-    out.into_inner()
-}
-
-async fn wait_for_files(api: &Api, token: &str, id: &str, roles: &[&str]) -> Value {
-    for _ in 0..300 {
-        let asset = api.get(&format!("/api/v1/assets/{id}"), token).await.body;
-        let files = asset["files"].as_array().unwrap();
-        if roles
-            .iter()
-            .all(|role| files.iter().any(|f| f["role"] == *role))
-        {
-            return asset;
-        }
-        tokio::time::sleep(Duration::from_millis(50)).await;
-    }
-    panic!("the server did not make {roles:?} for {id}");
-}
-
-fn tool(name: &str) -> bool {
-    let found = std::process::Command::new(name)
-        .arg("-version")
-        .output()
-        .is_ok();
-    if !found && std::env::var_os("HALDEN_REQUIRE_TOOLS").is_some() {
-        panic!("{name} is required for this test (HALDEN_REQUIRE_TOOLS is set)");
-    }
-    found
 }
 
 #[tokio::test]

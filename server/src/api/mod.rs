@@ -63,6 +63,7 @@ struct Inner {
     library_dir: PathBuf,
     derived_dir: PathBuf,
     suggest_window_ms: i64,
+    wake: Arc<tokio::sync::Notify>,
 }
 
 impl AppState {
@@ -73,6 +74,7 @@ impl AppState {
         port: u16,
         db: Db,
         uploads: Arc<Uploads>,
+        wake: Arc<tokio::sync::Notify>,
     ) -> Self {
         Self(Arc::new(Inner {
             server_id,
@@ -86,6 +88,7 @@ impl AppState {
             library_dir: config.storage.library_dir.clone(),
             derived_dir: config.derived_dir(),
             suggest_window_ms: i64::from(config.library.location_suggest_minutes) * 60_000,
+            wake,
         }))
     }
 
@@ -99,6 +102,11 @@ impl AppState {
 
     pub fn derived_dir(&self) -> &std::path::Path {
         &self.0.derived_dir
+    }
+
+    /// Tells the background workers that new jobs are waiting.
+    pub fn wake_workers(&self) {
+        self.0.wake.notify_waiters();
     }
 
     pub fn suggest_window_ms(&self) -> i64 {
@@ -153,6 +161,13 @@ pub fn router(state: AppState) -> Router {
         .route("/api/v1/uploads/{id}/complete", post(uploads::complete))
         .route("/api/v1/assets/check", post(assets::check))
         .route("/api/v1/assets/location", post(library::set_location))
+        .route("/api/v1/assets/trash", post(library::trash))
+        .route("/api/v1/assets/restore", post(library::restore))
+        .route("/api/v1/assets/delete", post(library::delete))
+        .route(
+            "/api/v1/me/settings",
+            get(library::settings).put(library::change_settings),
+        )
         .route(
             "/api/v1/assets/without-location",
             get(library::without_location),

@@ -6,5 +6,7 @@ pub mod derived;
 pub mod edits;
 pub mod metadata;
 pub mod paths;
+pub mod settings;
 pub mod space;
 pub mod sync;
+pub mod trash;

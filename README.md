@@ -7,8 +7,8 @@ video, it is saved on the phone right away and uploaded to your own server in th
 full quality, without you having to think about it. No cloud, no subscription, no jank.
 
 > **Status:** early development. The server has accounts, device pairing, resumable uploads,
-> sync, file delivery and metadata corrections; trash, conversions, backup and the iPhone app come
-> next. Nothing here is ready for your only copy of your photos yet.
+> sync, file delivery, metadata corrections, the trash and format conversions; backup and the
+> iPhone app come next. Nothing here is ready for your only copy of your photos yet.
 
 ## How it fits together
 
@@ -39,7 +39,8 @@ cargo build --release
 
 ### Set up on Ubuntu Server
 
-For thumbnails of videos and HEIC photos the server uses `ffmpeg` and libheif:
+For thumbnails of videos and HEIC photos, and for copies in other formats, the server uses
+`ffmpeg` and libheif:
 
 ```sh
 sudo apt install ffmpeg libheif-examples

@@ -8,6 +8,13 @@ There are no version numbers yet; entries are grouped by date until the first re
 
 ### Added
 
+- Server: trash (`POST /assets/trash`, `/restore`, `/delete`). Deleting for good only works from
+  the trash; after 30 days in the trash photos are deleted automatically. Tombstones keep no
+  place, time or metadata of the deleted photo.
+- Server: an extra copy of every photo or video in a preferred format per account
+  (`PUT /me/settings`: JPEG, HEIC, PNG, TIFF; MP4, MOV, MKV), next to the original. Videos only
+  change their container (no quality lost); existing photos are converted in the background
+  after a change, and switching back removes the copies.
 - Server: sync (`GET /sync?since=N`): every change gives an asset the next number, a device asks
   for everything after the last number it saw; one index range per page, tombstones for deleted
   photos, and a reset signal for devices that are too far behind.

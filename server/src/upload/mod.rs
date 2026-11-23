@@ -242,7 +242,7 @@ pub struct Uploads {
     slots: Mutex<HashMap<Uuid, Arc<tokio::sync::Mutex<Slot>>>>,
     /// Choosing a name and moving a file into the library happen one at a time, so two uploads
     /// taken in the same second can't pick the same name.
-    placing: tokio::sync::Mutex<()>,
+    placing: Arc<tokio::sync::Mutex<()>>,
     /// The server makes thumbnails the phone didn't send after this long.
     thumbnail_delay_ms: i64,
     /// Wakes the background workers when a finished upload queued work for them.
@@ -250,7 +250,11 @@ pub struct Uploads {
 }
 
 impl Uploads {
-    pub fn new(config: &Config, wake: Arc<tokio::sync::Notify>) -> anyhow::Result<Self> {
+    pub fn new(
+        config: &Config,
+        wake: Arc<tokio::sync::Notify>,
+        placing: Arc<tokio::sync::Mutex<()>>,
+    ) -> anyhow::Result<Self> {
         let template = PathTemplate::parse(&config.storage.path_template)
             .map_err(|problem| anyhow::anyhow!("storage.path_template: {problem}"))?;
         Ok(Self {
@@ -263,7 +267,7 @@ impl Uploads {
                 config.storage.min_free_gb.saturating_mul(1_000_000_000),
             ),
             slots: Mutex::new(HashMap::new()),
-            placing: tokio::sync::Mutex::new(()),
+            placing,
             thumbnail_delay_ms: i64::from(config.jobs.thumbnail_delay_minutes) * 60_000,
             wake,
         })
@@ -369,7 +373,9 @@ impl Uploads {
                 }
                 if new.role == UploadRole::Original {
                     return Err(UploadError::Conflict(
-                        "This asset already exists without an original.".into(),
+                        "This photo was deleted on the server. Give it a new asset id to upload \
+                         it again."
+                            .into(),
                     ));
                 }
             }

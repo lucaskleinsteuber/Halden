@@ -307,3 +307,109 @@ pub async fn suggestion(
     .await?;
     Ok(Json(SuggestionAnswer { suggestion }))
 }
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Ids {
+    ids: Vec<String>,
+}
+
+fn check_ids(ids: &[String]) -> Result<(), ApiError> {
+    if ids.len() > MAX_BULK_EDIT {
+        return Err(ApiError::validation(format!(
+            "At most {MAX_BULK_EDIT} ids per request."
+        )));
+    }
+    Ok(())
+}
+
+/// `POST /assets/trash`: move to the trash.
+pub async fn trash(
+    State(state): State<AppState>,
+    auth: Auth,
+    ApiJson(body): ApiJson<Ids>,
+) -> Result<Json<Changed>, ApiError> {
+    check_ids(&body.ids)?;
+    let changed = crate::library::trash::trash(state.db(), &auth.user.id, &body.ids).await?;
+    Ok(Json(Changed { changed }))
+}
+
+/// `POST /assets/restore`: take out of the trash.
+pub async fn restore(
+    State(state): State<AppState>,
+    auth: Auth,
+    ApiJson(body): ApiJson<Ids>,
+) -> Result<Json<Changed>, ApiError> {
+    check_ids(&body.ids)?;
+    let changed = crate::library::trash::restore(state.db(), &auth.user.id, &body.ids).await?;
+    Ok(Json(Changed { changed }))
+}
+
+/// `POST /assets/delete`: delete for good, only assets that are in the trash.
+pub async fn delete(
+    State(state): State<AppState>,
+    auth: Auth,
+    ApiJson(body): ApiJson<Ids>,
+) -> Result<Json<Changed>, ApiError> {
+    check_ids(&body.ids)?;
+    let changed = crate::library::trash::delete(
+        state.db(),
+        state.library_dir(),
+        state.derived_dir(),
+        &auth.user.id,
+        &body.ids,
+    )
+    .await?;
+    Ok(Json(Changed { changed }))
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SettingsAnswer {
+    #[serde(flatten)]
+    settings: crate::library::settings::Settings,
+    /// Conversions queued because a format changed.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    queued_conversions: Option<u64>,
+}
+
+/// `GET /me/settings`.
+pub async fn settings(
+    State(state): State<AppState>,
+    auth: Auth,
+) -> Result<Json<SettingsAnswer>, ApiError> {
+    let settings = crate::library::settings::get(state.db(), &auth.user.id).await?;
+    Ok(Json(SettingsAnswer {
+        settings,
+        queued_conversions: None,
+    }))
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct SettingsChange {
+    photo_format: Option<crate::library::settings::PhotoFormat>,
+    video_format: Option<crate::library::settings::VideoFormat>,
+}
+
+/// `PUT /me/settings`: change the preferred formats. Existing photos and videos are converted in
+/// the background.
+pub async fn change_settings(
+    State(state): State<AppState>,
+    auth: Auth,
+    ApiJson(change): ApiJson<SettingsChange>,
+) -> Result<Json<SettingsAnswer>, ApiError> {
+    let mut settings = crate::library::settings::get(state.db(), &auth.user.id).await?;
+    if let Some(photo) = change.photo_format {
+        settings.photo_format = photo;
+    }
+    if let Some(video) = change.video_format {
+        settings.video_format = video;
+    }
+    let queued = crate::library::settings::set(state.db(), &auth.user.id, settings).await?;
+    state.wake_workers();
+    Ok(Json(SettingsAnswer {
+        settings,
+        queued_conversions: Some(queued),
+    }))
+}
