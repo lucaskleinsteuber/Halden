@@ -23,10 +23,15 @@ pub mod seclog;
 pub mod server;
 pub mod setup;
 pub mod tls;
+pub mod update;
 pub mod upload;
 
-/// Version of this build of the server.
-pub const VERSION: &str = env!("CARGO_PKG_VERSION");
+/// Version of this build of the server. Release builds get it from their tag
+/// (`HALDEN_BUILD_VERSION`, set by the release workflow); otherwise it is Cargo's.
+pub const VERSION: &str = match option_env!("HALDEN_BUILD_VERSION") {
+    Some(version) => version,
+    None => env!("CARGO_PKG_VERSION"),
+};
 
 /// Version of the HTTP API that the apps talk to. Raised only for breaking changes.
 pub const API_VERSION: u32 = 1;

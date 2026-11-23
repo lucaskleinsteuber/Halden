@@ -1,0 +1,13 @@
+# Notices when an owner asks for an update in the Halden app: the server leaves this file in its
+# data folder (it can't install anything itself, it has no root rights), and
+# halden-update-request.service installs the newest signed version as root.
+
+[Unit]
+Description=Notice an update requested in the Halden app
+
+[Path]
+PathExists=/var/lib/halden/update-requested
+Unit=halden-update-request.service
+
+[Install]
+WantedBy=paths.target

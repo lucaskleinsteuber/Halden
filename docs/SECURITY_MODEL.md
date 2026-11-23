@@ -119,6 +119,16 @@ reinstall the app and sign in again. The password stays the real protection, whi
 - Entries are removed after `[security] log_retention_days` (default 90, 0 = keep). Cleaning up
   runs at start and then daily.
 
+## Updates
+
+Only releases signed with the owner's minisign key are installed, by root's updater
+(`halden update`); the key never goes to GitHub (see [UPDATE_SIGNING.md](UPDATE_SIGNING.md)). The
+server itself has no root rights: when the owner asks for an update in the app (with the password
+again), the server only leaves a file that says "install", and systemd starts the updater. The
+updater never installs an older version, refuses packages with files outside their folder, backs
+up the database first and goes back to the old version if the new one doesn't start. Looking for
+updates asks only GitHub's release list, with the program's version as the only detail.
+
 ## The terminal
 
 `halden user …`, `halden pair`, `halden devices` and `halden log` work directly on the database

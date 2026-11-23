@@ -27,6 +27,7 @@ use crate::{
     jobs::{self, QueueStats},
     library::assets,
     seclog::{Event, Record},
+    update,
 };
 
 #[derive(Serialize)]
@@ -530,4 +531,143 @@ pub async fn restart(
         .await;
     state.control().restart_soon();
     Ok((StatusCode::ACCEPTED, Json(json!({ "restarting": true }))))
+}
+
+/// Is root's updater installed (`halden-update-request.path`, from the install script)?
+fn updater_installed() -> bool {
+    #[cfg(debug_assertions)]
+    if std::env::var_os("HALDEN_UPDATER_INSTALLED").is_some() {
+        return true;
+    }
+    [
+        "/etc/systemd/system",
+        "/lib/systemd/system",
+        "/usr/lib/systemd/system",
+    ]
+    .iter()
+    .any(|dir| {
+        std::path::Path::new(dir)
+            .join("halden-update-request.path")
+            .exists()
+    })
+}
+
+fn in_docker() -> bool {
+    std::env::var_os("HALDEN_IN_DOCKER").is_some()
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateInfo {
+    /// The version that answers right now.
+    running: &'static str,
+    #[serde(flatten)]
+    status: update::UpdateStatus,
+    in_docker: bool,
+    /// Whether "Install" in the app can work here.
+    can_install: bool,
+    /// Why not, when it can't.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    install_hint: Option<&'static str>,
+}
+
+fn update_info(state: &AppState) -> UpdateInfo {
+    let has_key = update::Source::official().key.is_some();
+    let hint = if in_docker() {
+        Some("Update the container: docker compose pull && docker compose up -d")
+    } else if !has_key {
+        Some(
+            "This build installs no updates (it has no release key). Install the new version by hand.",
+        )
+    } else if !updater_installed() {
+        Some(
+            "The update helper is not installed. Run the install script on the server again: curl -fsSL https://raw.githubusercontent.com/lucaskleinsteuber/Halden/main/packaging/linux/get-halden.sh | sudo bash",
+        )
+    } else {
+        None
+    };
+    UpdateInfo {
+        running: VERSION,
+        status: update::status::read(state.config()),
+        in_docker: in_docker(),
+        can_install: hint.is_none(),
+        install_hint: hint,
+    }
+}
+
+pub async fn update_status(
+    State(state): State<AppState>,
+    auth: Auth,
+) -> Result<Json<UpdateInfo>, ApiError> {
+    auth.require_owner()?;
+    Ok(Json(update_info(&state)))
+}
+
+/// Looks for a new version now (the server does this once a day by itself).
+pub async fn check_for_update(
+    State(state): State<AppState>,
+    auth: Auth,
+) -> Result<Json<UpdateInfo>, ApiError> {
+    auth.require_owner()?;
+    let config = state.config().clone();
+    let checked = tokio::time::timeout(
+        std::time::Duration::from_secs(25),
+        update::check(&update::Source::official(), config.update.beta),
+    )
+    .await
+    .unwrap_or_else(|_| Err(anyhow::anyhow!("GitHub did not answer in time")));
+    match checked {
+        Ok(found) => {
+            update::install::checked(&config, found.as_ref());
+        }
+        Err(error) => update::install::report(
+            &config,
+            update::UpdateState::Failed,
+            VERSION,
+            None,
+            Some(format!("could not look for a new version: {error:#}")),
+        ),
+    }
+    Ok(Json(update_info(&state)))
+}
+
+/// Asks root's updater to install the newest version: leaves a request file, which systemd's
+/// `halden-update-request.path` notices. The request carries nothing but "install".
+pub async fn install_update(
+    State(state): State<AppState>,
+    auth: Auth,
+    ApiJson(request): ApiJson<Confirm>,
+) -> Result<(StatusCode, Json<UpdateInfo>), ApiError> {
+    auth.require_owner()?;
+    let info = update_info(&state);
+    if let Some(hint) = info.install_hint {
+        return Err(ApiError::new(
+            StatusCode::CONFLICT,
+            "update_unavailable",
+            hint,
+        ));
+    }
+    if info.status.state != update::UpdateState::Available {
+        return Err(ApiError::new(
+            StatusCode::CONFLICT,
+            "no_update",
+            "There is no newer version to install. Look for one first.",
+        ));
+    }
+    auth.confirm_password(&state, request.current_password)
+        .await?;
+    let path = update::status::install_request(state.config());
+    fsutil::write_atomic(&path, b"install\n", 0o600)?;
+    Record::new(Event::UpdateRequested)
+        .user(&auth.user.id)
+        .device(&auth.device.id)
+        .ip(auth.ip)
+        .detail(format!(
+            "{} to {}",
+            VERSION,
+            info.status.latest.as_deref().unwrap_or("?")
+        ))
+        .write(state.db())
+        .await;
+    Ok((StatusCode::ACCEPTED, Json(update_info(&state))))
 }

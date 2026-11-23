@@ -1,0 +1,32 @@
+# The Halden server with Docker Compose. Before the first start, give the folders to the
+# container's user (10001):
+#
+#   sudo mkdir -p /srv/halden/config /var/lib/halden /mnt/photos/halden
+#   sudo chown -R 10001:10001 /srv/halden/config /var/lib/halden /mnt/photos/halden
+#   docker compose up -d
+#   docker exec -it halden halden user add <name> --owner
+#   docker exec -it halden halden pair
+#
+# Update: docker compose pull && docker compose up -d
+
+services:
+  halden:
+    image: ghcr.io/lucaskleinsteuber/halden:latest
+    container_name: halden
+    restart: unless-stopped
+    # Host networking: Bonjour works, and the server sees your devices' real addresses (it only
+    # lets in the home network and Tailscale).
+    network_mode: host
+    read_only: true
+    tmpfs:
+      - /tmp
+    environment:
+      HALDEN_NAME: homeserver
+    volumes:
+      - /srv/halden/config:/config
+      # Database, keys and thumbnails: best on the fast system disk.
+      - /var/lib/halden:/data
+      # Your photos and videos: usually the big data disk.
+      - /mnt/photos/halden:/library
+      # A second copy on another disk (then: docker exec halden halden mirror set /mirror):
+      # - /mnt/usb/halden-mirror:/mirror

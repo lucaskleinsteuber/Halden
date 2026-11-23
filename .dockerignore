@@ -1,0 +1,7 @@
+# Only what the image needs goes into the build: the server's sources and the packaging.
+.git
+Local
+ios
+server/target
+server/fuzz/target
+**/.DS_Store

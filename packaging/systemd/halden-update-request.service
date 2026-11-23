@@ -1,0 +1,13 @@
+# Installs the newest signed Halden version when the app asked for it (see
+# halden-update-request.path). It removes the request first; the request carries nothing but
+# "install", so the server can't make root do anything else.
+
+[Unit]
+Description=Install a Halden update requested in the app
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+TimeoutStartSec=30min
+ExecStart=/usr/local/bin/halden --config /etc/halden/config.toml update --from-app

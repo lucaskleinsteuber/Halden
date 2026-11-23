@@ -10,6 +10,7 @@ mod doctor;
 mod log;
 mod mirror;
 mod pair;
+mod update;
 mod user;
 
 use std::{
@@ -34,7 +35,7 @@ use crate::{
 #[derive(Parser)]
 #[command(
     name = "halden",
-    version,
+    version = VERSION,
     about = "Halden server: your photos, your server, no twitches."
 )]
 struct Cli {
@@ -74,6 +75,13 @@ enum Command {
     Config(config::ConfigCommand),
     /// Check the server and say how to fix what's wrong.
     Doctor(doctor::DoctorArgs),
+    /// Look for a new version and install it (needs sudo).
+    Update(update::UpdateArgs),
+    /// Ask the running server whether it answers (for Docker's health check and scripts).
+    Health,
+    /// Used by the updater: bring a copy of the database up to this version and check it.
+    #[command(hide = true)]
+    CheckUpgrade,
 }
 
 #[derive(Args)]
@@ -146,6 +154,20 @@ async fn run(cli: Cli) -> Result<()> {
         Command::Mirror(command) => mirror::run(&cli.config, command).await,
         Command::Config(command) => config::run(&cli.config, command).await,
         Command::Doctor(args) => doctor::run(&cli.config, args).await,
+        Command::Update(args) => update::run(&cli.config, args).await,
+        Command::Health => {
+            let config = Config::load(&cli.config)?;
+            match crate::update::install::running_version(&config).await {
+                Some(version) => {
+                    println!("Halden {version} answers on port {}.", config.server.port);
+                    Ok(())
+                }
+                None => bail!("the server does not answer on port {}", config.server.port),
+            }
+        }
+        Command::CheckUpgrade => {
+            crate::update::install::check_upgrade(&Config::load(&cli.config)?).await
+        }
     }
 }
 
@@ -383,6 +405,24 @@ async fn run_status(config_path: &Path) -> Result<()> {
 
     println!("Halden server \"{}\"\n", config.server.name);
     row("Version", format!("{VERSION} (API {API_VERSION})"));
+    let update = crate::update::status::read(&config);
+    match update.state {
+        crate::update::UpdateState::Available => row(
+            "Update",
+            format!(
+                "Halden {} is available: sudo halden update",
+                update.latest.as_deref().unwrap_or("?")
+            ),
+        ),
+        crate::update::UpdateState::Failed | crate::update::UpdateState::RolledBack => row(
+            "Update",
+            update
+                .message
+                .as_deref()
+                .unwrap_or("the last update failed"),
+        ),
+        _ => {}
+    }
     row(
         "State",
         if is_listening(config.server.port) {

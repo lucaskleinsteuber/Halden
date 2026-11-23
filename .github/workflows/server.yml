@@ -3,9 +3,9 @@ name: Server
 on:
   push:
     branches: [main]
-    paths: ["server/**", ".github/workflows/server.yml"]
+    paths: ["server/**", "packaging/**", ".github/workflows/server.yml"]
   pull_request:
-    paths: ["server/**", ".github/workflows/server.yml"]
+    paths: ["server/**", "packaging/**", ".github/workflows/server.yml"]
 
 permissions:
   contents: read
@@ -44,3 +44,15 @@ jobs:
           HALDEN_REQUIRE_TOOLS: "1"
       - name: Build release
         run: cargo build --release --locked
+      - name: Check the install scripts
+        working-directory: packaging
+        run: bash -n linux/get-halden.sh && bash -n linux/install.sh && sh -n docker/entrypoint.sh
+      - name: Docker image from the built program
+        working-directory: .
+        run: |
+          mkdir -p dist/amd64
+          cp server/target/release/halden dist/amd64/halden
+          docker build -f packaging/docker/Dockerfile --target release -t halden:ci .
+      - name: Docker smoke test
+        working-directory: .
+        run: packaging/docker/smoke-test.sh halden:ci

@@ -1,0 +1,56 @@
+name: Docker release
+
+# When the owner publishes a signed server release, builds the image from exactly the signed
+# packages (the signature is checked first, with the key from get-halden.sh) and pushes it to
+# ghcr.io/lucaskleinsteuber/halden as <version> and, for stable releases, latest.
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  image:
+    if: startsWith(github.event.release.tag_name, 'server-v')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download and check the signed packages
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.event.release.tag_name }}
+        run: |
+          version="${TAG#server-v}"
+          mkdir -p work dist/amd64 dist/arm64
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --dir work
+          key=$(sed -n 's/^signing_public_key="\(.*\)"$/\1/p' packaging/linux/get-halden.sh)
+          [ -n "$key" ] || { echo "no signing key in get-halden.sh" >&2; exit 1; }
+          # The same check as get-halden.sh, with openssl.
+          base64 -d <<<"$key" > work/key.bin
+          sed -n 2p work/SHA256SUMS.minisig | base64 -d > work/signature.bin
+          { printf '\060\052\060\005\006\003\053\145\160\003\041\000'; tail -c 32 work/key.bin; } > work/key.der
+          tail -c 64 work/signature.bin > work/signature.raw
+          openssl dgst -blake2b512 -binary work/SHA256SUMS > work/hash
+          openssl pkeyutl -verify -pubin -keyform DER -inkey work/key.der -rawin -in work/hash -sigfile work/signature.raw
+          (cd work && sha256sum -c SHA256SUMS)
+          for pair in x86_64:amd64 aarch64:arm64; do
+            tar -xzf "work/halden-$version-${pair%%:*}-linux.tar.gz" -C work
+            cp "work/halden-$version-${pair%%:*}-linux/halden" "dist/${pair##*:}/halden"
+          done
+          echo "VERSION=$version" >> "$GITHUB_ENV"
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+      - name: Build and push
+        run: |
+          tags=(-t "ghcr.io/lucaskleinsteuber/halden:$VERSION")
+          case "$VERSION" in *-*) ;; *) tags+=(-t ghcr.io/lucaskleinsteuber/halden:latest) ;; esac
+          docker buildx build -f packaging/docker/Dockerfile --target release \
+            --platform linux/amd64,linux/arm64 "${tags[@]}" --push .

@@ -24,7 +24,23 @@ There are no version numbers yet; entries are grouped by date until the first re
 - Server: announces itself in the home network with Bonjour (`_halden._tcp`, with its ID,
   fingerprint, API version and name), only on home-network interfaces, so the apps find it
   without an address. `[network] bonjour = false` turns it off.
-- Server: `[update] check_daily` and `beta` settings (used by updates, coming next).
+- Server: updates like Aurelia's. The server looks for a new version once a day and the apps
+  show it; `sudo halden update` (or Install in the app, with the password) installs it.
+  Releases must carry the owner's minisign signature over `SHA256SUMS` (the key stays on the
+  owner's Mac); never an older version, never files outside the package's folder. The database
+  is backed up and the new program tests itself on a copy first; if it doesn't answer after the
+  restart, the old program and database come back. `halden update --beta on` also offers test
+  versions; `[update] check_daily` turns the daily look off.
+- Server: one-line install and update (`get-halden.sh`, checks the signature with openssl) and
+  `install.sh` in every release package: system user, program, systemd units, ffmpeg and
+  libheif, setup with the first account, firewall, start.
+- Docker image (`packaging/docker/`): ffmpeg and libheif included, runs as user 10001 with a
+  read-only file system, sets itself up on the first start, health check (`halden health`);
+  compose file with host networking. CI builds and tests the image on every change.
+- Release workflow: tags `server-v<version>` build packages for x86_64 and aarch64 Linux as a
+  draft; `scripts/publish-release.sh` signs and publishes on the Mac; the Docker image is built
+  from the signed packages only. No release has been made yet.
+- Docs: `docs/DOCKER.md`, `docs/UPDATE_SIGNING.md`, `docs/RELEASING.md`.
 
 - Server: daily database backups on the library disk (checked, 14 kept), also made at start;
   `halden backup now|list|restore`. A restore sets the current database aside first.

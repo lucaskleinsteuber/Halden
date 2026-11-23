@@ -236,6 +236,9 @@ pub fn router(state: AppState) -> Router {
         .route("/api/v1/admin/jobs/retry", post(manage::retry_jobs))
         .route("/api/v1/admin/doctor", get(manage::doctor))
         .route("/api/v1/admin/restart", post(manage::restart))
+        .route("/api/v1/admin/update", get(manage::update_status))
+        .route("/api/v1/admin/update/check", post(manage::check_for_update))
+        .route("/api/v1/admin/update/install", post(manage::install_update))
         .layer(
             CompressionLayer::new()
                 .gzip(true)

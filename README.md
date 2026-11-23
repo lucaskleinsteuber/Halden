@@ -37,24 +37,34 @@ cargo build --release
 # the program is server/target/release/halden
 ```
 
-### Set up on Ubuntu Server
+### Install on Ubuntu Server
 
-For thumbnails of videos and HEIC photos, and for copies in other formats, the server uses
-`ffmpeg` and libheif:
+Once there is a release, one line installs the server, or updates it (it checks the download's
+signature first):
 
 ```sh
-sudo apt install ffmpeg libheif-examples
+curl -fsSL https://raw.githubusercontent.com/lucaskleinsteuber/Halden/main/packaging/linux/get-halden.sh | sudo bash
 ```
 
+It creates the system user `halden`, installs the program and the systemd units, installs
+`ffmpeg` and libheif (thumbnails of videos and HEIC photos, copies in other formats), asks where
+your photos go and for the first account, opens the firewall if `ufw` is on, and starts the
+server.
+
+By hand, from a build (`packaging/linux/install.sh` does the same from a release package):
+
 ```sh
+sudo apt install ffmpeg libheif-examples libheif-plugin-libde265 libheif-plugin-x265
 sudo install -m 755 server/target/release/halden /usr/local/bin/halden
 sudo useradd --system --home /var/lib/halden --shell /usr/sbin/nologin halden
 sudo halden setup --library-dir /srv/halden/library
-sudo install -m 644 packaging/systemd/halden.service /etc/systemd/system/
+sudo install -m 644 packaging/systemd/halden*.service packaging/systemd/halden*.path /etc/systemd/system/
 sudo systemctl daemon-reload
-sudo systemctl enable --now halden
+sudo systemctl enable --now halden halden-update-request.path
 halden status
 ```
+
+With Docker: see [docs/DOCKER.md](docs/DOCKER.md).
 
 `halden setup` creates the config (`/etc/halden/config.toml`), the data folder
 (`/var/lib/halden`, best on the system SSD), the library folder for your photos (best on the big
@@ -79,6 +89,14 @@ sudo systemctl restart halden
 Every original, conversion and database backup is then copied there in the same readable
 layout and checked by its SHA-256. If the disk is unplugged, Halden waits and catches up when it
 is back.
+
+### Updates
+
+The server looks for a new version once a day and the app shows it; installing always waits for
+you (`sudo halden update`, or Install in the app). Every release is signed by the owner of Halden,
+and nothing unsigned or older is ever installed. Before swapping, the database is backed up and
+the new version tests itself on a copy of it; if it doesn't answer after the restart, the old
+version and its database come back. Details: [docs/UPDATE_SIGNING.md](docs/UPDATE_SIGNING.md).
 
 ### Find it in the home network
 
@@ -120,6 +138,9 @@ until someone confirms it.
 | `halden config list` | Show every setting with its value and what it does |
 | `halden config get\|set\|reset <setting> [value]` | Read or change one setting |
 | `halden doctor [--files]` | Check everything and say how to fix what's wrong; `--files` reads every file back |
+| `halden update [--check] [--yes]` | Look for a new version and install it (signed, with a way back) |
+| `halden update --beta on\|off` | Also install test versions |
+| `halden health` | Exit 0 when the running server answers |
 
 ### Settings
 
@@ -183,6 +204,8 @@ compressed, and background work runs at the lowest priority. `cargo run --releas
 
 - [Protocol](docs/PROTOCOL.md): the HTTP API the apps use
 - [Security model](docs/SECURITY_MODEL.md): what is protected, how, and the limits
+- [Docker](docs/DOCKER.md): running the server in a container
+- [Releasing](docs/RELEASING.md) and [update signing](docs/UPDATE_SIGNING.md)
 
 ### Develop
 

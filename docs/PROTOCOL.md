@@ -668,3 +668,29 @@ apply are left out.
 ### `POST /admin/restart`
 
 Starts the server again (`202`). Written to the security log.
+
+### `GET /admin/update`
+
+```json
+{ "running": "0.1.0", "state": "available", "installed": "0.1.0", "latest": "0.2.0",
+  "prerelease": false, "notesUrl": "https://github.com/…/releases/tag/server-v0.2.0",
+  "checkedAt": 1795443730000, "message": null,
+  "inDocker": false, "canInstall": true }
+```
+
+`state`: `unknown` (not checked yet), `upToDate`, `available`, `installing`, `installed`,
+`failed` (nothing was changed; `message` says why), `rolledBack` (the new version didn't start,
+the old one and its database are back). The server checks once a day by itself. When
+`canInstall` is false, `installHint` says what to do instead (in Docker: pull the new image).
+
+### `POST /admin/update/check`
+
+Looks now; answers like `GET /admin/update`.
+
+### `POST /admin/update/install`
+
+`{"currentPassword": "…"}`. Only when `state` is `available` (else `409 no_update`) and
+`canInstall` (else `409 update_unavailable`). Leaves a request for the server's root updater,
+which installs the newest signed version: `202` with the status, then `state` goes to
+`installing` and on to `installed` (the server restarts) or `failed`/`rolledBack`. Written to
+the security log (`update_requested`).

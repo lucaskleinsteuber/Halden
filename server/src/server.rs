@@ -130,6 +130,7 @@ pub struct RunningServer {
     task: JoinHandle<io::Result<()>>,
     tidying: JoinHandle<()>,
     backing_up: JoinHandle<()>,
+    checking_updates: Option<JoinHandle<()>>,
     workers: jobs::Workers,
     activity: Activity,
     bonjour: Option<crate::bonjour::Announcement>,
@@ -149,6 +150,9 @@ impl RunningServer {
         self.handle.graceful_shutdown(Some(grace));
         self.tidying.abort();
         self.backing_up.abort();
+        if let Some(checking) = &self.checking_updates {
+            checking.abort();
+        }
         self.workers.stop();
         let served = self.task.await;
         // Upload writers and photo decoding run on their own threads; the next server must not
@@ -234,6 +238,9 @@ pub async fn start_on(
     let task = tokio::spawn(async move { server.serve(app).await });
     let tidying = tokio::spawn(keep_tidy(pool.clone(), config.clone(), uploads));
     let backing_up = tokio::spawn(keep_backed_up(pool, config.clone(), backup_status, wake));
+    let checking_updates = (config.update.check_daily
+        && std::env::var_os("HALDEN_NO_UPDATE_CHECK").is_none())
+    .then(|| tokio::spawn(keep_up_to_date(config.clone())));
     let bonjour = if config.network.bonjour {
         let name = config.server.name.clone();
         let port = addr.port();
@@ -254,6 +261,7 @@ pub async fn start_on(
         task,
         tidying,
         backing_up,
+        checking_updates,
         workers,
         activity,
         bonjour,
@@ -519,6 +527,30 @@ pub async fn back_up(
         );
     }
     status.set(current);
+}
+
+/// Looks for a new version 20 minutes after the start (at a random minute within the next hour,
+/// so not every server asks GitHub at once), then once a day. Installing waits for the owner.
+async fn keep_up_to_date(config: Config) {
+    let first = Duration::from_secs(20 * 60 + rand::random::<u64>() % 3600);
+    tokio::time::sleep(first).await;
+    loop {
+        match crate::update::check(&crate::update::Source::official(), config.update.beta).await {
+            Ok(found) => {
+                crate::update::install::checked(&config, found.as_ref());
+                if let Some(found) = found {
+                    tracing::info!(version = %found.version, "a new version of Halden is available");
+                }
+            }
+            Err(error) => {
+                tracing::warn!(
+                    error = format!("{error:#}"),
+                    "could not look for a new version"
+                )
+            }
+        }
+        tokio::time::sleep(Duration::from_secs(24 * 60 * 60)).await;
+    }
 }
 
 async fn keep_tidy(pool: db::Db, config: Config, uploads: std::sync::Arc<Uploads>) {

@@ -36,6 +36,7 @@ pub enum Event {
     UserDeleted,
     SettingsChanged,
     ServerRestarted,
+    UpdateRequested,
 }
 
 impl Event {
@@ -65,6 +66,7 @@ impl Event {
             Self::UserDeleted => "user_deleted",
             Self::SettingsChanged => "settings_changed",
             Self::ServerRestarted => "server_restarted",
+            Self::UpdateRequested => "update_requested",
         }
     }
 }

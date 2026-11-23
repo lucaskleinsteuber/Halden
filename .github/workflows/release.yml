@@ -1,0 +1,99 @@
+name: Release
+
+# Builds a server release when a tag server-v<version> is pushed, and leaves it as a DRAFT on
+# GitHub with its packages and SHA256SUMS. Nothing is published here: the owner signs SHA256SUMS
+# on their Mac and publishes with scripts/publish-release.sh (see docs/RELEASING.md), so the
+# signing key never comes near GitHub. Run by hand (workflow_dispatch), it builds everything as a
+# dry run and keeps the packages as workflow artifacts only.
+
+on:
+  push:
+    tags: ["server-v*"]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version for the dry run, like 0.0.1"
+        required: true
+        default: "0.0.1"
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - arch: x86_64
+            runner: ubuntu-22.04
+          - arch: aarch64
+            runner: ubuntu-22.04-arm
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Version
+        id: version
+        run: |
+          if [ "${{ github.event_name }}" = push ]; then
+            version="${GITHUB_REF_NAME#server-v}"
+          else
+            version="${{ inputs.version }}"
+          fi
+          echo "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$' \
+            || { echo "not a version: $version" >&2; exit 1; }
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: server
+      - name: Build
+        working-directory: server
+        env:
+          HALDEN_BUILD_VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          cargo build --release --locked
+          ./target/release/halden --version | grep -qx "halden ${{ steps.version.outputs.version }}"
+      - name: Package
+        run: |
+          folder="halden-${{ steps.version.outputs.version }}-${{ matrix.arch }}-linux"
+          mkdir -p "dist/$folder/systemd"
+          cp server/target/release/halden "dist/$folder/"
+          cp packaging/linux/install.sh "dist/$folder/"
+          cp packaging/systemd/halden*.service packaging/systemd/halden*.path "dist/$folder/systemd/"
+          cp LICENSE README.md "dist/$folder/"
+          tar -C dist -czf "dist/$folder.tar.gz" --owner=0 --group=0 "$folder"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: package-${{ matrix.arch }}
+          path: dist/*.tar.gz
+
+  draft:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: package-*
+          merge-multiple: true
+          path: dist
+      - name: Checksums
+        working-directory: dist
+        run: sha256sum *.tar.gz > SHA256SUMS && cat SHA256SUMS
+      - name: Draft release
+        if: github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version="${GITHUB_REF_NAME#server-v}"
+          flags=(--draft --title "Halden server $version" --notes "Signed and published by the owner; see CHANGELOG.md.")
+          case "$version" in *-*) flags+=(--prerelease) ;; esac
+          gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" "${flags[@]}" dist/*.tar.gz dist/SHA256SUMS
+      - name: Keep the dry run's packages
+        if: github.event_name != 'push'
+        uses: actions/upload-artifact@v4
+        with:
+          name: dry-run
+          path: dist/

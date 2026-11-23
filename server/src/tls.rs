@@ -185,6 +185,88 @@ pub fn server_config(config: &Config) -> Result<(Arc<ServerConfig>, Fingerprint)
     Ok((Arc::new(server), fingerprint))
 }
 
+/// A client that trusts exactly one certificate, by its fingerprint, like the apps do. Used to
+/// ask the local server whether it is up (after an update).
+pub fn pinned_client(fingerprint: Fingerprint) -> Result<reqwest::Client> {
+    #[derive(Debug)]
+    struct Pinned {
+        expected: [u8; 32],
+        provider: Arc<rustls::crypto::CryptoProvider>,
+    }
+    use rustls::{
+        DigitallySignedStruct, SignatureScheme,
+        client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier},
+        pki_types::{ServerName, UnixTime},
+    };
+    impl ServerCertVerifier for Pinned {
+        fn verify_server_cert(
+            &self,
+            end_entity: &CertificateDer<'_>,
+            _intermediates: &[CertificateDer<'_>],
+            _server_name: &ServerName<'_>,
+            _ocsp_response: &[u8],
+            _now: UnixTime,
+        ) -> Result<ServerCertVerified, rustls::Error> {
+            if Fingerprint::of(end_entity).0 == self.expected {
+                Ok(ServerCertVerified::assertion())
+            } else {
+                Err(rustls::Error::General(
+                    "certificate fingerprint mismatch".into(),
+                ))
+            }
+        }
+
+        fn verify_tls12_signature(
+            &self,
+            message: &[u8],
+            cert: &CertificateDer<'_>,
+            dss: &DigitallySignedStruct,
+        ) -> Result<HandshakeSignatureValid, rustls::Error> {
+            rustls::crypto::verify_tls12_signature(
+                message,
+                cert,
+                dss,
+                &self.provider.signature_verification_algorithms,
+            )
+        }
+
+        fn verify_tls13_signature(
+            &self,
+            message: &[u8],
+            cert: &CertificateDer<'_>,
+            dss: &DigitallySignedStruct,
+        ) -> Result<HandshakeSignatureValid, rustls::Error> {
+            rustls::crypto::verify_tls13_signature(
+                message,
+                cert,
+                dss,
+                &self.provider.signature_verification_algorithms,
+            )
+        }
+
+        fn supported_verify_schemes(&self) -> Vec<SignatureScheme> {
+            self.provider
+                .signature_verification_algorithms
+                .supported_schemes()
+        }
+    }
+    let provider = Arc::new(rustls::crypto::ring::default_provider());
+    let mut tls = rustls::ClientConfig::builder_with_provider(provider.clone())
+        .with_protocol_versions(&[&rustls::version::TLS13])?
+        .dangerous()
+        .with_custom_certificate_verifier(Arc::new(Pinned {
+            expected: fingerprint.0,
+            provider,
+        }))
+        .with_no_client_auth();
+    tls.alpn_protocols = vec![b"h2".to_vec(), b"http/1.1".to_vec()];
+    reqwest::Client::builder()
+        .tls_backend_preconfigured(tls)
+        .timeout(std::time::Duration::from_secs(5))
+        .build()
+        .context("could not set up the HTTP client")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
