@@ -273,11 +273,12 @@ impl Api {
     pub async fn restarted_after(&mut self, generation: u64) -> u64 {
         let supervisor = self.server.supervisor();
         tokio::time::timeout(
-            Duration::from_secs(20),
+            Duration::from_secs(30),
             supervisor.restarted_after(generation),
         )
         .await
-        .expect("the server did not restart")
+        .expect("the server did not restart in time")
+        .unwrap_or_else(|error| panic!("the server stopped instead of restarting: {error:#}"))
         .number
     }
 

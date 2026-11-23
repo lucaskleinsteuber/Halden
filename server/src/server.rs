@@ -137,6 +137,7 @@ pub struct RunningServer {
     workers: jobs::Workers,
     activity: Activity,
     bonjour: Option<crate::bonjour::Announcement>,
+    db: db::Db,
     _lock: crate::fsutil::DataLock,
 }
 
@@ -151,13 +152,18 @@ impl RunningServer {
             let _ = tokio::task::spawn_blocking(move || announcement.stop()).await;
         }
         self.handle.graceful_shutdown(Some(grace));
-        self.tidying.abort();
-        self.backing_up.abort();
-        if let Some(checking) = &self.checking_updates {
-            checking.abort();
+        let mut background = vec![self.tidying, self.backing_up];
+        background.extend(self.checking_updates);
+        for task in &background {
+            task.abort();
         }
-        self.workers.stop();
         let served = self.task.await;
+        // Everything that could still hold the database (a tidy-up cut off in its transaction)
+        // is really gone before the next server opens it.
+        for task in background {
+            let _ = task.await;
+        }
+        self.workers.shutdown().await;
         // Upload writers and photo decoding run on their own threads; the next server must not
         // start on the same files while they still write.
         if !self.activity.wait_idle(WORK_GRACE).await {
@@ -166,6 +172,7 @@ impl RunningServer {
                 "background work did not finish in time"
             );
         }
+        self.db.close().await;
         served
             .context("the server task failed")?
             .context("the server stopped with an error")
@@ -184,8 +191,24 @@ pub async fn start_on(
     listener: TcpListener,
     control: Control,
 ) -> Result<RunningServer> {
+    start_inner(config, listener, control, false).await
+}
+
+/// `again`: the server starts again in this process, so it waits a moment for the one before
+/// to let go of the data folder.
+async fn start_inner(
+    config: &Config,
+    listener: TcpListener,
+    control: Control,
+    again: bool,
+) -> Result<RunningServer> {
     config.validate()?;
-    let lock = crate::fsutil::lock_data_dir(&config.storage.data_dir)?;
+    let lock = if again {
+        crate::fsutil::lock_data_dir_waiting(&config.storage.data_dir, Duration::from_secs(10))
+            .await?
+    } else {
+        crate::fsutil::lock_data_dir(&config.storage.data_dir)?
+    };
     let (tls_config, fingerprint) = tls::server_config(config)?;
     let pool = db::Db::open(&config.db_path()).await?;
     if let Err(error) = pool.optimize().await {
@@ -256,6 +279,7 @@ pub async fn start_on(
         .handle(handle.clone());
     tune_http(&mut server);
     let task = tokio::spawn(async move { server.serve(app).await });
+    let pool_for_stop = pool.clone();
     let tidying = tokio::spawn(keep_tidy(pool.clone(), config.clone(), uploads));
     let backing_up = tokio::spawn(keep_backed_up(pool, config.clone(), backup_status, wake));
     let checking_updates = (config.update.check_daily
@@ -285,6 +309,7 @@ pub async fn start_on(
         workers,
         activity,
         bonjour,
+        db: pool_for_stop,
         _lock: lock,
     })
 }
@@ -302,7 +327,8 @@ pub struct Generation {
 /// documentation.
 pub struct Supervisor {
     stop: Option<oneshot::Sender<()>>,
-    task: JoinHandle<Result<()>>,
+    /// `None` once its end was collected.
+    task: Option<JoinHandle<Result<()>>>,
     generation: watch::Receiver<Generation>,
     control: Control,
 }
@@ -336,7 +362,7 @@ impl Supervisor {
         }));
         Ok(Self {
             stop: Some(stop),
-            task,
+            task: Some(task),
             generation,
             control,
         })
@@ -350,17 +376,29 @@ impl Supervisor {
         &self.control
     }
 
-    /// Waits until the server has restarted past generation `after`.
-    pub async fn restarted_after(&mut self, after: u64) -> Generation {
-        let _ = self.generation.wait_for(|g| g.number > after).await;
-        self.current()
+    /// Waits until the server has restarted past generation `after`. An error says why it
+    /// stopped instead.
+    pub async fn restarted_after(&mut self, after: u64) -> Result<Generation> {
+        if self.generation.wait_for(|g| g.number > after).await.is_ok() {
+            return Ok(self.current());
+        }
+        match self.task.take() {
+            Some(task) => match task.await.context("the server task failed")? {
+                Ok(()) => anyhow::bail!("the server stopped"),
+                Err(error) => Err(error),
+            },
+            None => anyhow::bail!("the server stopped"),
+        }
     }
 
     pub async fn stop(mut self) -> Result<()> {
         if let Some(stop) = self.stop.take() {
             let _ = stop.send(());
         }
-        self.task.await.context("the server task failed")?
+        match self.task.take() {
+            Some(task) => task.await.context("the server task failed")?,
+            None => Ok(()),
+        }
     }
 }
 
@@ -438,8 +476,10 @@ async fn restart(s: &mut Supervised, mut next: Config) -> Result<()> {
     tracing::info!("starting again with the changed settings");
     let old = std::mem::replace(&mut s.config, next.clone());
     // The old server is fully stopped before the next one opens the database.
-    if let Some(running) = s.server.take() {
-        running.stop(RESTART_GRACE).await?;
+    if let Some(running) = s.server.take()
+        && let Err(error) = running.stop(RESTART_GRACE).await
+    {
+        tracing::warn!(error = format!("{error:#}"), "the server stopped with an error");
     }
     if (next.server.bind, next.server.port) != (old.server.bind, old.server.port) {
         match bind(next.server.bind, next.server.port) {
@@ -452,7 +492,7 @@ async fn restart(s: &mut Supervised, mut next: Config) -> Result<()> {
             }
         }
     }
-    let started = match start_on(&next, s.listener.try_clone()?, s.control.clone()).await {
+    let started = match start_inner(&next, s.listener.try_clone()?, s.control.clone(), true).await {
         Ok(started) => started,
         Err(error) => {
             let problem = format!("{error:#}");
@@ -462,7 +502,7 @@ async fn restart(s: &mut Supervised, mut next: Config) -> Result<()> {
             );
             s.control.set_problem(Some(problem));
             next = old;
-            start_on(&next, s.listener.try_clone()?, s.control.clone()).await?
+            start_again(&next, s).await?
         }
     };
     s.config = next;
@@ -474,6 +514,29 @@ async fn restart(s: &mut Supervised, mut next: Config) -> Result<()> {
     });
     s.server = Some(started);
     Ok(())
+}
+
+/// Starts with settings that worked before. A start can fail for a moment (the disk is busy);
+/// it is tried a few times before the process gives up (and systemd starts it anew).
+async fn start_again(config: &Config, s: &Supervised) -> Result<RunningServer> {
+    let mut wait = Duration::from_millis(500);
+    let mut attempt = 1;
+    loop {
+        match start_inner(config, s.listener.try_clone()?, s.control.clone(), true).await {
+            Ok(started) => return Ok(started),
+            Err(error) if attempt < 5 => {
+                tracing::warn!(
+                    error = format!("{error:#}"),
+                    attempt,
+                    "could not start again; trying once more"
+                );
+                tokio::time::sleep(wait).await;
+                wait *= 2;
+                attempt += 1;
+            }
+            Err(error) => return Err(error),
+        }
+    }
 }
 
 /// HTTP/2 as the apps use it: one connection carries hundreds of thumbnail requests at once, and

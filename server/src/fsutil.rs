@@ -111,6 +111,21 @@ pub fn lock_data_dir(data_dir: &Path) -> Result<DataLock> {
     }
 }
 
+/// Like [`lock_data_dir`], but waits up to `wait` for the lock: for a server that starts again
+/// in the same process, while the one before is still letting go.
+pub async fn lock_data_dir_waiting(data_dir: &Path, wait: std::time::Duration) -> Result<DataLock> {
+    let deadline = std::time::Instant::now() + wait;
+    loop {
+        match lock_data_dir(data_dir) {
+            Ok(lock) => return Ok(lock),
+            Err(_) if std::time::Instant::now() < deadline => {
+                tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+            }
+            Err(error) => return Err(error),
+        }
+    }
+}
+
 /// Flushes a folder's entries (new, renamed or removed files) to disk.
 pub fn sync_dir(dir: &Path) -> Result<()> {
     File::open(dir)

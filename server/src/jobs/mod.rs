@@ -209,6 +209,18 @@ impl Workers {
             task.abort();
         }
     }
+
+    /// Stops the workers and waits until they have let go of everything (a job cut off in the
+    /// middle runs again at the next start).
+    pub async fn shutdown(mut self) {
+        let tasks = std::mem::take(&mut self.tasks);
+        for task in &tasks {
+            task.abort();
+        }
+        for task in tasks {
+            let _ = task.await;
+        }
+    }
 }
 
 impl Drop for Workers {

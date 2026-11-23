@@ -130,6 +130,11 @@ There are no version numbers yet; entries are grouped by date until the first re
 
 ### Fixed
 
+- Server: under heavy load, starting again with changed settings could fail for a moment and
+  fall back to the old settings (the previous server still held the data folder and the
+  database). Stopping now waits for every background task and closes the database, a restart
+  waits briefly for the data folder, and a failed start is tried again instead of ending the
+  process. Found by running the settings tests 30 times under full load.
 - Server: a photo deleted for good could still be corrected (title, place, time), which put
   details back into its tombstone. Tombstones can't be changed any more. Found by the new model
   test.

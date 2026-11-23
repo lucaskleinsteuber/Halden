@@ -20,7 +20,7 @@ async fn owner(api: &Api) -> String {
 }
 
 async fn wait_for(path: &Path) {
-    for _ in 0..300 {
+    for _ in 0..1200 {
         if path.exists() {
             return;
         }
@@ -81,7 +81,8 @@ async fn the_mirror_gets_a_checked_copy_of_every_original() {
     wait_for(&copy).await;
     assert_eq!(std::fs::read(&copy).unwrap(), data);
     let db = Db::open(&api.config.db_path()).await.unwrap();
-    for _ in 0..100 {
+    // Generous: the copy is read back and checked, which takes a while on a busy machine.
+    for _ in 0..1200 {
         if mirror::waiting(&db).await.unwrap() == 0 {
             break;
         }
@@ -106,7 +107,7 @@ async fn the_mirror_gets_a_checked_copy_of_every_original() {
     api.upload(&token, &later, &random_bytes(1000), "image/heic", json!({}))
         .await;
     let mut error = None;
-    for _ in 0..100 {
+    for _ in 0..1200 {
         let found: Option<(Option<String>,)> =
             sqlx::query_as("SELECT last_error FROM jobs WHERE kind = 'mirror' AND asset_id = ?")
                 .bind(&later)
