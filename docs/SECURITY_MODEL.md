@@ -21,6 +21,22 @@ household, a few accounts, a handful of devices each.
   password, deleting accounts, making a pairing code for another account) need the owner's own
   password again, so a borrowed phone that is signed in isn't enough.
 
+## Settings from the app
+
+Owners can change the server's settings in the app. Three kinds:
+
+- **Terminal only**: folders, port, listening address and certificate. A wrong value would lock
+  the apps out, so the API refuses them.
+- **With the password again**: everything that opens the server up or can delete data:
+  internet access, allowed networks, Bonjour, password sign-in, how long devices stay signed in,
+  how long the security log and the trash are kept, the mirror, updates.
+- **Owner**: the rest (names, job settings, delays).
+
+Every change is written to the security log. The server saves settings by replacing its config
+file, so under systemd it may write to `/etc/halden` (and nowhere else in `/etc`); `halden setup`
+gives that folder to the server's group. A config file that doesn't parse or doesn't make sense
+is never used: the server keeps its previous settings.
+
 **Honest limit:** an owner can reset a member's password or pair a device into a member's
 account, and whoever has root on the server can read every file on its disks. Privacy between
 accounts is an access rule, not encryption. These actions are always written to the security log

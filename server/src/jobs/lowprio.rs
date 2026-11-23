@@ -13,10 +13,12 @@ type Work = Box<dyn FnOnce() + Send>;
 
 pub struct LowPriority {
     queue: Mutex<mpsc::Sender<Work>>,
+    activity: crate::activity::Activity,
 }
 
 impl LowPriority {
-    pub fn new(threads: usize) -> Self {
+    /// Work counts as busy in `activity` until it is done, even if whoever waited for it gave up.
+    pub fn new(threads: usize, activity: crate::activity::Activity) -> Self {
         let (sender, receiver) = mpsc::channel::<Work>();
         let receiver = Arc::new(Mutex::new(receiver));
         for n in 0..threads.max(1) {
@@ -47,6 +49,7 @@ impl LowPriority {
         }
         Self {
             queue: Mutex::new(sender),
+            activity,
         }
     }
 
@@ -56,7 +59,9 @@ impl LowPriority {
         work: impl FnOnce() -> R + Send + 'static,
     ) -> Option<R> {
         let (done, result) = tokio::sync::oneshot::channel();
+        let busy = self.activity.busy();
         let job: Work = Box::new(move || {
+            let _busy = busy;
             let _ = done.send(work());
         });
         self.queue.lock().ok()?.send(job).ok()?;
@@ -70,9 +75,11 @@ mod tests {
 
     #[tokio::test]
     async fn runs_work_and_survives_panics() {
-        let pool = LowPriority::new(2);
+        let activity = crate::activity::Activity::default();
+        let pool = LowPriority::new(2, activity.clone());
         assert_eq!(pool.run(|| 6 * 7).await, Some(42));
         assert_eq!(pool.run(|| -> u8 { panic!("broken photo") }).await, None);
         assert_eq!(pool.run(|| "still here").await, Some("still here"));
+        assert_eq!(activity.count(), 0);
     }
 }

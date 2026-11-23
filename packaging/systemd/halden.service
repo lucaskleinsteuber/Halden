@@ -7,8 +7,9 @@
 #   sudo install -m 644 halden.service /etc/systemd/system/halden.service
 #   sudo systemctl daemon-reload && sudo systemctl enable --now halden
 #
-# If your library is not under /srv/halden, or you set up a mirror (`halden mirror set`), add
-# those folders to ReadWritePaths below (or in `sudo systemctl edit halden`).
+# If your library is not under /srv/halden, or your mirror (`halden mirror set`) is not under
+# /mnt or /media, add those folders to ReadWritePaths below (or in `sudo systemctl edit halden`).
+# `halden doctor` checks this.
 
 [Unit]
 Description=Halden photo server
@@ -22,13 +23,16 @@ Type=simple
 User=halden
 Group=halden
 ExecStart=/usr/local/bin/halden --config /etc/halden/config.toml serve
+# The server notices a changed config file by itself; this only makes it look right away.
+ExecReload=/bin/kill -HUP $MAINPID
 Restart=on-failure
 RestartSec=3
 TimeoutStopSec=20
 UMask=0027
 
 # Only these folders are writable; everything else on the system is read-only for Halden.
-ReadWritePaths=/var/lib/halden /srv/halden
+# /etc/halden: settings changed in the app. /mnt and /media: where a mirror disk is mounted.
+ReadWritePaths=/var/lib/halden /srv/halden -/etc/halden -/mnt -/media
 
 # Hardening: no root, no new privileges, no access to other users or devices.
 NoNewPrivileges=yes

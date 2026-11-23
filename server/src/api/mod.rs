@@ -7,6 +7,7 @@ mod devices;
 mod error;
 mod extract;
 mod library;
+mod manage;
 mod uploads;
 
 use std::{path::PathBuf, sync::Arc, time::Duration};
@@ -66,6 +67,9 @@ struct Inner {
     wake: Arc<tokio::sync::Notify>,
     mirror_dir: Option<PathBuf>,
     backup_status: Arc<crate::backup::mirror::StatusCell>,
+    control: crate::server::Control,
+    /// The settings this server runs with.
+    config: Config,
 }
 
 /// What the running server hands to the API.
@@ -78,6 +82,7 @@ pub struct Services {
     pub uploads: Arc<Uploads>,
     pub wake: Arc<tokio::sync::Notify>,
     pub backup_status: Arc<crate::backup::mirror::StatusCell>,
+    pub control: crate::server::Control,
 }
 
 impl AppState {
@@ -97,10 +102,24 @@ impl AppState {
             wake: services.wake,
             mirror_dir: config.mirror.path.clone(),
             backup_status: services.backup_status,
+            control: services.control,
+            config: config.clone(),
         }))
     }
 
-    pub fn uploads(&self) -> &Uploads {
+    pub fn control(&self) -> &crate::server::Control {
+        &self.0.control
+    }
+
+    pub fn config(&self) -> &Config {
+        &self.0.config
+    }
+
+    pub fn server_id(&self) -> Uuid {
+        self.0.server_id
+    }
+
+    pub fn uploads(&self) -> &Arc<Uploads> {
         &self.0.uploads
     }
 
@@ -198,6 +217,25 @@ pub fn router(state: AppState) -> Router {
             get(library::suggestion),
         )
         .route("/api/v1/sync", get(library::changes))
+        .route("/api/v1/admin/status", get(manage::status))
+        .route(
+            "/api/v1/admin/config",
+            get(manage::config).patch(manage::change_config),
+        )
+        .route(
+            "/api/v1/admin/backups",
+            get(manage::backups).post(manage::back_up_now),
+        )
+        .route(
+            "/api/v1/admin/mirror",
+            get(manage::mirror)
+                .put(manage::set_mirror)
+                .delete(manage::mirror_off),
+        )
+        .route("/api/v1/admin/jobs", get(manage::jobs))
+        .route("/api/v1/admin/jobs/retry", post(manage::retry_jobs))
+        .route("/api/v1/admin/doctor", get(manage::doctor))
+        .route("/api/v1/admin/restart", post(manage::restart))
         .layer(
             CompressionLayer::new()
                 .gzip(true)

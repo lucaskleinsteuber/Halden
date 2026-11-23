@@ -111,11 +111,17 @@ until someone confirms it.
 | `halden backup now\|list` | Back up the database now, or list the backups |
 | `halden backup restore <file>` | Put a backup in place of the database (server stopped) |
 | `halden mirror set <folder>\|off\|status` | Mirror everything to a second disk |
+| `halden config list` | Show every setting with its value and what it does |
+| `halden config get\|set\|reset <setting> [value]` | Read or change one setting |
+| `halden doctor [--files]` | Check everything and say how to fix what's wrong; `--files` reads every file back |
 
 ### Settings
 
-Everything lives in `/etc/halden/config.toml`; every key is optional. Restart the server after
-changes. Besides `[server]`, `[network]` and `[tls]`:
+Everything lives in `/etc/halden/config.toml`; every key is optional. Change settings with
+`halden config set <setting> <value>` (comments in the file stay) or in the app; the server
+picks up changes by itself within a few seconds, without stopping. A file with a mistake is not
+used: the server keeps its settings and `halden doctor` says what's wrong. Besides `[server]`,
+`[network]` and `[tls]`:
 
 ```toml
 [storage]
@@ -145,7 +151,17 @@ device_inactive_days = 365   # sign out devices unused this long (0 = never)
 
 [security]
 log_retention_days = 90      # keep security log entries this long (0 = forever)
+
+[network]
+bonjour = true               # announce the server in the home network
+
+[update]
+check_daily = true           # look for a new version once a day; installing waits for you
+beta = false                 # also offer test versions
 ```
+
+The app can change every setting except folders, port and certificate; settings that open the
+server up or can delete data need your password again.
 
 ### Speed
 

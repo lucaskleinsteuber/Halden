@@ -250,13 +250,14 @@ mod tests {
         let extra = NetworkPolicy::from_config(&NetworkConfig {
             allow_public: false,
             allowed_networks: vec!["203.0.113.0/24".parse().unwrap()],
+            ..NetworkConfig::default()
         });
         assert!(extra.allows(ip("203.0.113.9")));
         assert!(!extra.allows(ip("203.0.114.9")));
 
         let open = NetworkPolicy::from_config(&NetworkConfig {
             allow_public: true,
-            allowed_networks: vec![],
+            ..NetworkConfig::default()
         });
         assert!(open.allows(ip("8.8.8.8")));
     }

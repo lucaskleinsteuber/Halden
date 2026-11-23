@@ -38,10 +38,12 @@ thread-priority = "3.1.1"
 tokio = { version = "1.54.1", features = ["rt-multi-thread", "macros", "net", "signal", "fs", "time", "sync", "process", "io-util"] }
 tokio-util = { version = "0.7.20", features = ["io"] }
 toml = "1.2.2"
+toml_edit = "0.25.20"
 tower-http = { version = "0.7.1", features = ["timeout", "trace", "compression-gzip", "compression-br"] }
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
 uuid = { version = "1.29.3", features = ["v4", "serde"] }
+x509-parser = { version = "0.18.1", default-features = false }
 
 # On Linux, mimalloc returns freed memory to the system quickly and avoids the fragmentation
 # glibc's allocator shows in long-running, many-threaded servers. On macOS the system allocator

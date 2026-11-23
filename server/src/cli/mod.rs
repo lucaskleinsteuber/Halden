@@ -4,7 +4,9 @@
 //! so they also work while the server is stopped.
 
 mod backup;
+mod config;
 mod devices;
+mod doctor;
 mod log;
 mod mirror;
 mod pair;
@@ -67,6 +69,11 @@ enum Command {
     /// The mirror: a second copy of everything on another disk.
     #[command(subcommand)]
     Mirror(mirror::MirrorCommand),
+    /// Show and change settings; the server picks up changes by itself.
+    #[command(subcommand)]
+    Config(config::ConfigCommand),
+    /// Check the server and say how to fix what's wrong.
+    Doctor(doctor::DoctorArgs),
 }
 
 #[derive(Args)]
@@ -130,13 +137,15 @@ async fn run(cli: Cli) -> Result<()> {
     match cli.command {
         Command::Setup(args) => run_setup(&cli.config, args).await,
         Command::Status => run_status(&cli.config).await,
-        Command::Serve => server::run(Config::load(&cli.config)?).await,
+        Command::Serve => server::run(&cli.config).await,
         Command::User(command) => user::run(&cli.config, command).await,
         Command::Pair(args) => pair::run(&cli.config, args).await,
         Command::Devices(args) => devices::run(&cli.config, args).await,
         Command::Log(args) => log::run(&cli.config, args).await,
         Command::Backup(command) => backup::run(&cli.config, command).await,
         Command::Mirror(command) => mirror::run(&cli.config, command).await,
+        Command::Config(command) => config::run(&cli.config, command).await,
+        Command::Doctor(args) => doctor::run(&cli.config, args).await,
     }
 }
 

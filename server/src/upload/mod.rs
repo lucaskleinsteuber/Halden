@@ -249,6 +249,7 @@ pub struct Uploads {
     wake: Arc<tokio::sync::Notify>,
     /// Copy finished uploads to the mirror.
     mirror: bool,
+    activity: crate::activity::Activity,
 }
 
 impl Uploads {
@@ -256,6 +257,7 @@ impl Uploads {
         config: &Config,
         wake: Arc<tokio::sync::Notify>,
         placing: Arc<tokio::sync::Mutex<()>>,
+        activity: crate::activity::Activity,
     ) -> anyhow::Result<Self> {
         let template = PathTemplate::parse(&config.storage.path_template)
             .map_err(|problem| anyhow::anyhow!("storage.path_template: {problem}"))?;
@@ -273,6 +275,7 @@ impl Uploads {
             thumbnail_delay_ms: i64::from(config.jobs.thumbnail_delay_minutes) * 60_000,
             wake,
             mirror: config.mirror.path.is_some(),
+            activity,
         })
     }
 
@@ -530,7 +533,7 @@ impl Uploads {
     /// `PATCH /uploads/{id}`: appends the body at `offset`. Finishes the upload when its last
     /// byte arrives. `POST /uploads/{id}/complete` calls this with an empty body.
     pub async fn receive(
-        &self,
+        self: &Arc<Self>,
         db: &Db,
         user: &User,
         id: &str,
@@ -566,7 +569,8 @@ impl Uploads {
         let mut end = BodyEnd::Complete;
         if remaining > 0 {
             let hasher = slot.hasher.take().unwrap_or_default();
-            let appended = store::append(part.clone(), hasher, body, remaining).await;
+            let appended =
+                store::append(part.clone(), hasher, body, remaining, &self.activity).await;
             slot.hasher = appended.hasher;
             end = appended.end;
             if let Some(error) = appended.error {
@@ -592,10 +596,22 @@ impl Uploads {
             return Ok(UploadState::Receiving(self.progress(&row, slot.received)));
         }
         let hasher = slot.hasher.take().unwrap_or_default();
-        let result = finalize::finish(self, db, user, &row, hasher).await;
-        // Whatever the outcome, this upload needs no memory any more.
-        drop(slot);
-        self.forget(uuid);
+        // Finishing runs on its own task: if the phone hangs up or the server restarts right
+        // now, the file still ends up either fully recorded in the library or back where it
+        // was, never in between.
+        let uploads = Arc::clone(self);
+        let (db, user) = (db.clone(), user.clone());
+        let finishing = tokio::spawn(async move {
+            let _busy = uploads.activity.busy();
+            let result = finalize::finish(&uploads, &db, &user, &row, hasher).await;
+            // Whatever the outcome, this upload needs no memory any more.
+            drop(slot);
+            uploads.forget(uuid);
+            result
+        });
+        let result = finishing
+            .await
+            .map_err(|join| UploadError::Io(std::io::Error::other(join.to_string())))?;
         match result {
             Ok(asset) => Ok(UploadState::Completed {
                 asset: Box::new(asset),

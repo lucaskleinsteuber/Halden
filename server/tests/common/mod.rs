@@ -2,15 +2,25 @@
 //! iPhone app), and a real server in a temporary folder.
 #![allow(dead_code)]
 
-use std::{path::Path, sync::Arc};
+use std::{
+    net::SocketAddr,
+    path::{Path, PathBuf},
+    sync::Arc,
+    time::Duration,
+};
 
 use halden::{
     accounts::{self, NewUser, Role, User},
     auth::password,
-    config::Config,
+    config::{
+        Config,
+        edit::{self, Change},
+        keys,
+    },
     db,
-    server::{self, RunningServer},
+    server::{self, RunningServer, Supervisor},
     setup::{self, SetupOptions},
+    tls::Fingerprint,
 };
 use reqwest::Method;
 use rustls::{
@@ -143,9 +153,39 @@ pub const ANNA_PASSWORD: &str = "anna's long password";
 /// A real server in a temporary folder, plus a client that talks to it like the app.
 pub struct Api {
     pub http: reqwest::Client,
-    pub server: RunningServer,
+    pub server: TestServer,
     pub config: Config,
+    pub config_path: PathBuf,
     pub dir: tempfile::TempDir,
+}
+
+/// The server under test: started directly, or like `halden serve` (from its config file,
+/// restarting when it changes).
+pub struct TestServer {
+    pub addr: SocketAddr,
+    pub fingerprint: Fingerprint,
+    running: Running,
+}
+
+enum Running {
+    Plain(RunningServer),
+    Supervised(Supervisor),
+}
+
+impl TestServer {
+    async fn shutdown(self) {
+        match self.running {
+            Running::Plain(server) => server.shutdown().await.unwrap(),
+            Running::Supervised(supervisor) => supervisor.stop().await.unwrap(),
+        }
+    }
+
+    pub fn supervisor(&mut self) -> &mut Supervisor {
+        match &mut self.running {
+            Running::Supervised(supervisor) => supervisor,
+            Running::Plain(_) => panic!("started without a supervisor"),
+        }
+    }
 }
 
 pub struct Reply {
@@ -172,10 +212,66 @@ impl Api {
         let http = client(*server.fingerprint.as_bytes(), &[&rustls::version::TLS13]);
         Self {
             http,
-            server,
+            server: TestServer {
+                addr: server.addr,
+                fingerprint: server.fingerprint,
+                running: Running::Plain(server),
+            },
             config,
+            config_path: dir.path().join("config.toml"),
             dir,
         }
+    }
+
+    /// Like `halden serve`: from the config file, which is checked for changes every 100 ms.
+    pub async fn start_supervised() -> Self {
+        let dir = tempfile::tempdir().unwrap();
+        let config_path = dir.path().join("config.toml");
+        setup::run(
+            &config_path,
+            SetupOptions {
+                name: Some("testbox".into()),
+                data_dir: Some(dir.path().join("data")),
+                library_dir: Some(dir.path().join("library")),
+                ..SetupOptions::default()
+            },
+        )
+        .await
+        .unwrap();
+        set_setting(&config_path, "server.bind", "127.0.0.1");
+        set_setting(&config_path, "server.port", "0");
+        let supervisor = Supervisor::start_polling(&config_path, Duration::from_millis(100))
+            .await
+            .unwrap();
+        let current = supervisor.current();
+        let http = client(*current.fingerprint.as_bytes(), &[&rustls::version::TLS13]);
+        Self {
+            http,
+            server: TestServer {
+                addr: current.addr,
+                fingerprint: current.fingerprint,
+                running: Running::Supervised(supervisor),
+            },
+            config: Config::load(&config_path).unwrap(),
+            config_path,
+            dir,
+        }
+    }
+
+    /// Waits until the supervised server restarted after `generation`; returns the new one.
+    pub async fn restarted_after(&mut self, generation: u64) -> u64 {
+        let supervisor = self.server.supervisor();
+        tokio::time::timeout(
+            Duration::from_secs(20),
+            supervisor.restarted_after(generation),
+        )
+        .await
+        .expect("the server did not restart")
+        .number
+    }
+
+    pub fn generation(&mut self) -> u64 {
+        self.server.supervisor().current().number
     }
 
     pub async fn call(
@@ -185,7 +281,7 @@ impl Api {
         token: Option<&str>,
         body: Option<Value>,
     ) -> Reply {
-        let mut request = self.http.request(method, url(&self.server, path));
+        let mut request = self.http.request(method, self.url(path));
         if let Some(token) = token {
             request = request.bearer_auth(token);
         }
@@ -264,18 +360,29 @@ impl Api {
     }
 
     pub fn url(&self, path: &str) -> String {
-        url(&self.server, path)
+        format!("https://127.0.0.1:{}{path}", self.server.addr.port())
     }
 
     /// Stops the server but keeps its folders (returned; they go when it is dropped).
     pub async fn stop_keeping_files(self) -> tempfile::TempDir {
-        self.server.shutdown().await.unwrap();
+        self.server.shutdown().await;
         self.dir
     }
 
     pub async fn stop(self) {
-        self.server.shutdown().await.unwrap();
+        self.server.shutdown().await;
     }
+}
+
+/// Changes a setting in a config file, like `halden config set`.
+pub fn set_setting(config_path: &Path, name: &str, value: &str) {
+    let key = keys::find(name).unwrap();
+    edit::change(config_path, &[(key, edit::from_text(key, value).unwrap())]).unwrap();
+}
+
+pub fn reset_setting(config_path: &Path, name: &str) {
+    let key = keys::find(name).unwrap();
+    edit::change(config_path, &[(key, Change::Reset)]).unwrap();
 }
 
 pub fn device(name: &str, installation: &str) -> Value {

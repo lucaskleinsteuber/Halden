@@ -13,6 +13,29 @@ use anyhow::{Context, Result};
 /// never a mix: the data goes to a temporary file in the same folder, is flushed to disk, and
 /// then renamed over the target. The folder is flushed too, so the rename survives a power cut.
 pub fn write_atomic(path: &Path, contents: &[u8], mode: u32) -> Result<()> {
+    write_atomic_owned(path, contents, mode, None)
+}
+
+/// Replaces an existing file atomically like [`write_atomic`], keeping its permissions and,
+/// where allowed, its owner and group (a config file written by root stays readable by the
+/// server's group, and one written by the server stays in that group).
+pub fn replace_file(path: &Path, contents: &[u8]) -> Result<()> {
+    use std::os::unix::fs::MetadataExt;
+    let old = fs::metadata(path).with_context(|| format!("could not read {}", path.display()))?;
+    write_atomic_owned(
+        path,
+        contents,
+        old.mode() & 0o7777,
+        Some((old.uid(), old.gid())),
+    )
+}
+
+fn write_atomic_owned(
+    path: &Path,
+    contents: &[u8],
+    mode: u32,
+    owner: Option<(u32, u32)>,
+) -> Result<()> {
     let dir = path
         .parent()
         .with_context(|| format!("{} has no parent folder", path.display()))?;
@@ -34,6 +57,13 @@ pub fn write_atomic(path: &Path, contents: &[u8], mode: u32) -> Result<()> {
         file.sync_all()?;
         // The mode given to open() is reduced by the umask; set it exactly.
         fs::set_permissions(&tmp, fs::Permissions::from_mode(mode))?;
+        if let Some((uid, gid)) = owner {
+            // Only root may give a file away; anyone may keep their own user and a group
+            // they belong to. What isn't allowed is left as it is.
+            if std::os::unix::fs::chown(&tmp, Some(uid), Some(gid)).is_err() {
+                let _ = std::os::unix::fs::chown(&tmp, None, Some(gid));
+            }
+        }
         fs::rename(&tmp, path)
             .with_context(|| format!("could not move the new file to {}", path.display()))?;
         sync_dir(dir)

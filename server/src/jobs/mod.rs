@@ -131,6 +131,8 @@ pub struct JobContext {
     pub incoming: PathBuf,
     /// The mirror folder, if one is set up.
     pub mirror: Option<PathBuf>,
+    /// Work on other threads registers here, so a stopping server can wait for it.
+    pub activity: crate::activity::Activity,
 }
 
 impl JobContext {
@@ -153,6 +155,7 @@ impl Workers {
         db: Db,
         wake: Arc<Notify>,
         placing: Arc<tokio::sync::Mutex<()>>,
+        activity: crate::activity::Activity,
     ) -> anyhow::Result<Self> {
         // Jobs that were running when the server stopped start over.
         sqlx::query("UPDATE jobs SET state = 'queued' WHERE state = 'running'")
@@ -172,13 +175,14 @@ impl Workers {
             derived: config.derived_dir(),
             scratch_dir,
             tools: Tools::find(),
-            background: Arc::new(LowPriority::new(workers)),
+            background: Arc::new(LowPriority::new(workers, activity.clone())),
             external_timeout: Duration::from_secs(
                 u64::from(config.jobs.external_timeout_minutes.max(1)) * 60,
             ),
             placing,
             incoming: config.incoming_dir(),
             mirror: config.mirror.path.clone(),
+            activity,
         });
         let tasks = (0..workers)
             .map(|_| tokio::spawn(work(context.clone(), wake.clone())))

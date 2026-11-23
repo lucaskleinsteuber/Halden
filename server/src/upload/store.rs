@@ -54,9 +54,19 @@ pub struct Appended {
 }
 
 /// Appends a request body to `part`, at most `limit` bytes, updating `hasher` as it goes.
-pub async fn append(part: PathBuf, hasher: Sha256, body: Body, limit: u64) -> Appended {
+/// The writer counts as busy in `activity` until its last byte is on disk, even if the request
+/// was dropped before.
+pub async fn append(
+    part: PathBuf,
+    hasher: Sha256,
+    body: Body,
+    limit: u64,
+    activity: &crate::activity::Activity,
+) -> Appended {
     let (frames, mut queue) = mpsc::channel::<Bytes>(QUEUE_FRAMES);
+    let busy = activity.busy();
     let writer = tokio::task::spawn_blocking(move || -> (Sha256, u64, io::Result<()>) {
+        let _busy = busy;
         let mut hasher = hasher;
         let mut written = 0u64;
         let result = (|| {
@@ -173,15 +183,25 @@ mod tests {
         let part = dir.path().join("u.part");
         create_part(&part).unwrap();
 
+        let activity = crate::activity::Activity::default();
         let first = append(
             part.clone(),
             Sha256::new(),
             body(vec![b"hello ", b"wor"]),
             11,
+            &activity,
         )
         .await;
         assert_eq!((first.written, first.end), (9, BodyEnd::Complete));
-        let second = append(part.clone(), first.hasher.unwrap(), body(vec![b"ld!!!"]), 2).await;
+        let second = append(
+            part.clone(),
+            first.hasher.unwrap(),
+            body(vec![b"ld!!!"]),
+            2,
+            &activity,
+        )
+        .await;
+        assert_eq!(activity.count(), 0, "the writer is done");
         assert_eq!((second.written, second.end), (2, BodyEnd::TooLong));
 
         assert_eq!(std::fs::read(&part).unwrap(), b"hello world");
@@ -204,7 +224,15 @@ mod tests {
             Ok(Bytes::from_static(b"abc")),
             Err(io::Error::other("connection reset")),
         ]);
-        let appended = append(part.clone(), Sha256::new(), Body::from_stream(stream), 100).await;
+        let activity = crate::activity::Activity::default();
+        let appended = append(
+            part.clone(),
+            Sha256::new(),
+            Body::from_stream(stream),
+            100,
+            &activity,
+        )
+        .await;
         assert_eq!((appended.written, appended.end), (3, BodyEnd::Interrupted));
         assert_eq!(std::fs::read(&part).unwrap(), b"abc");
     }

@@ -568,3 +568,93 @@ Body `{"currentPassword": "…"}`. Deletes the account and its devices. `204`.
 
 The server always keeps at least one active owner: demoting, disabling or deleting the last one
 is refused with `409 conflict`.
+
+## Looking after the server (owners only)
+
+Everything `halden` can do in the terminal, except restoring a backup (the server must be
+stopped for that) and changing folders, port or certificate (a wrong value would lock the apps
+out). Changes that open the server up or can delete data need the owner's password again as
+`currentPassword`; without it they fail with `403 password_required`.
+
+### `GET /admin/status`
+
+```json
+{ "name": "homeserver", "serverId": "…", "version": "0.0.0", "apiVersion": 1,
+  "startedAt": 1795443730000, "restarts": 0, "memoryBytes": 52428800,
+  "libraryDisk": { "path": "/srv/halden/library", "freeBytes": 812000000000, "totalBytes": 1000000000000 },
+  "dataDisk": { … }, "mirrorDisk": null,
+  "accounts": [ { "userId": "…", "username": "lucas", "photos": 1200, "videos": 80,
+                  "trashed": 3, "libraryBytes": 9400000000 } ],
+  "uploadsInProgress": 2, "jobs": { "waiting": 4, "failed": 0 },
+  "backup": { …as in GET /me },
+  "tools": { "ffmpeg": true, "libheif": true },
+  "configProblem": null, "inDocker": false }
+```
+
+`memoryBytes` is only known on Linux. `configProblem` is set when the config file was changed
+but can't be used; the server then keeps running with its previous settings.
+
+### `GET /admin/config`
+
+```json
+{ "settings": [ { "name": "library.trash_days", "kind": "number", "access": "password",
+                  "about": "Photos stay in the trash this many days, …",
+                  "value": 30, "default": 30 } ],
+  "canChange": true, "configProblem": null }
+```
+
+`kind`: `text`, `number`, `bool`, `path`, `optionalPath`, `ip`, `networks` (a list of
+`"192.0.2.0/24"` strings). `access`: `owner` (no password needed), `password` (needs
+`currentPassword`), `terminal` (refused here). `canChange` is false when the server was not
+started from a config file it may write.
+
+### `PATCH /admin/config`
+
+```json
+{ "changes": { "library.trash_days": 60, "auth.password_login": false, "jobs.workers": null },
+  "currentPassword": "…" }
+```
+
+`null` puts a setting back to its default. All changes are checked together before anything is
+saved; one wrong value (`422 validation_failed`) or one terminal-only setting (`403 forbidden`)
+saves nothing. On success the answer is the new settings with `"restarting": true`: the server
+starts again with them in under a second, on the same port. Running requests get two seconds to
+finish; cut-off uploads continue as usual (`HEAD /uploads/{id}`). Every change is written to the
+security log (`settings_changed`).
+
+### `GET /admin/backups` and `POST /admin/backups`
+
+`{"backups": [ { "name": "halden-2026-11-23_03-00-00.db", "size": 4096000, "madeAt": … } ]}`,
+newest first. `POST` makes one now (`201` with it) and copies it to the mirror.
+
+### `GET /admin/mirror`, `PUT /admin/mirror`, `DELETE /admin/mirror`
+
+`GET`: `{"path": "/mnt/usb/halden" | null, …the backup status of GET /me}`.
+`PUT {"path": "/mnt/usb/halden", "currentPassword": "…"}` makes the folder the mirror: it must
+exist and must not be inside the library (`422` otherwise); a marker file is written into it. The
+answer says `mirrorOnSameDisk` (a warning: such a mirror protects against nothing) and the server
+restarts with it, then copies everything that is missing. `DELETE` with
+`{"currentPassword": "…"}` stops mirroring; the copies stay.
+
+### `GET /admin/jobs?state=failed|all`
+
+`{"jobs": [ { "id": 7, "kind": "convert", "assetId": "…", "state": "failed", "attempts": 6,
+"lastError": "ffmpeg failed: …", "runAfter": …, "updatedAt": … } ], "counts": {…}}`. Default
+`failed`; at most 500, newest first.
+
+### `POST /admin/jobs/retry`
+
+`{"ids": [7, 9]}` or `{}` for every failed job. `{"retried": 2}`.
+
+### `GET /admin/doctor`
+
+What `halden doctor` says: `{"level": "ok" | "warning" | "problem", "checks": [ { "id":
+"mirror", "level": "warning", "title": "Mirror", "detail": "none: …", "fix": "connect a second
+disk and run: …" } ]}`. `id`s are stable: `config`, `folders`, `settings_file`,
+`library_disk`, `data_disk`, `database`, `certificate`, `ffmpeg`, `libheif`, `mirror`, `jobs`,
+`backups`, `server`, `clock`, `systemd`, `firewall`, `network`. Checks that don't apply are left
+out.
+
+### `POST /admin/restart`
+
+Starts the server again (`202`). Written to the security log.

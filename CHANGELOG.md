@@ -8,6 +8,22 @@ There are no version numbers yet; entries are grouped by date until the first re
 
 ### Added
 
+- Server: `halden config list|get|set|reset` changes settings in the config file and keeps its
+  comments. The server picks up a changed file by itself within a few seconds (or on
+  `systemctl reload halden`) and starts again with it inside the same process, on the same port;
+  cut-off uploads continue. A file with a mistake is not used, and the problem is reported.
+- Server: admin routes for the apps (owners only): status (disks, accounts, jobs, memory),
+  settings, database backups, the mirror, failed jobs with retry, doctor and restart. Folders,
+  port and certificate stay terminal-only; settings that open the server up or can delete data
+  need the password again. Every change goes to the security log.
+- Server: `halden doctor` checks settings, folders, free space, the database, the certificate,
+  ffmpeg and libheif (with a real HEIC round trip), the mirror, failed jobs, backups, the clock,
+  systemd write permissions and the firewall, and says how to fix each problem.
+  `halden doctor --files` reads every original, thumbnail and mirror copy back and compares its
+  SHA-256, and lists files the library doesn't know.
+- Server: `[network] bonjour` and `[update] check_daily`/`beta` settings (used from the next
+  steps on).
+
 - Server: daily database backups on the library disk (checked, 14 kept), also made at start;
   `halden backup now|list|restore`. A restore sets the current database aside first.
 - Server: mirror to a second disk (`halden mirror set <folder>`): every original, conversion
@@ -68,11 +84,21 @@ There are no version numbers yet; entries are grouped by date until the first re
 
 ### Changed
 
+- Server: `halden mirror set|off` keeps the comments in the config file and needs no restart.
+- systemd: the server may write to `/etc/halden` (settings from the app) and to `/mnt` and
+  `/media` (mirror disks); `systemctl reload halden` works.
+
 - Server: the database uses one writing and several reading connections, with a larger cache
   and memory-mapped reads; signing a request in takes one indexed lookup.
 - Server: HTTP/2 flow-control windows of 4 MiB per stream (instead of 64 KiB), keepalive pings,
   JSON answers compressed with gzip or brotli, small files read in one go, a cap on helper
   threads, and mimalloc as the memory allocator on Linux (memory stays flat under load).
+
+### Fixed
+
+- Server: an upload whose phone hung up (or whose server restarted) at the very moment it was
+  being finished could leave the file in the library without a record. Finishing now always runs
+  to the end on its own.
 
 ## 22.11.2026
 

@@ -13,6 +13,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::{fsutil, net::Cidr};
 
+pub mod edit;
+pub mod keys;
+
 pub const DEFAULT_CONFIG_PATH: &str = "/etc/halden/config.toml";
 pub const DEFAULT_PORT: u16 = 47130;
 pub const DEFAULT_DATA_DIR: &str = "/var/lib/halden";
@@ -31,6 +34,7 @@ pub struct Config {
     pub jobs: JobsConfig,
     pub backup: BackupConfig,
     pub mirror: MirrorConfig,
+    pub update: UpdateConfig,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -83,7 +87,7 @@ impl Default for StorageConfig {
     }
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct NetworkConfig {
     /// Accept connections from public internet addresses. Off: only the home network,
@@ -91,6 +95,18 @@ pub struct NetworkConfig {
     pub allow_public: bool,
     /// Extra networks allowed even when `allow_public` is off, e.g. `"203.0.113.0/24"`.
     pub allowed_networks: Vec<Cidr>,
+    /// Announce the server in the home network (Bonjour), so the apps find it by themselves.
+    pub bonjour: bool,
+}
+
+impl Default for NetworkConfig {
+    fn default() -> Self {
+        Self {
+            allow_public: false,
+            allowed_networks: Vec::new(),
+            bonjour: true,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -205,6 +221,25 @@ pub struct MirrorConfig {
     pub path: Option<PathBuf>,
 }
 
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct UpdateConfig {
+    /// Look for a new version once a day (only GitHub is asked). Installing always waits for
+    /// the owner.
+    pub check_daily: bool,
+    /// Also offer test versions (GitHub pre-releases).
+    pub beta: bool,
+}
+
+impl Default for UpdateConfig {
+    fn default() -> Self {
+        Self {
+            check_daily: true,
+            beta: false,
+        }
+    }
+}
+
 /// The computer's host name without a domain, or "Halden" when the host name is empty or a
 /// machine-made id (some containers and VMs are named like `946e80f9-0794-…`).
 pub fn default_server_name() -> String {
@@ -274,12 +309,13 @@ impl Config {
         let body = toml::to_string_pretty(self).context("could not write the config")?;
         Ok(format!(
             "# Halden server configuration.\n\
-             # Every key is optional; see docs or `halden --help`.\n\
-             # Restart the server after changes: sudo systemctl restart halden\n\n{body}"
+             # Every key is optional. Change settings with `halden config set <key> <value>`\n\
+             # (see `halden config list`); the server picks up changes by itself.\n\n{body}"
         ))
     }
 
-    /// Writes the config atomically, readable by its owner and group only.
+    /// Writes a new config file atomically, readable by its owner and group only. To change an
+    /// existing file, use [`edit::change`], which keeps its comments and layout.
     pub fn save(&self, path: &Path) -> Result<()> {
         self.validate()?;
         fsutil::write_atomic(path, self.to_toml()?.as_bytes(), 0o640)

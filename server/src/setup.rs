@@ -179,6 +179,21 @@ fn hand_over(
     std::os::unix::fs::chown(config_path, Some(0), Some(gid))
         .with_context(|| format!("could not hand over {}", config_path.display()))?;
     fs::set_permissions(config_path, fs::Permissions::from_mode(0o640))?;
+    // The server saves settings changed in the apps by replacing the config file, so its group
+    // may create files in the config's own folder (`/etc/halden`), and nowhere else in /etc.
+    if let Some(folder) = config_path.parent()
+        && folder.file_name().is_some_and(|name| name == "halden")
+    {
+        std::os::unix::fs::chown(folder, Some(0), Some(gid))
+            .with_context(|| format!("could not hand over {}", folder.display()))?;
+        fs::set_permissions(folder, fs::Permissions::from_mode(0o770))?;
+    } else {
+        warnings.push(
+            "The config file is not in a folder of its own (like /etc/halden), so the apps can't \
+             change settings; use `halden config set` here instead."
+                .to_string(),
+        );
+    }
     Ok(Some(user))
 }
 
@@ -221,6 +236,11 @@ pub fn running_as_root() -> bool {
 #[cfg(not(target_os = "linux"))]
 pub fn running_as_root() -> bool {
     false
+}
+
+/// (uid, gid) of the system user the packaged server runs as, if it exists.
+pub fn service_ids() -> Option<(u32, u32)> {
+    lookup_user(SERVICE_USER).ok().flatten()
 }
 
 /// (uid, gid) of a system user, from `/etc/passwd`.

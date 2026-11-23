@@ -34,6 +34,8 @@ pub enum Event {
     UserDisabled,
     UserEnabled,
     UserDeleted,
+    SettingsChanged,
+    ServerRestarted,
 }
 
 impl Event {
@@ -61,6 +63,8 @@ impl Event {
             Self::UserDisabled => "user_disabled",
             Self::UserEnabled => "user_enabled",
             Self::UserDeleted => "user_deleted",
+            Self::SettingsChanged => "settings_changed",
+            Self::ServerRestarted => "server_restarted",
         }
     }
 }

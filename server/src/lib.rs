@@ -5,12 +5,14 @@
 //! integration tests can drive the real code; `main.rs` only calls [`cli::main`].
 
 pub mod accounts;
+pub mod activity;
 pub mod api;
 pub mod auth;
 pub mod backup;
 pub mod cli;
 pub mod config;
 pub mod db;
+pub mod doctor;
 pub mod files;
 pub mod fsutil;
 pub mod jobs;

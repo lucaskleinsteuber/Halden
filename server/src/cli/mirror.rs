@@ -8,12 +8,16 @@ use clap::Subcommand;
 use super::{Database, local_time, row};
 use crate::{
     backup::mirror::{self, MirrorState},
-    config::Config,
+    config::{
+        Config,
+        edit::{self, Change},
+        keys,
+    },
 };
 
 #[derive(Subcommand)]
 pub enum MirrorCommand {
-    /// Use this folder (another disk!) as the mirror. Restart the server afterwards.
+    /// Use this folder (another disk!) as the mirror. The server picks it up by itself.
     Set { folder: PathBuf },
     /// Stop mirroring (the copies stay where they are).
     Off,
@@ -22,7 +26,7 @@ pub enum MirrorCommand {
 }
 
 pub async fn run(config_path: &Path, command: MirrorCommand) -> Result<()> {
-    let mut config = Config::load(config_path)?;
+    let config = Config::load(config_path)?;
     match command {
         MirrorCommand::Set { folder } => {
             let folder = mirror::prepare(&folder, &config.storage.library_dir)?;
@@ -33,22 +37,30 @@ pub async fn run(config_path: &Path, command: MirrorCommand) -> Result<()> {
                     folder.display()
                 );
             }
-            config.mirror.path = Some(folder.clone());
-            config.save(config_path)?;
+            let key = keys::find("mirror.path").expect("mirror.path is a setting");
+            edit::change(
+                config_path,
+                &[(key, Change::Set(folder.display().to_string().into()))],
+            )?;
             println!("The mirror is {}.", folder.display());
+            if !folder.starts_with("/mnt") && !folder.starts_with("/media") {
+                println!(
+                    "\nUnder systemd the server may only write to its own folders and to /mnt and \
+                     /media. Allow this one with\n  sudo systemctl edit halden\nand add:\n  \
+                     [Service]\n  ReadWritePaths={}\nthen: sudo systemctl restart halden",
+                    folder.display()
+                );
+            }
             println!(
-                "\nThe server may only write to its own folders. Allow this one with\n  \
-                 sudo systemctl edit halden\nand add:\n  [Service]\n  ReadWritePaths={}\n\
-                 then restart the server:\n  sudo systemctl restart halden\n\
-                 It copies everything that is missing right after starting.",
-                folder.display()
+                "The server picks this up by itself and copies everything that is missing. \
+                 `halden mirror status` shows how far it is."
             );
             Ok(())
         }
         MirrorCommand::Off => {
-            config.mirror.path = None;
-            config.save(config_path)?;
-            println!("Mirroring is off. Restart the server: sudo systemctl restart halden");
+            let key = keys::find("mirror.path").expect("mirror.path is a setting");
+            edit::change(config_path, &[(key, Change::Reset)])?;
+            println!("Mirroring is off. The copies stay where they are.");
             Ok(())
         }
         MirrorCommand::Status => {
