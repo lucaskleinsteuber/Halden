@@ -50,6 +50,9 @@ const WORK_GRACE: Duration = Duration::from_secs(15);
 /// How often the config file is checked for changes.
 pub const CONFIG_POLL: Duration = Duration::from_secs(5);
 const STREAM_WINDOW: u32 = 4 * 1024 * 1024;
+const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
+const HEADER_TIMEOUT: Duration = Duration::from_secs(15);
+const MAX_HEADER_BYTES: u32 = 64 * 1024;
 const CONNECTION_WINDOW: u32 = 16 * 1024 * 1024;
 /// How often old log entries, codes and unused devices are cleaned up (also once at start).
 const TIDY_EVERY: Duration = Duration::from_secs(24 * 60 * 60);
@@ -242,9 +245,11 @@ pub async fn start_on(
         },
     );
     let app = api::router(state).into_make_service_with_connect_info::<SocketAddr>();
-    let acceptor = RustlsAcceptor::new(RustlsConfig::from_config(tls_config)).acceptor(
-        HomeNetworkAcceptor::new(NetworkPolicy::from_config(&config.network)),
-    );
+    let acceptor = RustlsAcceptor::new(RustlsConfig::from_config(tls_config))
+        .handshake_timeout(HANDSHAKE_TIMEOUT)
+        .acceptor(HomeNetworkAcceptor::new(NetworkPolicy::from_config(
+            &config.network,
+        )));
     let handle = Handle::new();
     let mut server = axum_server::from_tcp(listener)?
         .acceptor(acceptor)
@@ -477,10 +482,18 @@ async fn restart(s: &mut Supervised, mut next: Config) -> Result<()> {
 /// covers a 100 ms round trip at 40 MB/s; the windows also cap how much an upload can have in
 /// flight, so many uploads at once can't eat the memory. Pings find dead connections (a phone
 /// that left the house) so they don't hold uploads open.
+///
+/// Slow or idle clients can't hold the server: a TLS handshake gets 10 s, HTTP/1 headers 15 s,
+/// and HTTP/2 headers may be at most 64 KiB per request (hyper's default would allow 16 MiB).
 fn tune_http<A>(server: &mut axum_server::Server<SocketAddr, A>) {
     server
         .http_builder()
+        .http1()
+        .header_read_timeout(HEADER_TIMEOUT);
+    server
+        .http_builder()
         .http2()
+        .max_header_list_size(MAX_HEADER_BYTES)
         .initial_stream_window_size(STREAM_WINDOW)
         .initial_connection_window_size(CONNECTION_WINDOW)
         .max_concurrent_streams(256)

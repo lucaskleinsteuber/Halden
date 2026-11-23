@@ -42,6 +42,10 @@ There are no version numbers yet; entries are grouped by date until the first re
   from the signed packages only. No release has been made yet.
 - Docs: `docs/DOCKER.md`, `docs/UPDATE_SIGNING.md`, `docs/RELEASING.md`.
 - CI: `cargo deny` checks the licences, known vulnerabilities and sources of all dependencies.
+- Tests: every route without, with a forged and with a signed-out token; members on owner
+  routes; one account on another's photos, uploads and devices; paths that try to leave the
+  library; oversized bodies and headers; forged client addresses; hundreds of idle connections
+  and headers sent one byte a second. Every `halden` command run as the real program.
 
 - Server: daily database backups on the library disk (checked, 14 kept), also made at start;
   `halden backup now|list|restore`. A restore sets the current database aside first.
@@ -103,6 +107,8 @@ There are no version numbers yet; entries are grouped by date until the first re
 
 ### Changed
 
+- Server: explicit limits for slow and idle clients: 10 s for the TLS handshake, 15 s for HTTP/1
+  headers, at most 64 KiB of HTTP/2 headers per request (instead of 16 MiB).
 - Server: `halden mirror set|off` keeps the comments in the config file and needs no restart.
 - systemd: the server may write to `/etc/halden` (settings from the app) and to `/mnt` and
   `/media` (mirror disks); `systemctl reload halden` works.
@@ -115,6 +121,7 @@ There are no version numbers yet; entries are grouped by date until the first re
 
 ### Fixed
 
+- Security log: "1 device signed out" instead of "1 devices".
 - Server: a crash at the wrong moment could leave files behind or out of step with the
   database. A file journal now notes every move into the library before it happens and every
   removal in the same transaction that deletes the record; the next start finishes what was

@@ -135,7 +135,10 @@ pub async fn run(config_path: &Path, command: UserCommand) -> Result<()> {
                 };
                 Record::new(Event::PasswordReset)
                     .user(&user.id)
-                    .detail(format!("in the terminal, {signed_out} devices signed out"))
+                    .detail(format!(
+                        "in the terminal, {} signed out",
+                        crate::seclog::devices(signed_out as u64)
+                    ))
                     .write(pool)
                     .await;
                 println!("The password of {} is changed.", user.username);

@@ -172,7 +172,7 @@ pub async fn update_user(
         };
         log(
             Event::PasswordReset,
-            format!("{signed_out} devices signed out"),
+            format!("{} signed out", crate::seclog::devices(signed_out as u64)),
         )
         .write(db)
         .await;

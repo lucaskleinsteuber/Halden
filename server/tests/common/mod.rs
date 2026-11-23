@@ -92,12 +92,13 @@ impl ServerCertVerifier for PinnedCertificate {
     }
 }
 
-pub fn client(
+/// TLS settings that trust exactly the pinned certificate.
+pub fn pinned_tls(
     pin: [u8; 32],
     versions: &[&'static rustls::SupportedProtocolVersion],
-) -> reqwest::Client {
+) -> rustls::ClientConfig {
     let provider = Arc::new(rustls::crypto::ring::default_provider());
-    let mut tls = rustls::ClientConfig::builder_with_provider(provider.clone())
+    rustls::ClientConfig::builder_with_provider(provider.clone())
         .with_protocol_versions(versions)
         .unwrap()
         .dangerous()
@@ -105,7 +106,14 @@ pub fn client(
             expected: pin,
             provider,
         }))
-        .with_no_client_auth();
+        .with_no_client_auth()
+}
+
+pub fn client(
+    pin: [u8; 32],
+    versions: &[&'static rustls::SupportedProtocolVersion],
+) -> reqwest::Client {
+    let mut tls = pinned_tls(pin, versions);
     tls.alpn_protocols = vec![b"h2".to_vec(), b"http/1.1".to_vec()];
     reqwest::Client::builder()
         .tls_backend_preconfigured(tls)

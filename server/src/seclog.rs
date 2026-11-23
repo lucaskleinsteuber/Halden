@@ -71,6 +71,15 @@ impl Event {
     }
 }
 
+/// "1 device", "3 devices".
+pub fn devices(count: u64) -> String {
+    if count == 1 {
+        "1 device".into()
+    } else {
+        format!("{count} devices")
+    }
+}
+
 /// One entry about to be written.
 pub struct Record<'a> {
     event: Event,

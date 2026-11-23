@@ -311,7 +311,10 @@ pub async fn change_password(
         .user(&auth.user.id)
         .device(&auth.device.id)
         .ip(auth.ip)
-        .detail(format!("{signed_out_devices} other devices signed out"))
+        .detail(format!(
+            "other {} signed out",
+            crate::seclog::devices(signed_out_devices as u64)
+        ))
         .write(db)
         .await;
     Ok(Json(PasswordChanged { signed_out_devices }))
