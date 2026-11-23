@@ -25,6 +25,7 @@ use crate::{
     jobs::{self, JobKind},
     library::{
         assets::{self, Asset},
+        journal,
         metadata::{self, FileMetadata},
         paths::{MediaKind, MediaType},
         settings::{self, PhotoFormat, VideoFormat},
@@ -86,7 +87,15 @@ pub(super) async fn finish(
     let relative = assets::free_library_name(db, uploads.library(), &base, media.extension).await?;
     let relative_text = relative.to_string_lossy().into_owned();
     let target = uploads.library().join(&relative);
-    place(&part, &target, &uploads.incoming).await?;
+    // Noted before the move: a crash between the move and the record is put right at the next
+    // start (the file goes back to the partial file, and the upload can be finished).
+    let entry = journal::will_place(db, &relative_text, Some(&row.id)).await?;
+    crate::failpoint::hit("upload-before-place");
+    if let Err(error) = place(&part, &target, &uploads.incoming).await {
+        let _ = journal::forget(db, entry).await;
+        return Err(error);
+    }
+    crate::failpoint::hit("upload-placed");
 
     let recorded = record(
         uploads,
@@ -100,13 +109,16 @@ pub(super) async fn finish(
         &file_metadata,
         &capture,
         now,
+        entry,
     )
     .await;
     if let Err(error) = recorded {
         // Put the file back, so the device can finish the upload again later.
         let _ = std::fs::rename(&target, &part);
+        let _ = journal::forget(db, entry).await;
         return Err(error);
     }
+    crate::failpoint::hit("upload-recorded");
     drop(placing);
     uploads.wake.notify_waiters();
 
@@ -221,8 +233,10 @@ async fn record(
     file: &FileMetadata,
     capture: &Capture,
     now: i64,
+    entry: i64,
 ) -> Result<(), UploadError> {
     let mut tx = db.begin().await?;
+    journal::placed(&mut tx, entry).await?;
     let seq = assets::next_seq(&mut tx).await?;
     if row.role() == UploadRole::Original {
         let location = client

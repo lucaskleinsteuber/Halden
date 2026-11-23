@@ -41,6 +41,7 @@ There are no version numbers yet; entries are grouped by date until the first re
   draft; `scripts/publish-release.sh` signs and publishes on the Mac; the Docker image is built
   from the signed packages only. No release has been made yet.
 - Docs: `docs/DOCKER.md`, `docs/UPDATE_SIGNING.md`, `docs/RELEASING.md`.
+- CI: `cargo deny` checks the licences, known vulnerabilities and sources of all dependencies.
 
 - Server: daily database backups on the library disk (checked, 14 kept), also made at start;
   `halden backup now|list|restore`. A restore sets the current database aside first.
@@ -114,6 +115,13 @@ There are no version numbers yet; entries are grouped by date until the first re
 
 ### Fixed
 
+- Server: a crash at the wrong moment could leave files behind or out of step with the
+  database. A file journal now notes every move into the library before it happens and every
+  removal in the same transaction that deletes the record; the next start finishes what was
+  interrupted. An upload cut off between moving and recording goes back to its partial file and
+  can be finished; an unrecorded conversion is removed and made again; a photo deleted for good
+  never stays behind on the library disk, the thumbnails or the mirror. Tested by making the
+  real server die at exactly these moments (`HALDEN_FAILPOINT`, debug builds only).
 - Server: an upload whose phone hung up (or whose server restarted) at the very moment it was
   being finished could leave the file in the library without a record. Finishing now always runs
   to the end on its own.

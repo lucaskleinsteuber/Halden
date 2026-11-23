@@ -4,6 +4,7 @@
 pub mod assets;
 pub mod derived;
 pub mod edits;
+pub mod journal;
 pub mod metadata;
 pub mod paths;
 pub mod settings;

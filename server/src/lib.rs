@@ -14,6 +14,7 @@ pub mod cli;
 pub mod config;
 pub mod db;
 pub mod doctor;
+pub mod failpoint;
 pub mod files;
 pub mod fsutil;
 pub mod jobs;

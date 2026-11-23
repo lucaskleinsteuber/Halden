@@ -136,6 +136,15 @@ pub struct JobContext {
 }
 
 impl JobContext {
+    /// Where the library's, thumbnails' and mirror's files are.
+    pub fn roots(&self) -> crate::library::journal::Roots<'_> {
+        crate::library::journal::Roots {
+            library: &self.library,
+            derived: &self.derived,
+            mirror: self.mirror.as_deref(),
+        }
+    }
+
     /// A folder for temporary files of external tools, on the fast disk.
     pub fn scratch(&self) -> &std::path::Path {
         &self.scratch_dir

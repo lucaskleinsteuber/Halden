@@ -20,7 +20,7 @@ use crate::{
     db::now_ms,
     fsutil,
     library::{
-        assets,
+        assets, journal,
         paths::{MediaKind, MediaType},
         settings,
     },
@@ -105,24 +105,29 @@ pub async fn run(ctx: &JobContext, job: &Job) -> Result<(), String> {
         .await
         .map_err(err)?;
     let destination = ctx.library.join(&relative);
+    let relative_text = relative.to_string_lossy().into_owned();
+    let entry = journal::will_place(&ctx.db, &relative_text, None)
+        .await
+        .map_err(err)?;
     if let Err(error) = place(&temporary, &destination).await {
         let _ = tokio::fs::remove_file(&temporary).await;
+        let _ = journal::forget(&ctx.db, entry).await;
         return Err(error.to_string());
     }
-    let relative_text = relative.to_string_lossy().into_owned();
-    let recorded = record(ctx, job, target, &sha256, size, &relative_text).await;
+    crate::failpoint::hit("convert-placed");
+    let recorded = record(ctx, job, target, &sha256, size, &relative_text, entry).await;
     drop(placing);
     match recorded {
-        Ok(previous) => {
-            if let Some(previous) = previous.filter(|p| *p != relative_text)
-                && let Some(path) = crate::library::paths::resolve(&ctx.library, &previous)
-            {
-                let _ = tokio::fs::remove_file(path).await;
-            }
+        Ok(()) => {
+            // The conversion it replaced (another format) goes.
+            journal::remove_pending(&ctx.db, ctx.roots())
+                .await
+                .map_err(err)?;
             Ok(())
         }
         Err(error) => {
             let _ = tokio::fs::remove_file(&destination).await;
+            let _ = journal::forget(&ctx.db, entry).await;
             Err(error.to_string())
         }
     }
@@ -412,7 +417,7 @@ async fn place(temporary: &Path, destination: &Path) -> std::io::Result<()> {
     .map_err(|join| std::io::Error::other(join.to_string()))?
 }
 
-/// Records the conversion; returns the path of the conversion it replaced.
+/// Records the conversion; a conversion it replaces is noted for removal.
 async fn record(
     ctx: &JobContext,
     job: &Job,
@@ -420,13 +425,20 @@ async fn record(
     sha256: &[u8; 32],
     size: u64,
     relative: &str,
-) -> Result<Option<String>, sqlx::Error> {
+    entry: i64,
+) -> Result<(), sqlx::Error> {
     let mut tx = ctx.db.begin().await?;
+    journal::placed(&mut tx, entry).await?;
     let previous: Option<(String,)> =
         sqlx::query_as("SELECT path FROM asset_files WHERE asset_id = ? AND role = 'converted'")
             .bind(&job.asset_id)
             .fetch_optional(&mut *tx)
             .await?;
+    if let Some((previous,)) = &previous
+        && previous != relative
+    {
+        journal::will_remove(&mut tx, journal::Storage::Library, previous).await?;
+    }
     sqlx::query(
         "INSERT INTO asset_files (asset_id, role, user_id, sha256, size, mime, storage, path, \
              created_at) \
@@ -456,12 +468,15 @@ async fn record(
         .await?;
     }
     tx.commit().await?;
-    Ok(previous.map(|(path,)| path))
+    Ok(())
 }
 
 /// The account no longer wants a copy (or the original is in that format): remove it.
 async fn remove_converted(ctx: &JobContext, asset_id: &str, path: &str) -> Result<(), String> {
     let mut tx = ctx.db.begin().await.map_err(|e| e.to_string())?;
+    journal::will_remove(&mut tx, journal::Storage::Library, path)
+        .await
+        .map_err(|e| e.to_string())?;
     sqlx::query("DELETE FROM asset_files WHERE asset_id = ? AND role = 'converted'")
         .bind(asset_id)
         .execute(&mut *tx)
@@ -471,8 +486,8 @@ async fn remove_converted(ctx: &JobContext, asset_id: &str, path: &str) -> Resul
         .await
         .map_err(|e| e.to_string())?;
     tx.commit().await.map_err(|e| e.to_string())?;
-    if let Some(full) = crate::library::paths::resolve(&ctx.library, path) {
-        let _ = tokio::fs::remove_file(full).await;
-    }
+    journal::remove_pending(&ctx.db, ctx.roots())
+        .await
+        .map_err(|e| e.to_string())?;
     Ok(())
 }

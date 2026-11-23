@@ -339,26 +339,6 @@ pub async fn compute_status(db: &Db, config: &Config) -> BackupStatus {
     }
 }
 
-/// Removes an asset's copies from the mirror (it was deleted for good).
-pub async fn forget(db: &Db, root: Option<&Path>, asset_id: &str) -> Result<(), sqlx::Error> {
-    let copies: Vec<(String,)> = sqlx::query_as("SELECT path FROM mirror_files WHERE asset_id = ?")
-        .bind(asset_id)
-        .fetch_all(db.read())
-        .await?;
-    sqlx::query("DELETE FROM mirror_files WHERE asset_id = ?")
-        .bind(asset_id)
-        .execute(db.write())
-        .await?;
-    if let Some(root) = root.filter(|root| reachable(root)) {
-        for (path,) in copies {
-            if let Some(full) = paths::resolve(root, &path) {
-                let _ = tokio::fs::remove_file(full).await;
-            }
-        }
-    }
-    Ok(())
-}
-
 /// Checks a folder and makes it the mirror: it must exist, be writable, and not be the library.
 /// Writes the marker file.
 pub fn prepare(folder: &Path, library: &Path) -> anyhow::Result<PathBuf> {

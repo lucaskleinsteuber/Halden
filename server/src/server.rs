@@ -200,6 +200,21 @@ pub async fn start_on(
         placing.clone(),
         activity.clone(),
     )?);
+    let derived = config.derived_dir();
+    let roots = crate::library::journal::Roots {
+        library: &config.storage.library_dir,
+        derived: &derived,
+        mirror: config.mirror.path.as_deref(),
+    };
+    let recovered = crate::library::journal::recover(&pool, roots, &config.incoming_dir()).await?;
+    if recovered != crate::library::journal::Recovered::default() {
+        tracing::warn!(
+            uploads_returned = recovered.uploads_returned,
+            unrecorded_removed = recovered.unrecorded_removed,
+            removed = recovered.removed,
+            "finished file moves and removals a stop had interrupted"
+        );
+    }
     uploads.recover(&pool).await?;
     let workers = jobs::Workers::start(
         config,
@@ -510,6 +525,16 @@ pub async fn back_up(
         }
     }
     if config.mirror.path.is_some() {
+        // Copies of deleted photos that waited for the mirror disk.
+        let derived = config.derived_dir();
+        let roots = crate::library::journal::Roots {
+            library: &config.storage.library_dir,
+            derived: &derived,
+            mirror: config.mirror.path.as_deref(),
+        };
+        if let Err(error) = crate::library::journal::remove_pending(pool, roots).await {
+            tracing::warn!(%error, "could not remove files of deleted photos");
+        }
         match mirror::sweep(pool).await {
             Ok(0) => {}
             Ok(queued) => {

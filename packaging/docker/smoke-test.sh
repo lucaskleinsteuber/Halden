@@ -24,7 +24,7 @@ echo "smoke test password" | docker exec -i "$name" halden user add smoke --owne
 base=https://127.0.0.1:47130/api/v1
 curl -fsSk "$base/server" | jq -e '.name == "smoke" and .apiVersion == 1' >/dev/null
 token=$(curl -fsSk -H 'content-type: application/json' \
-  -d '{"username":"smoke","password":"smoke test password","device":{"name":"CI","platform":"ios","installationId":"ci"}}' \
+  -d '{"username":"smoke","password":"smoke test password","device":{"name":"CI","platform":"ios","installationId":"ci-smoke-test"}}' \
   "$base/auth/login" | jq -r .token)
 curl -fsSk -H "authorization: Bearer $token" "$base/me" | jq -e '.user.username == "smoke"' >/dev/null
 curl -fsSk -H "authorization: Bearer $token" "$base/admin/update" | jq -e '.inDocker == true and .canInstall == false' >/dev/null

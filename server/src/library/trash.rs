@@ -4,11 +4,9 @@
 //! learns about the deletion. Every step can be repeated safely, so a deletion that a phone made
 //! offline can simply be sent again later.
 
-use std::path::Path;
-
 use crate::{
     db::{Db, now_ms},
-    library::{assets, derived, paths},
+    library::{assets, journal},
 };
 
 /// Moves the account's assets to the trash. Returns how many moved (already trashed ones count
@@ -82,12 +80,7 @@ pub async fn delete(
 }
 
 /// Where an asset's files can be: the library, the derived folder, the mirror.
-#[derive(Clone, Copy)]
-pub struct Roots<'a> {
-    pub library: &'a Path,
-    pub derived: &'a Path,
-    pub mirror: Option<&'a Path>,
-}
+pub type Roots<'a> = super::journal::Roots<'a>;
 
 /// Deletes everything that has been in the trash longer than `days`.
 pub async fn purge_expired(
@@ -108,8 +101,10 @@ pub async fn purge_expired(
     purge(db, roots, &ids).await
 }
 
-/// Turns assets into tombstones and removes their files. The database goes first: if the server
-/// stops halfway, some files are left over, but no record ever points at a missing file.
+/// Turns assets into tombstones and removes their files. The database goes first, and notes in
+/// the same transaction which files are to go (the file journal): if the server stops halfway,
+/// the next start removes what is left, so a deleted photo never stays on any disk, and no
+/// record ever points at a missing file.
 async fn purge(db: &Db, roots: Roots<'_>, ids: &[String]) -> Result<u64, sqlx::Error> {
     let mut purged = 0;
     for id in ids {
@@ -119,6 +114,21 @@ async fn purge(db: &Db, roots: Roots<'_>, ids: &[String]) -> Result<u64, sqlx::E
                 .bind(id)
                 .fetch_all(&mut *tx)
                 .await?;
+        for (storage, path) in &files {
+            journal::will_remove(&mut tx, journal::Storage::parse(storage), path).await?;
+        }
+        let copies: Vec<(String,)> =
+            sqlx::query_as("SELECT path FROM mirror_files WHERE asset_id = ?")
+                .bind(id)
+                .fetch_all(&mut *tx)
+                .await?;
+        for (path,) in &copies {
+            journal::will_remove(&mut tx, journal::Storage::Mirror, path).await?;
+        }
+        sqlx::query("DELETE FROM mirror_files WHERE asset_id = ?")
+            .bind(id)
+            .execute(&mut *tx)
+            .await?;
         sqlx::query("DELETE FROM asset_files WHERE asset_id = ?")
             .bind(id)
             .execute(&mut *tx)
@@ -148,16 +158,10 @@ async fn purge(db: &Db, roots: Roots<'_>, ids: &[String]) -> Result<u64, sqlx::E
         tx.commit().await?;
         purged += 1;
 
-        for (storage, path) in files {
-            if storage == "library" {
-                if let Some(full) = paths::resolve(roots.library, &path) {
-                    let _ = tokio::fs::remove_file(full).await;
-                }
-            } else if let Err(error) = derived::remove_if_unused(db, roots.derived, &path).await {
-                tracing::warn!(%error, "could not remove a thumbnail of a deleted photo");
-            }
-        }
-        crate::backup::mirror::forget(db, roots.mirror, id).await?;
+        crate::failpoint::hit("purge-recorded");
+    }
+    if !ids.is_empty() {
+        journal::remove_pending(db, roots).await?;
     }
     Ok(purged)
 }
