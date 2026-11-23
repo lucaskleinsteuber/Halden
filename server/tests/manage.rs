@@ -50,7 +50,10 @@ async fn a_changed_config_file_is_picked_up_on_the_same_port() {
         .clone();
     if trash["value"] != 45 {
         let status = api.get("/api/v1/admin/status", &owner).await;
-        panic!("the new settings were not used: {}", status.body["configProblem"]);
+        panic!(
+            "the new settings were not used: {}",
+            status.body["configProblem"]
+        );
     }
     assert_eq!(trash["default"], 30);
     assert_eq!(trash["access"], "password");

@@ -479,7 +479,10 @@ async fn restart(s: &mut Supervised, mut next: Config) -> Result<()> {
     if let Some(running) = s.server.take()
         && let Err(error) = running.stop(RESTART_GRACE).await
     {
-        tracing::warn!(error = format!("{error:#}"), "the server stopped with an error");
+        tracing::warn!(
+            error = format!("{error:#}"),
+            "the server stopped with an error"
+        );
     }
     if (next.server.bind, next.server.port) != (old.server.bind, old.server.port) {
         match bind(next.server.bind, next.server.port) {
