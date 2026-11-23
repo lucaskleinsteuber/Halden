@@ -61,8 +61,10 @@ impl LowPriority {
         let (done, result) = tokio::sync::oneshot::channel();
         let busy = self.activity.busy();
         let job: Work = Box::new(move || {
-            let _busy = busy;
-            let _ = done.send(work());
+            let result = work();
+            // Done before the answer goes out, so whoever gets it sees the work finished.
+            drop(busy);
+            let _ = done.send(result);
         });
         self.queue.lock().ok()?.send(job).ok()?;
         result.await.ok()

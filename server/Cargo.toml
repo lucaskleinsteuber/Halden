@@ -21,6 +21,7 @@ fs4 = "1.1.0"
 futures-util = "0.3.34"
 gethostname = "1.1.0"
 hex = "0.4.3"
+mdns-sd = { version = "0.22.0", default-features = false }
 if-addrs = "0.15.0"
 image = { version = "0.25.10", default-features = false, features = ["jpeg", "png", "tiff", "webp", "gif"] }
 nom-exif = "3.8.0"

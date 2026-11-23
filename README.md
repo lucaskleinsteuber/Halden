@@ -80,6 +80,12 @@ Every original, conversion and database backup is then copied there in the same 
 layout and checked by its SHA-256. If the disk is unplugged, Halden waits and catches up when it
 is back.
 
+### Find it in the home network
+
+The server announces itself with Bonjour, so the app lists it by itself when the phone is in the
+same home network. If `ufw` is on, allow the port and Bonjour: `sudo ufw allow 47130/tcp` and
+`sudo ufw allow 5353/udp`. Over Tailscale or from outside, the QR code carries the addresses.
+
 ### Add a device
 
 ```sh

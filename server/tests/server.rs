@@ -145,3 +145,51 @@ async fn two_servers_never_share_a_data_folder() {
     let again = server::start(&config).await.unwrap();
     again.shutdown().await.unwrap();
 }
+
+/// The server announces itself in the home network and an app finds it, with the facts it needs
+/// to recognise it. Needs a network interface with a home-network address (skipped without).
+#[tokio::test]
+async fn the_server_is_found_in_the_home_network() {
+    use halden::bonjour;
+    if !halden::net::local_addresses()
+        .into_iter()
+        .any(bonjour::announce_on)
+    {
+        eprintln!("no home-network interface here; skipping");
+        return;
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let (server, config) = common::start_server_with(dir.path(), |config| {
+        config.network.bonjour = true;
+    })
+    .await;
+    let pool = halden::db::Db::open(&config.db_path()).await.unwrap();
+    let id = halden::db::server_id(&pool).await.unwrap().to_string();
+    pool.close().await;
+
+    let browser = mdns_sd::ServiceDaemon::new().unwrap();
+    let events = browser.browse(bonjour::SERVICE_TYPE).unwrap();
+    let found = tokio::task::spawn_blocking(move || {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(15);
+        while let Some(left) = deadline.checked_duration_since(std::time::Instant::now()) {
+            if let Ok(mdns_sd::ServiceEvent::ServiceResolved(service)) = events.recv_timeout(left)
+                && service.get_property_val_str("id") == Some(id.as_str())
+            {
+                return Some(service);
+            }
+        }
+        None
+    })
+    .await
+    .unwrap()
+    .expect("the server was not found");
+    assert_eq!(
+        found.get_property_val_str("fp"),
+        Some(server.fingerprint.hex().as_str())
+    );
+    assert_eq!(found.get_property_val_str("name"), Some("testbox"));
+    assert_eq!(found.get_property_val_str("api"), Some("1"));
+    assert_eq!(found.get_port(), server.addr.port());
+    let _ = browser.shutdown();
+    server.shutdown().await.unwrap();
+}

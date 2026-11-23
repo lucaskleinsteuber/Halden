@@ -9,6 +9,7 @@ pub mod activity;
 pub mod api;
 pub mod auth;
 pub mod backup;
+pub mod bonjour;
 pub mod cli;
 pub mod config;
 pub mod db;

@@ -132,6 +132,7 @@ pub struct RunningServer {
     backing_up: JoinHandle<()>,
     workers: jobs::Workers,
     activity: Activity,
+    bonjour: Option<crate::bonjour::Announcement>,
     _lock: crate::fsutil::DataLock,
 }
 
@@ -141,7 +142,10 @@ impl RunningServer {
         self.stop(SHUTDOWN_GRACE).await
     }
 
-    async fn stop(self, grace: Duration) -> Result<()> {
+    async fn stop(mut self, grace: Duration) -> Result<()> {
+        if let Some(announcement) = self.bonjour.take() {
+            let _ = tokio::task::spawn_blocking(move || announcement.stop()).await;
+        }
         self.handle.graceful_shutdown(Some(grace));
         self.tidying.abort();
         self.backing_up.abort();
@@ -230,6 +234,18 @@ pub async fn start_on(
     let task = tokio::spawn(async move { server.serve(app).await });
     let tidying = tokio::spawn(keep_tidy(pool.clone(), config.clone(), uploads));
     let backing_up = tokio::spawn(keep_backed_up(pool, config.clone(), backup_status, wake));
+    let bonjour = if config.network.bonjour {
+        let name = config.server.name.clone();
+        let port = addr.port();
+        tokio::task::spawn_blocking(move || {
+            crate::bonjour::announce(&name, server_id, &fingerprint, port)
+        })
+        .await
+        .ok()
+        .flatten()
+    } else {
+        None
+    };
 
     Ok(RunningServer {
         addr,
@@ -240,6 +256,7 @@ pub async fn start_on(
         backing_up,
         workers,
         activity,
+        bonjour,
         _lock: lock,
     })
 }

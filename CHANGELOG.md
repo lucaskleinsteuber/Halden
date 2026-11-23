@@ -21,8 +21,10 @@ There are no version numbers yet; entries are grouped by date until the first re
   systemd write permissions and the firewall, and says how to fix each problem.
   `halden doctor --files` reads every original, thumbnail and mirror copy back and compares its
   SHA-256, and lists files the library doesn't know.
-- Server: `[network] bonjour` and `[update] check_daily`/`beta` settings (used from the next
-  steps on).
+- Server: announces itself in the home network with Bonjour (`_halden._tcp`, with its ID,
+  fingerprint, API version and name), only on home-network interfaces, so the apps find it
+  without an address. `[network] bonjour = false` turns it off.
+- Server: `[update] check_daily` and `beta` settings (used by updates, coming next).
 
 - Server: daily database backups on the library disk (checked, 14 kept), also made at start;
   `halden backup now|list|restore`. A restore sets the current database aside first.

@@ -60,6 +60,16 @@ Every error has a status code and the same body:
 
 `serverId` never changes; use it to recognise the server at any address.
 
+## Finding the server
+
+In the home network the server announces itself with Bonjour as `_halden._tcp` (instance name
+`halden-<first 8 hex digits of the server ID>`). The text record has `id` (server ID), `fp`
+(certificate fingerprint, lowercase hex), `api` (API version), `v` (server version) and `name`
+(the server's name, to show). The announcement goes out only on home-network interfaces. Finding
+a server is not trusting it: the app still pairs or signs in, and when signing in with a password
+it shows the fingerprint to compare with `halden status`. Turned off with
+`[network] bonjour = false`. In Docker it only works with host networking.
+
 ## Signing in
 
 A device signs in once and gets a **device token**. It sends the token with every request:
@@ -652,8 +662,8 @@ What `halden doctor` says: `{"level": "ok" | "warning" | "problem", "checks": [ 
 "mirror", "level": "warning", "title": "Mirror", "detail": "none: …", "fix": "connect a second
 disk and run: …" } ]}`. `id`s are stable: `config`, `folders`, `settings_file`,
 `library_disk`, `data_disk`, `database`, `certificate`, `ffmpeg`, `libheif`, `mirror`, `jobs`,
-`backups`, `server`, `clock`, `systemd`, `firewall`, `network`. Checks that don't apply are left
-out.
+`backups`, `server`, `clock`, `systemd`, `firewall`, `bonjour`, `network`. Checks that don't
+apply are left out.
 
 ### `POST /admin/restart`
 

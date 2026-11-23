@@ -138,6 +138,8 @@ pub async fn start_server_with(
     let mut config = Config::load(&config_path).unwrap();
     config.server.bind = "127.0.0.1".parse().unwrap();
     config.server.port = 0;
+    // Tests don't announce themselves in the network (one test turns it back on).
+    config.network.bonjour = false;
     change(&mut config);
     let running = server::start(&config).await.unwrap();
     (running, config)
@@ -240,6 +242,7 @@ impl Api {
         .unwrap();
         set_setting(&config_path, "server.bind", "127.0.0.1");
         set_setting(&config_path, "server.port", "0");
+        set_setting(&config_path, "network.bonjour", "false");
         let supervisor = Supervisor::start_polling(&config_path, Duration::from_millis(100))
             .await
             .unwrap();

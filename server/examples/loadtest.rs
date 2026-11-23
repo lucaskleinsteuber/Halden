@@ -234,6 +234,7 @@ async fn main() -> Result<()> {
     let port = TcpListener::bind("127.0.0.1:0")?.local_addr()?.port();
     config.server.bind = "127.0.0.1".parse()?;
     config.server.port = port;
+    config.network.bonjour = false;
     config.save(&config_path)?;
 
     let db = Db::open(&config.db_path()).await?;

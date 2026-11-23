@@ -95,6 +95,7 @@ async fn kill_dash_nine_in_the_middle_of_an_upload_loses_nothing() {
         .port();
     config.server.bind = "127.0.0.1".parse().unwrap();
     config.server.port = port;
+    config.network.bonjour = false;
     config.save(&config_path).unwrap();
 
     let db = Db::open(&config.db_path()).await.unwrap();

@@ -103,6 +103,21 @@ pub async fn check(config: &Config, db: Option<&Db>, options: &Options) -> Repor
     checks.extend(clock().await);
     checks.extend(systemd(config).await);
     checks.extend(firewall(config).await);
+    if config.network.bonjour
+        && !crate::net::local_addresses()
+            .into_iter()
+            .any(crate::bonjour::announce_on)
+    {
+        checks.push(
+            Check::new(
+                "bonjour",
+                "Bonjour",
+                Level::Warning,
+                "no home-network address, so the apps can't find the server by themselves",
+            )
+            .fix("pair devices with the QR code from `sudo halden pair` instead"),
+        );
+    }
     if config.network.allow_public {
         checks.push(
             Check::new(
