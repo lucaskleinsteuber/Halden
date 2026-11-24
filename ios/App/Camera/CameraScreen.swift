@@ -147,7 +147,7 @@ struct CameraScreen<Gallery: View>: View {
         .font(.title3)
         .frame(height: Self.topBarHeight)
         .padding(.horizontal, 12)
-        .background(camera.mode == .video ? Color.black.opacity(0.25) : .clear)
+        .background(camera.mode.records ? Color.black.opacity(0.25) : .clear)
     }
 
     /// Flash for photos, the light for videos.
@@ -238,17 +238,32 @@ struct CameraScreen<Gallery: View>: View {
                     .background(.red, in: .rect(cornerRadius: 4))
             }
             .accessibilityIdentifier("recording-time")
-        } else if camera.mode == .video {
+        } else if camera.mode.records {
             Menu {
-                Picker("Size", selection: videoSetting(\.videoResolution)) {
-                    Text("4K").tag(AppSettings.VideoResolution.uhd4K)
-                    Text("1080p").tag(AppSettings.VideoResolution.hd1080)
+                switch camera.mode {
+                case .slowMotion:
+                    Picker("Frame rate", selection: videoSetting(\.slowMotionRate)) {
+                        Text("240 fps").tag(240)
+                        Text("120 fps").tag(120)
+                    }
+                case .timeLapse:
+                    Picker("A picture", selection: videoSetting(\.timeLapseInterval)) {
+                        Text("Automatic").tag(0.0)
+                        ForEach([0.5, 1, 2, 5, 10], id: \.self) { seconds in
+                            Text("every \(CameraMode.intervalText(seconds))").tag(seconds)
+                        }
+                    }
+                default:
+                    Picker("Size", selection: videoSetting(\.videoResolution)) {
+                        Text("4K").tag(AppSettings.VideoResolution.uhd4K)
+                        Text("1080p").tag(AppSettings.VideoResolution.hd1080)
+                    }
+                    Picker("Frame rate", selection: videoSetting(\.videoFrameRate)) {
+                        Text("60 fps").tag(60)
+                        Text("30 fps").tag(30)
+                    }
+                    Toggle("HDR", isOn: videoSetting(\.videoHDR))
                 }
-                Picker("Frame rate", selection: videoSetting(\.videoFrameRate)) {
-                    Text("60 fps").tag(60)
-                    Text("30 fps").tag(30)
-                }
-                Toggle("HDR", isOn: videoSetting(\.videoHDR))
             } label: {
                 Text(state.videoFormat ?? "Video")
                     .font(.caption.bold())
@@ -403,7 +418,7 @@ struct CameraScreen<Gallery: View>: View {
         } label: {
             ZStack {
                 Circle().strokeBorder(.white, lineWidth: 4).frame(width: 76, height: 76)
-                if camera.mode == .video {
+                if camera.mode.records {
                     RoundedRectangle(cornerRadius: camera.recording ? 6 : 30)
                         .fill(.red)
                         .frame(width: camera.recording ? 30 : 62, height: camera.recording ? 30 : 62)
@@ -417,7 +432,7 @@ struct CameraScreen<Gallery: View>: View {
         .accessibilityLabel(
             camera.countdown != nil
                 ? "Stop the self-timer"
-                : camera.mode == .photo ? "Take a photo" : camera.recording ? "Stop recording" : "Record a video"
+                : camera.recording ? "Stop recording" : camera.mode.shutterLabel
         )
         .accessibilityIdentifier("shutter")
     }
@@ -431,13 +446,29 @@ extension CameraScreen where Gallery == EmptyView {
 
 extension CameraMode {
     /// The order on the screen, as in Apple's camera.
-    static let strip: [CameraMode] = [.video, .photo]
+    static let strip: [CameraMode] = [.timeLapse, .slowMotion, .video, .photo]
 
     var title: String {
         switch self {
         case .photo: "Photo"
         case .video: "Video"
+        case .slowMotion: "Slo-mo"
+        case .timeLapse: "Time-lapse"
         }
+    }
+
+    var shutterLabel: String {
+        switch self {
+        case .photo: "Take a photo"
+        case .video: "Record a video"
+        case .slowMotion: "Record slow motion"
+        case .timeLapse: "Record a time-lapse"
+        }
+    }
+
+    /// "0.5 s", "2 s".
+    static func intervalText(_ seconds: Double) -> String {
+        (seconds == seconds.rounded() ? String(Int(seconds)) : String(seconds)) + " s"
     }
 }
 

@@ -53,6 +53,21 @@ the design comes after that. What works today is described below.
   uploads count them as one. Full screen shows "LIVE" and plays it while held
   (`PHLivePhotoView`, the video fetched from the server when it isn't on this iPhone). Saved to
   Apple Photos as a Live Photo; shared with both files. The lock-screen camera takes them too.
+- **Slow motion** (Slo-mo): 1080p at 240 fps (or 120, in the settings or on the camera
+  screen), with sound, on the camera that can record that fast. The file stays as recorded;
+  played, a part of it is slow (`Retiming.slowMotion`, the sound slowing down with it): by
+  default from a seventh in to a seventh before the end at 30 frames a second (1/8 at 240 fps).
+  Where and how slow can be changed (the slow-motion button in the full-screen view); the
+  server keeps it as the asset's `playback`, a correction with its history, and every device
+  gets it with the sync. Shared as recorded or as played (written anew).
+- **Time-lapse**: the camera's frames, of which `TimeLapseRecorder` keeps a few and writes them
+  at 30 frames a second (HEVC, with place and time). Automatic like Apple's camera: two
+  pictures a second at first, half as many whenever the video would get longer than 40 s, and
+  when it stops, the earlier stretches are sped up to the pace of the last one, so the video is
+  20 to 40 s and runs at one speed (`TimeLapsePlan`, `Retiming.timeLapse`). A fixed interval
+  (0.5 to 10 s) can be set instead.
+- Slow-motion videos and time-lapses are marked in the grid and full screen, and the server
+  knows them by their `captureMode`.
 - **Time, place and direction**: every photo and video knows when it was taken (with the time
   zone), where (with the accuracy) and which way the camera pointed, sent to the server and
   written into the file itself (EXIF/GPS for photos, QuickTime metadata for videos, as Apple's

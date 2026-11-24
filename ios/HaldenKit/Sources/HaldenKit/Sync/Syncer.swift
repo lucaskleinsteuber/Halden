@@ -75,6 +75,8 @@ public actor Syncer {
         local.thumbnailSha256 = asset.file("thumbnail")?.sha256 ?? local.thumbnailSha256
         local.previewSha256 = asset.file("preview")?.sha256 ?? local.previewSha256
         local.pairedVideoSha256 = asset.file("paired_video")?.sha256 ?? local.pairedVideoSha256
+        local.captureMode = asset.captureMode ?? local.captureMode
+        local.playback = asset.playback
         try local.save(db)
     }
 }

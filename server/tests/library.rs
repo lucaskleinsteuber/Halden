@@ -402,6 +402,118 @@ async fn corrections_keep_the_original_and_their_history() {
     api.stop().await;
 }
 
+/// A slow-motion video says so, and its slow part is a correction next to the unchanged
+/// original, with its history; a photo never gets a capture mode.
+#[tokio::test]
+async fn slow_motion_keeps_its_slow_part_next_to_the_original() {
+    let api = Api::start().await;
+    let token = owner(&api).await;
+    let video = Uuid::new_v4().to_string();
+    let mut metadata = taken(1_795_443_730_000, None);
+    metadata["captureMode"] = json!("slowmo");
+    api.upload(
+        &token,
+        &video,
+        &random_bytes(400),
+        "video/quicktime",
+        metadata.clone(),
+    )
+    .await;
+    let photo = Uuid::new_v4().to_string();
+    api.upload(&token, &photo, &random_bytes(300), "image/heic", metadata)
+        .await;
+    let other = Uuid::new_v4().to_string();
+    let mut unknown = taken(1_795_443_730_000, None);
+    unknown["captureMode"] = json!("cinematic");
+    api.upload(
+        &token,
+        &other,
+        &random_bytes(500),
+        "video/quicktime",
+        unknown,
+    )
+    .await;
+
+    let path = format!("/api/v1/assets/{video}");
+    let asset = api.get(&path, &token).await.body;
+    assert_eq!(asset["captureMode"], "slowmo", "{asset}");
+    assert_eq!(asset["playback"], Value::Null);
+    let photo_asset = api
+        .get(&format!("/api/v1/assets/{photo}"), &token)
+        .await
+        .body;
+    assert_eq!(photo_asset["captureMode"], Value::Null, "only videos");
+    let other_asset = api
+        .get(&format!("/api/v1/assets/{other}"), &token)
+        .await
+        .body;
+    assert_eq!(
+        other_asset["captureMode"],
+        Value::Null,
+        "unknown modes are not used"
+    );
+    assert_eq!(other_asset["playback"], Value::Null);
+
+    let slow = json!({ "slowFromMs": 500, "slowToMs": 2500, "rate": 0.125 });
+    let changed = api
+        .call(
+            Method::PATCH,
+            &path,
+            Some(&token),
+            Some(json!({ "playback": slow })),
+        )
+        .await;
+    assert_eq!(changed.status, 200, "{}", changed.body);
+    assert_eq!(changed.body["playback"], slow);
+    for wrong in [
+        json!({ "slowFromMs": 500, "slowToMs": 100, "rate": 0.125 }),
+        json!({ "slowFromMs": -1, "slowToMs": 100, "rate": 0.125 }),
+        json!({ "slowFromMs": 0, "slowToMs": 100, "rate": 2 }),
+        json!({ "slowFromMs": 0, "slowToMs": 100, "rate": 0.5, "speed": 3 }),
+    ] {
+        let refused = api
+            .call(
+                Method::PATCH,
+                &path,
+                Some(&token),
+                Some(json!({ "playback": wrong })),
+            )
+            .await;
+        assert_eq!(refused.status, 422, "{wrong}: {}", refused.body);
+    }
+    // Other devices hear of it through sync.
+    let page = api.get("/api/v1/sync?since=0", &token).await.body;
+    let synced = page["assets"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|a| a["id"] == video.as_str())
+        .unwrap();
+    assert_eq!(synced["playback"], slow);
+    assert_eq!(synced["captureMode"], "slowmo");
+
+    let back = api
+        .call(
+            Method::PATCH,
+            &path,
+            Some(&token),
+            Some(json!({ "playback": null })),
+        )
+        .await;
+    assert_eq!(back.body["playback"], Value::Null);
+    let edits = api.get(&path, &token).await.body["edits"].clone();
+    let fields: Vec<_> = edits
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|e| e["field"].clone())
+        .collect();
+    assert_eq!(fields, [json!("playback"), json!("playback")], "{edits}");
+    assert_eq!(edits[0]["new"], slow);
+    assert_eq!(edits[1]["old"], slow);
+    assert_eq!(edits[1]["new"], Value::Null);
+}
+
 #[tokio::test]
 async fn photos_without_a_place_get_one_suggested() {
     let api = Api::start().await;

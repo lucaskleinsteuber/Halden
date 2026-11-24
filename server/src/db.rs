@@ -221,6 +221,9 @@ mod upgrade_tests {
             // 7
             "INSERT INTO file_journal (action, storage, path, created_at) \
              VALUES ('remove', 'derived', 'ab/cd/x.jpg', 1)",
+            // 8
+            "UPDATE assets SET capture_mode = 'slowmo', \
+                 playback_json = '{\"slowFromMs\":1,\"slowToMs\":2,\"rate\":0.25}' WHERE id = 'a1'",
         ];
         for statement in &statements[..level.min(statements.len())] {
             sqlx::raw_sql(*statement)

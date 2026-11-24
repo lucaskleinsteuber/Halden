@@ -8,6 +8,14 @@ There are no version numbers yet; entries are grouped by date until the first re
 
 ### Added
 
+- iPhone slow motion: 1080p at 240 or 120 fps with sound; the original stays as recorded and a
+  slow part (by default most of it, at 30 frames a second) is set next to it, changeable in the
+  full-screen view, kept on the server as the asset's `playback` and synced to every device;
+  shared as recorded or as played.
+- iPhone time-lapse: automatic like Apple's camera (the video stays 20 to 40 seconds however
+  long it runs, at one speed) or with a fixed interval.
+- Server: the asset's `captureMode` (`slowmo`, `timelapse`, from the upload's metadata) and
+  `playback` (the slow part of a slow-motion video, a correction with its history).
 - iPhone Live Photos, on by default like Apple's camera (button on the camera, Settings ›
   Camera): photo and short video with sound, uploaded as the asset's `original` and
   `paired_video` and counted as one, played full screen while held, marked in the grid, saved to

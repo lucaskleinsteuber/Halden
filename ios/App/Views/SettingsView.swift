@@ -251,6 +251,20 @@ struct CameraSettings: View {
                 Toggle(isOn: app.setting(\.videoHDR)) {
                     Explained("HDR", "Brighter highlights on HDR screens; looks different elsewhere.")
                 }
+                Picker(selection: app.setting(\.slowMotionRate)) {
+                    Text("240 fps").tag(240)
+                    Text("120 fps").tag(120)
+                } label: {
+                    Explained("Slow motion", "240 frames a second play eight times slower, 120 four times.")
+                }
+                Picker(selection: app.setting(\.timeLapseInterval)) {
+                    Text("Automatic").tag(0.0)
+                    ForEach([0.5, 1, 2, 5, 10], id: \.self) { seconds in
+                        Text("every \(CameraMode.intervalText(seconds))").tag(seconds)
+                    }
+                } label: {
+                    Explained("Time-lapse", "Automatic: however long it runs, the video is 20 to 40 seconds.")
+                }
             } header: {
                 Text("Videos")
             } footer: {

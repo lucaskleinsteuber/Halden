@@ -8,6 +8,11 @@ import Photos
 import UIKit
 import UniformTypeIdentifiers
 
+extension Notification.Name {
+    /// A slow-motion video's slow part changed (the object is its id).
+    static let haldenPlaybackChanged = Notification.Name("halden.playback-changed")
+}
+
 /// Everything the screens show and do. Lives as long as the app.
 @MainActor
 @Observable
@@ -446,6 +451,36 @@ final class AppModel {
         }
     }
 
+    /// The slow part of a slow-motion video; `nil` brings back the one it started with.
+    func setPlayback(_ id: String, _ slow: SlowMotion?) {
+        do {
+            try actions.correct(id, AssetCorrection(playback: slow.map { .set($0) } ?? .clear))
+            refresh()
+            NotificationCenter.default.post(name: .haldenPlaybackChanged, object: id)
+        } catch {
+            problem = "The slow part could not be saved: \(error.localizedDescription)"
+        }
+    }
+
+    /// The video to play: on this iPhone, else streamed from the server.
+    func playable(_ asset: LocalAsset) -> AVURLAsset? {
+        media.localOriginal(of: asset).map { AVURLAsset(url: $0) } ?? stream(asset)
+    }
+
+    /// The slow part a slow-motion video starts with.
+    func standardSlowMotion(for asset: LocalAsset) async -> SlowMotion {
+        guard let video = playable(asset) else {
+            return SlowMotion.standard(durationMs: asset.durationMs ?? 1000, frameRate: 240)
+        }
+        return await Retiming.standardSlowMotion(of: video, durationMs: asset.durationMs)
+    }
+
+    /// How a slow-motion video plays: its slow part, or the standard one.
+    func slowMotion(of asset: LocalAsset) async -> SlowMotion {
+        if let playback = asset.playback { return playback }
+        return await standardSlowMotion(for: asset)
+    }
+
     /// One place for many photos.
     func setPlace(_ ids: [String], _ place: CorrectedLocation) {
         do {
@@ -519,13 +554,15 @@ final class AppModel {
         case corrected
         /// The copy in the account's preferred format (`/me/settings`).
         case preferred
+        /// A slow-motion video as it plays, with its slow part (written anew).
+        case asPlayed
     }
 
     /// A file to share; fetched from the server when it isn't on this iPhone.
     /// What to share: the file, and for a Live Photo its video too (not for other formats).
     func filesToShare(_ asset: LocalAsset, as kind: ShareKind) async throws -> [URL] {
         let main = try await fileToShare(asset, as: kind)
-        guard asset.isLivePhoto, kind != .preferred else { return [main] }
+        guard asset.isLivePhoto, kind == .original || kind == .corrected else { return [main] }
         return [main, try await media.pairedVideo(of: asset)]
     }
 
@@ -546,6 +583,12 @@ final class AppModel {
             let named = folder.appendingPathComponent("Halden-\(asset.id.prefix(8)).\(ext)")
             try? FileManager.default.removeItem(at: named)
             try FileManager.default.moveItem(at: download, to: named)
+            return named
+        case .asPlayed:
+            let original = AVURLAsset(url: try await media.original(of: asset))
+            let played = try await Retiming.slowMotion(original, slow: await slowMotion(of: asset))
+            let named = folder.appendingPathComponent("Halden-\(asset.id.prefix(8))-slow.mov")
+            try await Retiming.export(played, to: named, metadataOf: original)
             return named
         }
     }

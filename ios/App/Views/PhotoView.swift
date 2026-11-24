@@ -13,6 +13,7 @@ struct PhotoView: View {
     @State private var preparing = false
     @State private var problem: String?
     @State private var confirmDelete = false
+    @State private var editingSlowMotion = false
     @Environment(\.dismiss) private var dismiss
 
     init(start: String, assets: [LocalAsset]) {
@@ -36,6 +37,9 @@ struct PhotoView: View {
                         Button("Original") { share(.original) }
                         Button("With corrected time and place") { share(.corrected) }
                         Button("In the preferred format") { share(.preferred) }
+                        if asset?.isSlowMotion == true {
+                            Button("As played, slowed down") { share(.asPlayed) }
+                        }
                     } label: {
                         if preparing { ProgressView() } else { Image(systemName: "square.and.arrow.up") }
                     }
@@ -51,6 +55,18 @@ struct PhotoView: View {
                     }
                     .accessibilityLabel("Delete")
                     .accessibilityIdentifier("delete")
+                }
+                if asset?.isSlowMotion == true {
+                    ToolbarSpacer(.flexible, placement: .bottomBar)
+                    ToolbarItem(placement: .bottomBar) {
+                        Button {
+                            editingSlowMotion = true
+                        } label: {
+                            Image(systemName: "slowmo")
+                        }
+                        .accessibilityLabel("Slow part")
+                        .accessibilityIdentifier("slow-motion")
+                    }
                 }
                 ToolbarSpacer(.flexible, placement: .bottomBar)
                 ToolbarItem(placement: .bottomBar) {
@@ -83,6 +99,9 @@ struct PhotoView: View {
                 )
             }
             .sheet(isPresented: $showInfo) { InfoView(id: current) }
+            .sheet(isPresented: $editingSlowMotion) {
+                if let asset { SlowMotionEditor(asset: asset) }
+            }
             .sheet(item: $sharing) { file in ShareSheet(items: file.urls) }
             .alert("Can't share", isPresented: .constant(problem != nil)) {
                 Button("OK") { problem = nil }
@@ -204,6 +223,18 @@ struct InfoView: View {
             if let duration = asset.durationMs {
                 LabeledContent(
                     "Length", value: Duration.milliseconds(duration).formatted(.time(pattern: .minuteSecond)))
+            }
+            if let kind = asset.isLivePhoto
+                ? "Live Photo" : asset.isSlowMotion ? "Slow motion" : asset.isTimeLapse ? "Time-lapse" : nil
+            {
+                LabeledContent("Taken as", value: kind)
+            }
+            if let slow = asset.playback {
+                LabeledContent(
+                    "Slow part",
+                    value:
+                        "\(SlowMotionEditor.seconds(slow.slowFromMs))–\(SlowMotionEditor.seconds(slow.slowToMs)), \(Int((1 / slow.rate).rounded()))× slower"
+                )
             }
             Button("Correct…") { correcting = true }.accessibilityIdentifier("correct")
         }

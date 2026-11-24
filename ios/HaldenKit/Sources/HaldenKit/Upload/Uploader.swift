@@ -34,6 +34,7 @@ public actor Uploader {
         asset.backedUp = false
         asset.durationMs = metadata.durationMs
         asset.origin = origin
+        asset.captureMode = kind == "video" ? metadata.captureMode : nil
         if let place = metadata.location {
             asset.latitude = place.latitude
             asset.longitude = place.longitude

@@ -35,6 +35,30 @@ impl NewLocation {
     }
 }
 
+/// The slow part of a slow-motion video: from and to (milliseconds into the video) and how slow
+/// (0.125 is eight times slower).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct Playback {
+    pub slow_from_ms: i64,
+    pub slow_to_ms: i64,
+    pub rate: f64,
+}
+
+impl Playback {
+    pub fn check(&self) -> Result<(), String> {
+        if self.slow_from_ms < 0
+            || self.slow_to_ms <= self.slow_from_ms
+            || !(0.01..=1.0).contains(&self.rate)
+        {
+            return Err(
+                "playback needs 0 <= slowFromMs < slowToMs and a rate between 0.01 and 1.".into(),
+            );
+        }
+        Ok(())
+    }
+}
+
 /// What to change. A missing field stays as it is.
 #[derive(Debug, Default)]
 pub struct Correction {
@@ -44,6 +68,8 @@ pub struct Correction {
     pub location: Option<Option<NewLocation>>,
     pub title: Option<Option<String>>,
     pub description: Option<Option<String>>,
+    /// `Some(None)`: play as recorded.
+    pub playback: Option<Option<Playback>>,
     /// Drop corrections and show the original again: `takenAt` and/or `location`.
     pub restore: Vec<String>,
 }
@@ -52,6 +78,9 @@ impl Correction {
     pub fn check(&self) -> Result<(), String> {
         if let Some(Some(location)) = &self.location {
             location.check()?;
+        }
+        if let Some(Some(playback)) = &self.playback {
+            playback.check()?;
         }
         if let Some(taken) = self.taken_at
             && !(super::EARLIEST_TAKEN_AT..=super::LATEST_TAKEN_AT).contains(&taken)
@@ -90,6 +119,7 @@ impl Correction {
             && self.location.is_none()
             && self.title.is_none()
             && self.description.is_none()
+            && self.playback.is_none()
             && self.restore.is_empty()
     }
 }
@@ -264,6 +294,29 @@ async fn apply(
                 .await?;
             record(tx, id, device_id, field, Value::Null, json!(value)).await?;
         }
+    }
+
+    if let Some(playback) = &correction.playback {
+        let new = playback.as_ref().map(|p| json!(p));
+        sqlx::query("UPDATE assets SET playback_json = ? WHERE id = ?")
+            .bind(new.as_ref().map(Value::to_string))
+            .bind(id)
+            .execute(&mut *tx)
+            .await?;
+        let old = row
+            .playback_json
+            .as_deref()
+            .and_then(|json| serde_json::from_str(json).ok())
+            .unwrap_or(Value::Null);
+        record(
+            tx,
+            id,
+            device_id,
+            "playback",
+            old,
+            new.unwrap_or(Value::Null),
+        )
+        .await?;
     }
     assets::touch(tx, id).await?;
     Ok(())

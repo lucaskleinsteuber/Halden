@@ -395,6 +395,54 @@ struct EndToEndTests {
         #expect(try database.asset(c)?.takenAt == before)
     }
 
+    /// A slow-motion video: the server knows it as one, its slow part goes there as a
+    /// correction and comes back with the sync, and "as recorded" brings back the standard.
+    @Test func slowMotionKeepsItsSlowPartOnTheServer() async throws {
+        let server = try RealServer()
+        let info = try await server.ready()
+        let (connection, token) = try await Connector.login(
+            address: "127.0.0.1", port: server.port, fingerprint: info.fingerprint,
+            username: "lucas", password: RealServer.password, device: device)
+        let client = APIClient(
+            base: APIClient.base(address: "127.0.0.1", port: server.port)!, trust: .pinned(connection.fingerprint),
+            token: token)
+        let database = try HaldenDatabase()
+        try database.save(
+            server: StoredServer(serverId: connection.serverId, connection: connection, syncSince: 0, backup: nil))
+        let root = server.folder.appendingPathComponent("phone")
+        let files = try FileLocations(root: root, caches: root.appendingPathComponent("caches"))
+        let id = UUID().uuidString.lowercased()
+        try await SampleMedia.video(at: files.original("slow.mov"), seed: 8, seconds: 2)
+        try Uploader.enqueue(
+            database: database, files: files, assetId: id, fileName: "slow.mov", kind: "video",
+            mimeType: "video/quicktime",
+            metadata: UploadMetadata(takenAt: 1_795_443_730_000, durationMs: 2000, captureMode: "slowmo"))
+        #expect(try database.asset(id)?.isSlowMotion == true)
+        #expect(await Uploader(database: database, files: files, client: client).drain() == 1)
+        #expect(try await client.asset(id).captureMode == "slowmo")
+
+        let slow = SlowMotion(slowFromMs: 400, slowToMs: 1600, rate: 0.25)
+        let actions = Actions(database: database)
+        try actions.correct(id, AssetCorrection(playback: .set(slow)))
+        #expect(try database.asset(id)?.playback == slow, "shows at once")
+        #expect(await actions.send(with: client) == .done)
+        #expect(try await client.asset(id).playback == slow)
+
+        // Another phone gets it with the sync.
+        let other = try HaldenDatabase()
+        try other.save(
+            server: StoredServer(serverId: connection.serverId, connection: connection, syncSince: 0, backup: nil))
+        try await Syncer(database: other, client: client).run()
+        let synced = try #require(try other.asset(id))
+        #expect(synced.isSlowMotion && synced.playback == slow)
+
+        try actions.correct(id, AssetCorrection(playback: .clear))
+        #expect(await actions.send(with: client) == .done)
+        #expect(try await client.asset(id).playback == nil)
+        try await Syncer(database: other, client: client).run()
+        #expect(try other.asset(id)?.playback == nil)
+    }
+
     /// Two phones send the same photo; the second finishes while the first is halfway. When the
     /// first one's last piece arrives, the server says "duplicate", and the first phone's photo
     /// becomes the one that is already there.

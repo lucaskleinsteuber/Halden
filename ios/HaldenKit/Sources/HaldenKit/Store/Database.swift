@@ -155,6 +155,14 @@ public final class HaldenDatabase: Sendable {
                         SELECT file FROM upload WHERE upload.assetId = asset.id AND role = 'paired_video')
                     """)
         }
+        migrator.registerMigration("5: slow motion and time-lapse") { db in
+            try db.alter(table: "asset") { t in
+                // `slowmo` or `timelapse` for videos taken that way.
+                t.add(column: "captureMode", .text)
+                // The slow part of a slow-motion video (JSON), when it was changed.
+                t.add(column: "playback", .jsonText)
+            }
+        }
         return migrator
     }
 }
@@ -205,8 +213,14 @@ public struct LocalAsset: Codable, Sendable, Equatable, Identifiable, FetchableR
     public var origin: String?
     public var pairedVideoFile: String?
     public var pairedVideoSha256: String?
+    /// `slowmo` or `timelapse` for videos taken that way.
+    public var captureMode: String?
+    /// The slow part of a slow-motion video, when it was changed; else the standard one.
+    public var playback: SlowMotion?
 
     public var isVideo: Bool { kind == "video" }
+    public var isSlowMotion: Bool { isVideo && captureMode == "slowmo" }
+    public var isTimeLapse: Bool { isVideo && captureMode == "timelapse" }
     /// A photo with a short video, taken as one.
     public var isLivePhoto: Bool { !isVideo && (pairedVideoFile != nil || pairedVideoSha256 != nil) }
     public var hasLocation: Bool { latitude != nil && longitude != nil }

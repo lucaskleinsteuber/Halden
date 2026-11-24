@@ -82,7 +82,8 @@ final class DeviceCamera: CaptureBackend {
         self.video = video
         Task {
             // Sound for videos and Live Photos; without the microphone they are silent.
-            if mode == .video || video.live, AVCaptureDevice.authorizationStatus(for: .audio) == .notDetermined {
+            let sound = mode == .video || mode == .slowMotion || (mode == .photo && video.live)
+            if sound, AVCaptureDevice.authorizationStatus(for: .audio) == .notDetermined {
                 _ = await AVCaptureDevice.requestAccess(for: .audio)
             }
             core.run { $0.change(mode: mode, video: video) }
@@ -130,8 +131,28 @@ final class DeviceCamera: CaptureBackend {
     }
 
     func stopRecording() async -> URL? {
-        await withCheckedContinuation { continuation in
-            core.run { $0.stopRecording { continuation.resume(returning: $0) } }
+        let (url, plan): (URL?, TimeLapsePlan?) = await withCheckedContinuation { continuation in
+            core.run { $0.stopRecording { url, plan in continuation.resume(returning: (url, plan)) } }
+        }
+        guard let url else { return nil }
+        if let plan, plan.stretches.count > 1 { return await Self.evenOut(url, plan) ?? url }
+        return url
+    }
+
+    /// A time-lapse whose first stretches were taken more often: played faster, so the whole
+    /// video runs at one speed (written anew, with the same place and time).
+    private static func evenOut(_ url: URL, _ plan: TimeLapsePlan) async -> URL? {
+        let asset = AVURLAsset(url: url)
+        let even = url.deletingPathExtension().appendingPathExtension("even.mov")
+        do {
+            let composition = try await Retiming.timeLapse(asset, stretches: plan.speedUps, frameRate: 30)
+            try await Retiming.export(composition, to: even, metadataOf: asset)
+            try FileManager.default.removeItem(at: url)
+            try FileManager.default.moveItem(at: even, to: url)
+            return url
+        } catch {
+            try? FileManager.default.removeItem(at: even)
+            return nil
         }
     }
 
@@ -215,6 +236,10 @@ final class CaptureCore: NSObject, @unchecked Sendable {
     let session = AVCaptureSession()
     private let photoOutput = AVCapturePhotoOutput()
     private let movieOutput = AVCaptureMovieFileOutput()
+    /// Time-lapses: the frames, of which `timeLapse` keeps a few.
+    private let frameOutput = AVCaptureVideoDataOutput()
+    private let timeLapse = TimeLapseRecorder()
+    private var timeLapsing = false
     private var input: AVCaptureDeviceInput?
     private var audioInput: AVCaptureDeviceInput?
     private var mode = CameraMode.photo
@@ -230,6 +255,8 @@ final class CaptureCore: NSObject, @unchecked Sendable {
 
     override init() {
         super.init()
+        frameOutput.alwaysDiscardsLateVideoFrames = true
+        frameOutput.setSampleBufferDelegate(timeLapse, queue: timeLapse.queue)
         observers.append(
             NotificationCenter.default.addObserver(
                 forName: AVCaptureSession.runtimeErrorNotification, object: session, queue: nil
@@ -247,18 +274,31 @@ final class CaptureCore: NSObject, @unchecked Sendable {
 
     private var device: AVCaptureDevice? { input?.device }
 
-    /// The back camera with the most lenses there are, or the front camera.
-    static func camera(_ side: CameraSide) -> AVCaptureDevice? {
+    /// The back camera with the most lenses there are, or the front camera. For slow motion the
+    /// first that can record that fast (not every camera made of several lenses can).
+    static func camera(_ side: CameraSide, mode: CameraMode = .photo, options: CaptureOptions? = nil)
+        -> AVCaptureDevice?
+    {
         let types: [AVCaptureDevice.DeviceType] =
             side == .back
             ? [.builtInTripleCamera, .builtInDualWideCamera, .builtInDualCamera, .builtInWideAngleCamera]
             : [.builtInTrueDepthCamera, .builtInWideAngleCamera]
-        for type in types {
-            if let device = AVCaptureDevice.default(type, for: .video, position: side == .back ? .back : .front) {
-                return device
+        let devices = types.compactMap {
+            AVCaptureDevice.default($0, for: .video, position: side == .back ? .back : .front)
+        }
+        if mode == .slowMotion {
+            let wanted = Double(min(options?.slowMotionRate ?? 240, 120))
+            if let fast = devices.first(where: { device in
+                device.formats.contains { format in
+                    let size = CMVideoFormatDescriptionGetDimensions(format.formatDescription)
+                    return size.width == 1920 && size.height == 1080
+                        && (format.videoSupportedFrameRateRanges.map(\.maxFrameRate).max() ?? 0) >= wanted
+                }
+            }) {
+                return fast
             }
         }
-        return nil
+        return devices.first
     }
 
     func configure(side: CameraSide, mode: CameraMode, video: CaptureOptions?) {
@@ -268,7 +308,8 @@ final class CaptureCore: NSObject, @unchecked Sendable {
         session.beginConfiguration()
         if let input { session.removeInput(input) }
         input = nil
-        guard let device = Self.camera(side), let newInput = try? AVCaptureDeviceInput(device: device),
+        guard let device = Self.camera(side, mode: mode, options: video),
+            let newInput = try? AVCaptureDeviceInput(device: device),
             session.canAddInput(newInput)
         else {
             session.commitConfiguration()
@@ -287,7 +328,11 @@ final class CaptureCore: NSObject, @unchecked Sendable {
     }
 
     func change(mode: CameraMode, video: CaptureOptions) {
-        guard let device, !movieOutput.isRecording else { return }
+        guard let device, !movieOutput.isRecording, !timeLapsing else { return }
+        // Slow motion may need another camera than the others.
+        if Self.camera(side, mode: mode, options: video) != device {
+            return configure(side: side, mode: mode, video: video)
+        }
         self.mode = mode
         self.video = video
         session.beginConfiguration()
@@ -305,6 +350,10 @@ final class CaptureCore: NSObject, @unchecked Sendable {
     func stopRunning() {
         wantRunning = false
         if movieOutput.isRecording { movieOutput.stopRecording() }
+        if timeLapsing {
+            timeLapsing = false
+            timeLapse.finish { _, _ in }
+        }
         if session.isRunning { session.stopRunning() }
     }
 
@@ -312,13 +361,22 @@ final class CaptureCore: NSObject, @unchecked Sendable {
         changed?(state, device.map(Carry.init))
     }
 
-    /// Photo: the photo output in the best quality the camera has. Video: the movie output with
-    /// the chosen format, HEVC, stabilized, with sound when allowed.
+    /// Only this output in the session.
+    private func use(_ output: AVCaptureOutput) {
+        for other in [photoOutput, movieOutput, frameOutput] as [AVCaptureOutput] where other !== output {
+            if session.outputs.contains(other) { session.removeOutput(other) }
+        }
+        if !session.outputs.contains(output), session.canAddOutput(output) { session.addOutput(output) }
+    }
+
+    /// Photo: the photo output in the best quality the camera has. Video and slow motion: the
+    /// movie output with the chosen format, HEVC, stabilized, with sound when allowed. Time-lapse:
+    /// the frames, without sound.
     private func apply(mode: CameraMode, on device: AVCaptureDevice) {
         session.automaticallyConfiguresCaptureDeviceForWideColor = mode == .photo
         switch mode {
         case .photo:
-            if session.outputs.contains(movieOutput) { session.removeOutput(movieOutput) }
+            use(photoOutput)
             // Live Photos record sound; plain photos need no microphone.
             let live = video?.live == true
             if live {
@@ -326,9 +384,6 @@ final class CaptureCore: NSObject, @unchecked Sendable {
             } else if let audioInput {
                 session.removeInput(audioInput)
                 self.audioInput = nil
-            }
-            if !session.outputs.contains(photoOutput), session.canAddOutput(photoOutput) {
-                session.addOutput(photoOutput)
             }
             if session.canSetSessionPreset(.photo) { session.sessionPreset = .photo }
             photoOutput.maxPhotoQualityPrioritization = .quality
@@ -341,13 +396,19 @@ final class CaptureCore: NSObject, @unchecked Sendable {
             photoOutput.isLivePhotoCaptureEnabled = live && photoOutput.isLivePhotoCaptureSupported
             if photoOutput.isLivePhotoCaptureEnabled { photoOutput.isLivePhotoAutoTrimmingEnabled = true }
             state.videoFormat = nil
-        case .video:
-            if session.outputs.contains(photoOutput) { session.removeOutput(photoOutput) }
-            if !session.outputs.contains(movieOutput), session.canAddOutput(movieOutput) {
-                session.addOutput(movieOutput)
-            }
+        case .video, .slowMotion:
+            use(movieOutput)
             addMicrophone()
-            if let video { applyVideoFormat(video, on: device) }
+            if let video {
+                if mode == .slowMotion {
+                    applyVideoFormat(
+                        sizes: [(1920, 1080)], rate: Double(video.slowMotionRate), hdr: false, on: device)
+                } else {
+                    applyVideoFormat(
+                        sizes: video.resolution == .uhd4K ? [(3840, 2160), (1920, 1080)] : [(1920, 1080)],
+                        rate: Double(video.frameRate), hdr: video.hdr, on: device)
+                }
+            }
             if let connection = movieOutput.connection(with: .video) {
                 if movieOutput.availableVideoCodecTypes.contains(.hevc) {
                     movieOutput.setOutputSettings([AVVideoCodecKey: AVVideoCodecType.hevc], for: connection)
@@ -355,6 +416,21 @@ final class CaptureCore: NSObject, @unchecked Sendable {
                 if connection.isVideoStabilizationSupported {
                     connection.preferredVideoStabilizationMode = .auto
                 }
+            }
+        case .timeLapse:
+            use(frameOutput)
+            if let audioInput {
+                session.removeInput(audioInput)
+                self.audioInput = nil
+            }
+            if let video {
+                applyVideoFormat(
+                    sizes: video.resolution == .uhd4K ? [(3840, 2160), (1920, 1080)] : [(1920, 1080)], rate: 30,
+                    hdr: false, on: device)
+                state.videoFormat = video.timeLapseInterval.map { "every \(CameraMode.intervalText($0))" } ?? "Auto"
+            }
+            if let connection = frameOutput.connection(with: .video), connection.isVideoStabilizationSupported {
+                connection.preferredVideoStabilizationMode = .auto
             }
         }
     }
@@ -371,7 +447,7 @@ final class CaptureCore: NSObject, @unchecked Sendable {
 
     /// The format closest to what was asked: the size first, then the frame rate, then HDR (10
     /// bit with HLG) or not. What was actually chosen is shown on the camera screen.
-    private func applyVideoFormat(_ options: CaptureOptions, on device: AVCaptureDevice) {
+    private func applyVideoFormat(sizes: [(Int, Int)], rate: Double, hdr wantHDR: Bool, on device: AVCaptureDevice) {
         func dimensions(_ format: AVCaptureDevice.Format) -> (Int, Int) {
             let size = CMVideoFormatDescriptionGetDimensions(format.formatDescription)
             return (Int(size.width), Int(size.height))
@@ -383,7 +459,6 @@ final class CaptureCore: NSObject, @unchecked Sendable {
             CMFormatDescriptionGetMediaSubType(format.formatDescription)
                 == kCVPixelFormatType_420YpCbCr10BiPlanarVideoRange
         }
-        let sizes: [(Int, Int)] = options.resolution == .uhd4K ? [(3840, 2160), (1920, 1080)] : [(1920, 1080)]
         let sized =
             sizes.lazy.map { size in device.formats.filter { dimensions($0) == size } }.first { !$0.isEmpty }
             ?? []
@@ -392,11 +467,10 @@ final class CaptureCore: NSObject, @unchecked Sendable {
             state.videoFormat = nil
             return
         }
-        let rate = Double(options.frameRate)
         let fast = sized.filter { maxRate($0) >= rate }
         let pool = fast.isEmpty ? sized : fast
         let format =
-            pool.first { options.hdr ? tenBit($0) && $0.supportedColorSpaces.contains(.HLG_BT2020) : !tenBit($0) }
+            pool.first { wantHDR ? tenBit($0) && $0.supportedColorSpaces.contains(.HLG_BT2020) : !tenBit($0) }
             ?? pool[0]
         let used = min(rate, maxRate(format)).rounded()
         guard (try? device.lockForConfiguration()) != nil else { return }
@@ -404,7 +478,7 @@ final class CaptureCore: NSObject, @unchecked Sendable {
         let frame = CMTime(value: 1, timescale: CMTimeScale(used))
         device.activeVideoMinFrameDuration = frame
         device.activeVideoMaxFrameDuration = frame
-        if options.hdr, format.supportedColorSpaces.contains(.HLG_BT2020) {
+        if wantHDR, format.supportedColorSpaces.contains(.HLG_BT2020) {
             device.activeColorSpace = .HLG_BT2020
         } else if format.supportedColorSpaces.contains(.sRGB) {
             device.activeColorSpace = .sRGB
@@ -540,21 +614,35 @@ final class CaptureCore: NSObject, @unchecked Sendable {
     }
 
     func startRecording(_ request: VideoRequest, angle: CGFloat) {
-        guard mode == .video, session.isRunning, !movieOutput.isRecording,
+        let metadata = VideoMetadata.items(
+            location: request.location, takenAt: request.takenAt, timeZone: request.timeZone)
+        if mode == .timeLapse {
+            guard session.isRunning, !timeLapsing, let connection = frameOutput.connection(with: .video) else { return }
+            // The frames come upright, so the file needs no turning.
+            if connection.isVideoRotationAngleSupported(angle) { connection.videoRotationAngle = angle }
+            timeLapsing = true
+            timeLapse.begin(url: request.url, fixedInterval: video?.timeLapseInterval, metadata: metadata)
+            return
+        }
+        guard mode.records, session.isRunning, !movieOutput.isRecording,
             let connection = movieOutput.connection(with: .video)
         else { return }
         if connection.isVideoRotationAngleSupported(angle) { connection.videoRotationAngle = angle }
-        movieOutput.metadata = VideoMetadata.items(
-            location: request.location, takenAt: request.takenAt, timeZone: request.timeZone)
+        movieOutput.metadata = metadata
         let recording = Recording()
         self.recording = recording
         movieOutput.startRecording(to: request.url, recordingDelegate: recording)
     }
 
-    func stopRecording(done: @escaping @Sendable (URL?) -> Void) {
-        guard let recording else { return done(nil) }
+    /// The finished file, and for a time-lapse which stretches were taken how often.
+    func stopRecording(done: @escaping @Sendable (URL?, TimeLapsePlan?) -> Void) {
+        if timeLapsing {
+            timeLapsing = false
+            return timeLapse.finish { url, plan in done(url, plan) }
+        }
+        guard let recording else { return done(nil, nil) }
         self.recording = nil
-        recording.whenFinished(done)
+        recording.whenFinished { done($0, nil) }
         if movieOutput.isRecording { movieOutput.stopRecording() }
     }
 }

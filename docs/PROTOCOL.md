@@ -269,7 +269,8 @@ taken (`[storage] path_template`). Two photos from the same second get `_2`, `_3
                   "horizontalAccuracy": 4.5, "verticalAccuracy": 3.0,
                   "heading": 271.5, "headingAccuracy": 10.0 },
     "width": 4032, "height": 3024, "durationMs": null,
-    "originalFilename": "IMG_0001.HEIC"
+    "originalFilename": "IMG_0001.HEIC",
+    "captureMode": null
   }
 }
 ```
@@ -280,6 +281,8 @@ taken (`[storage] path_template`). Two photos from the same second get `_2`, `_3
 - `mimeType`: `image/heic`, `image/heif`, `image/jpeg`, `image/png`, `image/tiff`, `image/webp`,
   `image/gif`, `image/avif`, `image/x-adobe-dng`, `image/x-canon-cr3`, `image/x-fuji-raf`,
   `video/quicktime`, `video/mp4`, `video/x-matroska`, `video/webm`. Anything else: `415`.
+- `captureMode`: for videos `slowmo` (recorded at a high frame rate, played with a slow part) or
+  `timelapse`; it becomes the asset's `captureMode`. Other values are kept but not used.
 - `metadata` is optional and every field in it too. Unknown fields are kept but not used. When the
   device doesn't say when or where, the server reads it from the file (EXIF, QuickTime); for the
   time the order is device, file, upload time.
@@ -359,7 +362,9 @@ finished before (a finished upload stays stored).
 ```
 
 `takenAtSource` is `client`, `exif` or `upload`; `location.source` is `client` or `exif`. `seq`
-changes with every change to the asset.
+changes with every change to the asset. `captureMode` is `slowmo`, `timelapse` or `null`;
+`playback` is the slow part of a slow-motion video (see `PATCH`) or `null` to play it as
+recorded.
 
 `takenAt`, `timeZoneOffsetMinutes` and `location` are the *effective* values: a correction if
 there is one, otherwise the original. `takenAtSource` is then `manual`; `location.source` is
@@ -391,12 +396,15 @@ Corrections. The original values are never changed; every correction is kept in 
   "location": { "latitude": 48.137, "longitude": 11.575, "altitude": null, "estimated": false },
   "title": "Munich",
   "description": null,
+  "playback": { "slowFromMs": 1000, "slowToMs": 6000, "rate": 0.125 },
   "restore": []
 }
 ```
 
 Every field is optional. `location: null` removes the place (the original stays stored but is not
-shown); `title: null` and `description: null` remove them. `restore: ["takenAt", "location"]`
+shown); `title: null` and `description: null` remove them. `playback` sets the slow part of a
+slow-motion video (`0 <= slowFromMs < slowToMs`, `rate` from 0.01 to 1, 0.125 is eight times
+slower); `null` plays it as recorded. The file is never changed. `restore: ["takenAt", "location"]`
 drops corrections and shows the originals again. Answers with the asset.
 
 ### `POST /assets/location`

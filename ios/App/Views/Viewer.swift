@@ -91,6 +91,7 @@ final class PageController: UIViewController, UIScrollViewDelegate, PHLivePhotoV
     private var loading: Task<Void, Never>?
     private var hasOriginal = false
     private var liveView: PHLivePhotoView?
+    private var playbackObserver: NSObjectProtocol?
     private var liveLoading: Task<PHLivePhoto?, Never>?
 
     init(asset: LocalAsset, app: AppModel) {
@@ -123,6 +124,8 @@ final class PageController: UIViewController, UIScrollViewDelegate, PHLivePhotoV
         doubleTap.numberOfTapsRequired = 2
         scroll.addGestureRecognizer(doubleTap)
         if asset.isLivePhoto { addLive() }
+        if asset.isSlowMotion { addBadge(symbol: "slowmo", text: "SLO-MO", label: "Slow motion") }
+        if asset.isTimeLapse { addBadge(symbol: "timelapse", text: "TIME-LAPSE", label: "Time-lapse") }
         // The thumbnail at once, if it is decoded already.
         if let small = app.pipeline.cached(asset, pixels: 512) ?? app.pipeline.cached(asset, pixels: 300) {
             imageView.image = UIImage(cgImage: small.cgImage)
@@ -185,26 +188,31 @@ final class PageController: UIViewController, UIScrollViewDelegate, PHLivePhotoV
         press.minimumPressDuration = 0.25
         scroll.addGestureRecognizer(press)
 
+        addBadge(symbol: "livephoto", text: "LIVE", label: "Live Photo, touch and hold to play", id: "live-badge")
+    }
+
+    /// What kind of photo or video this is, top left.
+    private func addBadge(symbol: String, text: String, label: String, id: String = "kind-badge") {
         let badge = UILabel()
-        let symbol = NSAttributedString(
+        let content = NSMutableAttributedString(
             attachment: NSTextAttachment(
-                image: UIImage(systemName: "livephoto")!.withTintColor(.label, renderingMode: .alwaysOriginal)))
-        let text = NSMutableAttributedString(attributedString: symbol)
-        text.append(
-            NSAttributedString(string: " LIVE", attributes: [.font: UIFont.systemFont(ofSize: 12, weight: .semibold)]))
-        badge.attributedText = text
+                image: UIImage(systemName: symbol)!.withTintColor(.label, renderingMode: .alwaysOriginal)))
+        content.append(
+            NSAttributedString(
+                string: " \(text)", attributes: [.font: UIFont.systemFont(ofSize: 12, weight: .semibold)]))
+        badge.attributedText = content
         badge.backgroundColor = .systemBackground.withAlphaComponent(0.7)
         badge.layer.cornerRadius = 6
         badge.clipsToBounds = true
         badge.textAlignment = .center
         badge.translatesAutoresizingMaskIntoConstraints = false
-        badge.accessibilityLabel = "Live Photo, touch and hold to play"
-        badge.accessibilityIdentifier = "live-badge"
+        badge.accessibilityLabel = label
+        badge.accessibilityIdentifier = id
         view.addSubview(badge)
         NSLayoutConstraint.activate([
             badge.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor, constant: 12),
             badge.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 8),
-            badge.widthAnchor.constraint(equalToConstant: 62),
+            badge.widthAnchor.constraint(equalToConstant: badge.intrinsicContentSize.width + 16),
             badge.heightAnchor.constraint(equalToConstant: 24),
         ])
     }
@@ -263,16 +271,9 @@ final class PageController: UIViewController, UIScrollViewDelegate, PHLivePhotoV
     }
 
     private func startVideo() {
-        let item: AVPlayerItem
-        if let local = app.media.localOriginal(of: asset) {
-            item = AVPlayerItem(url: local)
-        } else if let stream = app.stream(asset) {
-            item = AVPlayerItem(asset: stream)
-        } else {
-            return
-        }
+        guard let video = app.playable(asset) else { return }
         let controller = AVPlayerViewController()
-        controller.player = AVPlayer(playerItem: item)
+        controller.player = AVPlayer(playerItem: AVPlayerItem(asset: video))
         controller.view.backgroundColor = .clear
         addChild(controller)
         controller.view.frame = view.bounds
@@ -281,6 +282,26 @@ final class PageController: UIViewController, UIScrollViewDelegate, PHLivePhotoV
         controller.didMove(toParent: self)
         controller.view.accessibilityIdentifier = "video-player"
         player = controller
+        if asset.isSlowMotion {
+            playSlowly()
+            playbackObserver = NotificationCenter.default.addObserver(
+                forName: .haldenPlaybackChanged, object: asset.id, queue: .main
+            ) { [weak self] _ in
+                MainActor.assumeIsolated { self?.playSlowly() }
+            }
+        }
+    }
+
+    /// A slow-motion video with its slow part (as it is now): the sound slows down with it.
+    private func playSlowly() {
+        Task { [weak self, asset, app] in
+            guard let current = app.asset(asset.id) ?? Optional(asset), let video = app.playable(current),
+                let played = try? await Retiming.slowMotion(video, slow: await app.slowMotion(of: current))
+            else { return }
+            let item = AVPlayerItem(asset: played)
+            item.audioTimePitchAlgorithm = .varispeed
+            self?.player?.player?.replaceCurrentItem(with: item)
+        }
     }
 
     func viewForZooming(in scrollView: UIScrollView) -> UIView? {

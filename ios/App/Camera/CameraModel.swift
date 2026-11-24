@@ -102,7 +102,7 @@ final class CameraModel {
         if countdown != nil { return cancelCountdown() }
         if recording { return stopRecording() }
         let action: () -> Void =
-            mode == .photo ? { [weak self] in self?.takePhoto() } : { [weak self] in self?.startRecording() }
+            mode.records ? { [weak self] in self?.startRecording() } : { [weak self] in self?.takePhoto() }
         guard timer > 0 else { return action() }
         countdown = timer
         countdownTask = Task { [weak self] in
@@ -151,7 +151,8 @@ final class CameraModel {
     private func startRecording() {
         let now = Date()
         let url = FileManager.default.temporaryDirectory.appendingPathComponent("\(UUID().uuidString).mov")
-        let request = VideoRequest(url: url, location: place(at: now), takenAt: now, timeZone: .current)
+        let request = VideoRequest(
+            url: url, location: place(at: now), takenAt: now, timeZone: .current, mode: mode)
         guard backend.startRecording(request) else {
             problem = "The video could not be started."
             return
@@ -171,6 +172,7 @@ final class CameraModel {
                 return
             }
             var metadata = Self.metadata(at: request.takenAt, place: place)
+            metadata.captureMode = request.mode.captureMode
             if let facts = try? await VideoFacts.read(url) {
                 metadata.width = facts.width
                 metadata.height = facts.height

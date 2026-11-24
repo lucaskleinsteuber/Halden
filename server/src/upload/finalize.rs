@@ -289,8 +289,8 @@ async fn record(
             "INSERT INTO assets (id, user_id, kind, taken_at, tz_offset_min, taken_at_source, \
                  width, height, duration_ms, camera_make, camera_model, lens, latitude, longitude, \
                  altitude, location_accuracy_m, heading, location_source, exif_json, client_json, \
-                 created_at, updated_at, seq) \
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                 capture_mode, created_at, updated_at, seq) \
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         )
         .bind(&row.asset_id)
         .bind(&user.id)
@@ -312,6 +312,11 @@ async fn record(
         .bind(location.map(|l| l.5))
         .bind(exif_json(file))
         .bind(serde_json::to_string(client).ok())
+        .bind(
+            client
+                .known_capture_mode()
+                .filter(|_| media.kind.as_str() == "video"),
+        )
         .bind(now)
         .bind(now)
         .bind(seq)

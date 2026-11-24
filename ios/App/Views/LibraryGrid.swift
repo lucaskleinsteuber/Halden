@@ -250,8 +250,18 @@ final class GridCell: UICollectionViewCell {
             state = "not backed up yet"
         }
         if asset.isVideo, let ms = asset.durationMs {
-            duration.attributedText = nil
-            duration.text = Duration.milliseconds(ms).formatted(.time(pattern: .minuteSecond))
+            let length = Duration.milliseconds(ms).formatted(.time(pattern: .minuteSecond))
+            if let symbol = asset.isSlowMotion ? "slowmo" : asset.isTimeLapse ? "timelapse" : nil,
+                let image = UIImage(systemName: symbol)
+            {
+                let text = NSMutableAttributedString(
+                    attachment: NSTextAttachment(image: image.withTintColor(.white, renderingMode: .alwaysOriginal)))
+                text.append(NSAttributedString(string: " \(length)"))
+                duration.attributedText = text
+            } else {
+                duration.attributedText = nil
+                duration.text = length
+            }
             duration.isHidden = false
         } else if asset.isLivePhoto, let symbol = UIImage(systemName: "livephoto") {
             duration.attributedText = NSAttributedString(
@@ -260,7 +270,10 @@ final class GridCell: UICollectionViewCell {
         } else {
             duration.isHidden = true
         }
-        accessibilityLabel = "\(asset.isVideo ? "Video" : "Photo"), \(state)"
+        let kind =
+            asset.isSlowMotion
+            ? "Slow-motion video" : asset.isTimeLapse ? "Time-lapse" : asset.isVideo ? "Video" : "Photo"
+        accessibilityLabel = "\(kind), \(state)"
     }
 
     func setImage(_ image: UIImage?, for id: String) {

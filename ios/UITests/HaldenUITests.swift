@@ -190,6 +190,63 @@ final class HaldenUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Everything is on the server"].exists)
     }
 
+    /// Slow motion and a time-lapse from the stand-in camera reach the server marked as such,
+    /// and the slow part of the slow-motion video can be changed.
+    @MainActor
+    func testSlowMotionAndTimeLapse() throws {
+        let environment = ProcessInfo.processInfo.environment
+        guard let server = environment["HALDEN_TEST_SERVER"], let password = environment["HALDEN_TEST_PASSWORD"]
+        else {
+            throw XCTSkip("no server: run ios/ui-tests.sh")
+        }
+        allowLocation()
+        let app = XCUIApplication()
+        app.launchArguments = ["-ui-testing", "-ui-testing-sign-in"]
+        app.launchEnvironment = ["HALDEN_TEST_SERVER": server, "HALDEN_TEST_PASSWORD": password]
+        app.launch()
+        let tabs = app.tabBars.firstMatch
+        XCTAssertTrue(tabs.waitForExistence(timeout: 60), "signed in")
+        tabs.buttons["Camera"].tap()
+        let shutter = app.buttons["shutter"]
+        XCTAssertTrue(shutter.waitForExistence(timeout: 10))
+
+        app.buttons["mode-slowMotion"].tap()
+        XCTAssertTrue(app.buttons["Record slow motion"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["video-format"].label.hasSuffix("240 fps"), app.buttons["video-format"].label)
+        shutter.tap()
+        XCTAssertTrue(app.descendants(matching: .any)["recording-time"].waitForExistence(timeout: 5))
+        Thread.sleep(forTimeInterval: 1.5)
+        shutter.tap()
+        XCTAssertTrue(app.buttons["Record slow motion"].waitForExistence(timeout: 10), "stopped")
+
+        app.buttons["mode-timeLapse"].tap()
+        XCTAssertTrue(app.buttons["Record a time-lapse"].waitForExistence(timeout: 5))
+        shutter.tap()
+        Thread.sleep(forTimeInterval: 1.5)
+        shutter.tap()
+        XCTAssertTrue(app.buttons["Record a time-lapse"].waitForExistence(timeout: 10), "stopped")
+
+        tabs.buttons["Photos"].tap()
+        let grid = app.collectionViews["library-grid"]
+        let slow = grid.cells.matching(NSPredicate(format: "label == 'Slow-motion video, backed up'")).firstMatch
+        let lapse = grid.cells.matching(NSPredicate(format: "label == 'Time-lapse, backed up'")).firstMatch
+        XCTAssertTrue(slow.waitForExistence(timeout: 90), "the slow-motion video is on the server")
+        XCTAssertTrue(lapse.waitForExistence(timeout: 90), "the time-lapse is on the server")
+
+        slow.tap()
+        XCTAssertTrue(app.descendants(matching: .any)["kind-badge"].waitForExistence(timeout: 10))
+        app.buttons["slow-motion"].tap()
+        let rate = app.segmentedControls["slow-rate"]
+        XCTAssertTrue(rate.waitForExistence(timeout: 10))
+        // The stand-in's videos have 30 frames a second: a quarter is where they start.
+        rate.buttons["⅛"].tap()
+        app.buttons["save-slow-motion"].tap()
+        app.buttons["info"].tap()
+        let changed = app.descendants(matching: .any)
+            .matching(NSPredicate(format: "label CONTAINS '8× slower' OR value CONTAINS '8× slower'")).firstMatch
+        XCTAssertTrue(changed.waitForExistence(timeout: 10), "the slow part is kept")
+    }
+
     /// A correction shows at once and reaches the server, which keeps it next to the original.
     @MainActor
     func testACorrectionShowsAtOnceAndReachesTheServer() throws {

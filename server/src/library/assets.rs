@@ -1,6 +1,7 @@
 //! Photos and videos ("assets") and their files in the database.
 
 use serde::Serialize;
+use serde_json::Value;
 use sqlx::{Executor, Sqlite, SqliteConnection};
 
 use crate::db::{Db, now_ms};
@@ -36,6 +37,10 @@ pub struct Asset {
     pub camera: Option<Camera>,
     pub title: Option<String>,
     pub description: Option<String>,
+    /// How a video was taken: `slowmo` or `timelapse`; `null` for everything else.
+    pub capture_mode: Option<String>,
+    /// How it plays: the slow part of a slow-motion video (a correction).
+    pub playback: Option<Value>,
     pub files: Vec<AssetFile>,
     pub created_at: i64,
     pub updated_at: i64,
@@ -85,7 +90,8 @@ macro_rules! asset_columns {
          a.altitude, a.location_accuracy_m, a.heading, a.location_source, a.created_at, \
          a.updated_at, a.seq, a.trashed_at, a.deleted_at, a.title, a.description, \
          a.edit_taken_at, a.edit_tz_offset_min, a.edit_latitude, a.edit_longitude, \
-         a.edit_altitude, a.edit_location_source, a.location_hidden"
+         a.edit_altitude, a.edit_location_source, a.location_hidden, a.capture_mode, \
+         a.playback_json"
     };
 }
 pub(crate) use asset_columns;
@@ -123,6 +129,8 @@ pub(crate) struct AssetRow {
     edit_altitude: Option<f64>,
     edit_location_source: Option<String>,
     location_hidden: bool,
+    capture_mode: Option<String>,
+    pub playback_json: Option<String>,
 }
 
 impl AssetRow {
@@ -192,6 +200,11 @@ impl AssetRow {
             camera,
             title: self.title,
             description: self.description,
+            capture_mode: self.capture_mode,
+            playback: self
+                .playback_json
+                .as_deref()
+                .and_then(|json| serde_json::from_str(json).ok()),
             files,
             created_at: self.created_at,
             updated_at: self.updated_at,

@@ -91,8 +91,19 @@ pub struct ClientMetadata {
     pub duration_ms: Option<u64>,
     /// Shown in the app, never used for a path on the server.
     pub original_filename: Option<String>,
+    /// How a video was taken: `slowmo` or `timelapse`. Other values are kept but not used.
+    pub capture_mode: Option<String>,
     #[serde(flatten)]
     pub other: Map<String, Value>,
+}
+
+impl ClientMetadata {
+    /// The capture mode, if the server knows it.
+    pub fn known_capture_mode(&self) -> Option<&str> {
+        self.capture_mode
+            .as_deref()
+            .filter(|mode| matches!(*mode, "slowmo" | "timelapse"))
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -148,8 +159,9 @@ impl ClientMetadata {
                 .original_filename
                 .as_ref()
                 .is_some_and(|n| n.len() > 255)
+            || self.capture_mode.as_ref().is_some_and(|m| m.len() > 32)
         {
-            return Err("timeZone or originalFilename is too long.".into());
+            return Err("timeZone, originalFilename or captureMode is too long.".into());
         }
         Ok(())
     }

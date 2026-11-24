@@ -3,7 +3,19 @@ import HaldenKit
 import UIKit
 
 enum CameraMode: String, CaseIterable, Sendable {
-    case photo, video
+    case photo, video, slowMotion, timeLapse
+
+    /// Everything but photos is recorded with the shutter started and stopped.
+    var records: Bool { self != .photo }
+
+    /// What the server calls videos taken this way.
+    var captureMode: String? {
+        switch self {
+        case .slowMotion: "slowmo"
+        case .timeLapse: "timelapse"
+        default: nil
+        }
+    }
 }
 
 enum CameraSide: Sendable {
@@ -16,12 +28,17 @@ struct CaptureOptions: Equatable, Sendable {
     var frameRate: Int
     var hdr: Bool
     var live: Bool
+    var slowMotionRate: Int
+    /// Seconds between pictures of a time-lapse; `nil` for automatic.
+    var timeLapseInterval: Double?
 
     init(_ settings: AppSettings) {
         resolution = settings.videoResolution
         frameRate = settings.videoFrameRate
         hdr = settings.videoHDR
         live = settings.livePhotos
+        slowMotionRate = settings.slowMotionRate
+        timeLapseInterval = settings.timeLapseInterval > 0 ? settings.timeLapseInterval : nil
     }
 }
 
@@ -70,6 +87,8 @@ struct VideoRequest: Sendable {
     var location: ClientLocation?
     var takenAt: Date
     var timeZone: TimeZone
+    /// Video, slow motion or time-lapse.
+    var mode = CameraMode.video
 }
 
 /// A camera for the camera screen: the real one (`DeviceCamera`), or the stand-in that the

@@ -116,6 +116,10 @@ public struct Asset: Codable, Sendable, Equatable {
     public var deletedAt: Int64?
     public var title: String?
     public var description: String?
+    /// How a video was taken: `slowmo` or `timelapse`.
+    public var captureMode: String?
+    /// The slow part of a slow-motion video, if it was changed.
+    public var playback: SlowMotion?
 
     public func file(_ role: String) -> AssetFile? {
         files.first { $0.role == role }
@@ -140,12 +144,15 @@ public struct UploadMetadata: Codable, Sendable, Equatable {
     public var height: Int?
     public var durationMs: Int64?
     public var originalFilename: String?
+    /// For videos: `slowmo` or `timelapse`.
+    public var captureMode: String?
 
     public init(
         takenAt: Int64? = nil, timeZoneOffsetMinutes: Int? = nil, timeZone: String? = nil,
         location: ClientLocation? = nil, width: Int? = nil, height: Int? = nil,
-        durationMs: Int64? = nil, originalFilename: String? = nil
+        durationMs: Int64? = nil, originalFilename: String? = nil, captureMode: String? = nil
     ) {
+        self.captureMode = captureMode
         self.takenAt = takenAt
         self.timeZoneOffsetMinutes = timeZoneOffsetMinutes
         self.timeZone = timeZone
@@ -239,13 +246,16 @@ public struct AssetCorrection: Codable, Sendable, Equatable {
     public var location: Change<CorrectedLocation> = .keep
     public var title: Change<String> = .keep
     public var description: Change<String> = .keep
+    /// The slow part of a slow-motion video; `.clear` plays it as recorded.
+    public var playback: Change<SlowMotion> = .keep
     public var restore: [String] = []
 
     public init(
         takenAt: Change<Int64> = .keep, timeZoneOffsetMinutes: Change<Int> = .keep,
         location: Change<CorrectedLocation> = .keep, title: Change<String> = .keep,
-        description: Change<String> = .keep, restore: [String] = []
+        description: Change<String> = .keep, playback: Change<SlowMotion> = .keep, restore: [String] = []
     ) {
+        self.playback = playback
         self.takenAt = takenAt
         self.timeZoneOffsetMinutes = timeZoneOffsetMinutes
         self.location = location
@@ -255,7 +265,7 @@ public struct AssetCorrection: Codable, Sendable, Equatable {
     }
 
     enum CodingKeys: String, CodingKey {
-        case takenAt, timeZoneOffsetMinutes, location, title, description, restore
+        case takenAt, timeZoneOffsetMinutes, location, title, description, playback, restore
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -272,6 +282,7 @@ public struct AssetCorrection: Codable, Sendable, Equatable {
         try put(location, .location)
         try put(title, .title)
         try put(description, .description)
+        try put(playback, .playback)
         if !restore.isEmpty { try container.encode(restore, forKey: .restore) }
     }
 
@@ -287,6 +298,7 @@ public struct AssetCorrection: Codable, Sendable, Equatable {
         location = try get(.location)
         title = try get(.title)
         description = try get(.description)
+        playback = try get(.playback)
         restore = try container.decodeIfPresent([String].self, forKey: .restore) ?? []
     }
 }

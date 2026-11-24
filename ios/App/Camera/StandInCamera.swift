@@ -28,7 +28,12 @@ final class StandInCamera: CaptureBackend {
         self.mode = mode
         state.canLive = mode == .photo
         state.videoFormat =
-            mode == .video ? "\(video.resolution == .uhd4K ? "4K" : "1080p") · \(video.frameRate) fps" : nil
+            switch mode {
+            case .photo: nil
+            case .video: "\(video.resolution == .uhd4K ? "4K" : "1080p") · \(video.frameRate) fps"
+            case .slowMotion: "1080p · \(video.slowMotionRate) fps"
+            case .timeLapse: video.timeLapseInterval.map { "every \(CameraMode.intervalText($0))" } ?? "Auto"
+            }
     }
 
     func flip() {
@@ -84,7 +89,7 @@ final class StandInCamera: CaptureBackend {
     }
 
     func startRecording(_ request: VideoRequest) -> Bool {
-        guard mode == .video, recording == nil else { return false }
+        guard mode.records, recording == nil else { return false }
         recording = (request, Date())
         return true
     }

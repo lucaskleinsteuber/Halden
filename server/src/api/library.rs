@@ -17,7 +17,9 @@ use crate::{
     files::{self, BulkItem, Caching, FileToSend},
     library::{
         assets::{self, ROLES, StoredFile},
-        edits::{self, AssetDetail, Correction, NewLocation, Suggestion, WithoutLocation},
+        edits::{
+            self, AssetDetail, Correction, NewLocation, Playback, Suggestion, WithoutLocation,
+        },
         sync::{self, SyncPage},
     },
 };
@@ -175,6 +177,9 @@ pub struct CorrectionBody {
     title: Option<Option<String>>,
     #[serde(default, deserialize_with = "present")]
     description: Option<Option<String>>,
+    /// The slow part of a slow-motion video; `null` removes it.
+    #[serde(default, deserialize_with = "present")]
+    playback: Option<Option<Playback>>,
     /// Drop corrections: `["takenAt", "location"]`.
     #[serde(default)]
     restore: Vec<String>,
@@ -188,6 +193,7 @@ impl From<CorrectionBody> for Correction {
             location: body.location,
             title: body.title,
             description: body.description,
+            playback: body.playback,
             restore: body.restore,
         }
     }
