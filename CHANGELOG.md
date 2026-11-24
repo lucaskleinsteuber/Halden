@@ -8,6 +8,9 @@ There are no version numbers yet; entries are grouped by date until the first re
 
 ### Added
 
+- iPhone map with all photos (Photos › Map): groups with their newest photo and count, steady
+  while the map moves, estimated places marked, a tap shows the photos; the photos without a
+  place a tap away. Measured with 50,000 photos (`PerformanceTests`).
 - Albums: on the server (`/albums`, in the sync with the assets) and on the iPhone, with names,
   covers, order, adding and taking out photos, also offline; photos in the trash stay in their
   albums, deleted for good they leave them.

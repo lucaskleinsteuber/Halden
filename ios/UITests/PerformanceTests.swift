@@ -57,4 +57,28 @@ final class PerformanceTests: XCTestCase {
             grid.swipeDown(velocity: .fast)
         }
     }
+
+    /// Memory and processor while moving and zooming the map with 45,000 photos on it.
+    @MainActor
+    func testTheMapWithFiftyThousandPhotos() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-ui-testing-signed-in", "-ui-testing-library", "50000"]
+        app.launch()
+        let tabs = app.tabBars.firstMatch
+        XCTAssertTrue(tabs.waitForExistence(timeout: 60))
+        tabs.buttons["Photos"].tap()
+        app.segmentedControls["photos-section"].buttons["Map"].tap()
+        let map = app.descendants(matching: .any)["photo-map"]
+        XCTAssertTrue(
+            app.descendants(matching: .any).matching(identifier: "map-group").firstMatch.waitForExistence(timeout: 20))
+        measure(
+            metrics: [XCTMemoryMetric(application: app), XCTCPUMetric(application: app), XCTClockMetric()],
+            options: options(5)
+        ) {
+            map.pinch(withScale: 2.5, velocity: 3)
+            map.swipeLeft()
+            map.swipeUp()
+            map.pinch(withScale: 0.4, velocity: -3)
+        }
+    }
 }

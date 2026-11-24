@@ -90,6 +90,12 @@ the design comes after that. What works today is described below.
   and come out in the album. All of it shows at once and reaches the server when it can (an
   album change waits for photos still uploading), and every device gets it with the sync.
   Photos in the trash aren't shown in albums and are back when restored.
+- **Map** (Photos › Map): every photo with a place, grouped (`MapClusters`): the visible part
+  of the map on a grid fixed to the earth, in steps of two, so groups don't jump while the map
+  moves and split in four when zooming in; each group shows its newest photo and how many there
+  are, estimated places with a dashed frame. Grouped again away from the main thread when the
+  map stops; only pins that changed are replaced. A tap shows the group's photos; photos without
+  a place are a tap away.
 - **Trips** (`Trips`, `TripFinder`): home is where most days have photos; a run of days with
   photos farther away (50 km, in Settings › Place; a day or two without photos still belongs to
   it, at least six photos) is a trip, named after the town where most of them were taken (from

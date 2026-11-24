@@ -42,6 +42,7 @@
 		A892FFFF61DE9485CF41799F /* SlowMotionEditor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 532104EC85F41EC2AD8621D1 /* SlowMotionEditor.swift */; };
 		AC905610DA82DFA5531F1278 /* AdminViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 70F615205779FE0156F57C22 /* AdminViews.swift */; };
 		B26514E18BDCEA39A54F586F /* TripFinder.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5C9036B1E68F05F767BA225 /* TripFinder.swift */; };
+		B74A92ED5F56E522A006E68D /* MapLibraryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CF10462761DAD01DC9A3FAFA /* MapLibraryView.swift */; };
 		C5BEB796768D84CB9050598F /* Viewer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B4EC6EBA149179462421878 /* Viewer.swift */; };
 		C6F2BAB2216CDFB906390167 /* HaldenApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5C56DCD1A8AC3F879F869CCE /* HaldenApp.swift */; };
 		D02EC56937064A49FA03124A /* AccountViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = C9042D37089100C0A5DBF4C6 /* AccountViews.swift */; };
@@ -149,6 +150,7 @@
 		C765E5168916BA5A5355EF98 /* PhotosView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotosView.swift; sourceTree = "<group>"; };
 		C9042D37089100C0A5DBF4C6 /* AccountViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AccountViews.swift; sourceTree = "<group>"; };
 		CCDEB459ACF35A5382B17B06 /* PhotoView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoView.swift; sourceTree = "<group>"; };
+		CF10462761DAD01DC9A3FAFA /* MapLibraryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MapLibraryView.swift; sourceTree = "<group>"; };
 		D5C9036B1E68F05F767BA225 /* TripFinder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TripFinder.swift; sourceTree = "<group>"; };
 		DBEEA719E7976B95C7A812F2 /* CameraModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraModel.swift; sourceTree = "<group>"; };
 		EC66D3547031D67063F9441E /* TrashView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TrashView.swift; sourceTree = "<group>"; };
@@ -206,6 +208,7 @@
 				4720DFD3016CAEA4E93C4BF4 /* AlbumsView.swift */,
 				20E7E327CD3E758EB9FBEAC9 /* CameraView.swift */,
 				B5DE17A5A6B072AE573A3107 /* LibraryGrid.swift */,
+				CF10462761DAD01DC9A3FAFA /* MapLibraryView.swift */,
 				BD8F20F7C6963AF7826E38E6 /* OnboardingView.swift */,
 				C765E5168916BA5A5355EF98 /* PhotosView.swift */,
 				CCDEB459ACF35A5382B17B06 /* PhotoView.swift */,
@@ -477,6 +480,7 @@
 				C6F2BAB2216CDFB906390167 /* HaldenApp.swift in Sources */,
 				1A3071743BB7165FCFE51777 /* LibraryGrid.swift in Sources */,
 				0D392F59853052F455C35A95 /* ManualPanel.swift in Sources */,
+				B74A92ED5F56E522A006E68D /* MapLibraryView.swift in Sources */,
 				FED0DC6246F4D4D89C793019 /* NetworkWatcher.swift in Sources */,
 				9051085D202825975E1E609C /* OnboardingView.swift in Sources */,
 				3DAEFCB4BCCF0F1420801D9D /* PhotoView.swift in Sources */,

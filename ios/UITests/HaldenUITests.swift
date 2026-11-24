@@ -142,6 +142,37 @@ final class HaldenUITests: XCTestCase {
         XCTAssertTrue(next.waitForExistence(timeout: 5), "swiped to the next photo")
     }
 
+    /// The 50,000 photos on the map, in groups; a group opens, and the photos without a place
+    /// are a tap away.
+    @MainActor
+    func testTheMapShowsFiftyThousandPhotos() throws {
+        let app = XCUIApplication()
+        app.launchArguments = ["-ui-testing-signed-in", "-ui-testing-library", "50000"]
+        app.launch()
+        let tabs = app.tabBars.firstMatch
+        XCTAssertTrue(tabs.waitForExistence(timeout: 60))
+        tabs.buttons["Photos"].tap()
+        app.segmentedControls["photos-section"].buttons["Map"].tap()
+        let group = app.descendants(matching: .any).matching(identifier: "map-group").firstMatch
+        XCTAssertTrue(group.waitForExistence(timeout: 20), "groups on the map")
+        let withoutPlace = app.buttons["map-without-place"]
+        XCTAssertTrue(withoutPlace.label.contains("without a place"), withoutPlace.label)
+        // Written as the simulator's language writes numbers (5,000 or 5.000).
+        XCTAssertEqual(withoutPlace.label.filter(\.isNumber), "5000", withoutPlace.label)
+        let map = app.descendants(matching: .any)["photo-map"]
+        map.pinch(withScale: 3, velocity: 2)
+        map.swipeLeft()
+        XCTAssertTrue(group.waitForExistence(timeout: 10), "still groups after zooming and moving")
+        // Groups just outside the screen are there too (nothing pops in at the edges): one on it.
+        let groups = app.descendants(matching: .any).matching(identifier: "map-group").allElementsBoundByIndex
+        let visible = try XCTUnwrap(groups.first { $0.isHittable }, "a group on the screen")
+        visible.tap()
+        XCTAssertTrue(app.collectionViews["library-grid"].cells.firstMatch.waitForExistence(timeout: 10), "its photos")
+        app.navigationBars.buttons.firstMatch.tap()
+        app.buttons["map-without-place"].tap()
+        XCTAssertTrue(app.navigationBars.element(boundBy: 0).waitForExistence(timeout: 5))
+    }
+
     /// The camera from the shutter to the server: a photo, one with the self-timer and a video
     /// from the stand-in camera all show up in the library with a check mark.
     @MainActor

@@ -10,12 +10,15 @@ struct PhotosView: View {
         case trash
         case album(String)
         case photoInAlbum(String, album: String)
+        case mapGroup([String])
+        case photoInGroup(String, group: [String])
     }
 
     /// What the Photos tab shows.
     enum Section: String, CaseIterable {
         case library = "Library"
         case albums = "Albums"
+        case map = "Map"
     }
 
     @Environment(AppModel.self) private var app
@@ -30,10 +33,15 @@ struct PhotosView: View {
     var body: some View {
         NavigationStack(path: $path) {
             Group {
-                if section == .albums {
-                    AlbumsView { id in path.append(.album(id)) }
-                } else {
-                    library
+                switch section {
+                case .library: library
+                case .albums: AlbumsView { id in path.append(.album(id)) }
+                case .map:
+                    MapLibraryView { ids in
+                        path.append(ids.count == 1 ? .photoInGroup(ids[0], group: ids) : .mapGroup(ids))
+                    } withoutPlace: {
+                        path.append(.withoutPlace)
+                    }
                 }
             }
             .navigationTitle(section.rawValue)
@@ -44,7 +52,7 @@ struct PhotosView: View {
                         ForEach(Section.allCases, id: \.self) { Text($0.rawValue).tag($0) }
                     }
                     .pickerStyle(.segmented)
-                    .frame(width: 220)
+                    .frame(width: 260)
                     .disabled(selection != nil)
                     .accessibilityIdentifier("photos-section")
                 }
@@ -62,6 +70,11 @@ struct PhotosView: View {
                     AlbumView(id: id) { photo, _ in path.append(.photoInAlbum(photo, album: id)) }
                 case .photoInAlbum(let photo, let album):
                     PhotoView(start: photo, assets: app.photos(inAlbum: album))
+                case .mapGroup(let ids):
+                    MapGroupView(ids: ids) { photo in path.append(.photoInGroup(photo, group: ids)) }
+                case .photoInGroup(let photo, let ids):
+                    let wanted = Set(ids)
+                    PhotoView(start: photo, assets: app.library.filter { wanted.contains($0.id) })
                 }
             }
         }
