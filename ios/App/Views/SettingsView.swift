@@ -27,6 +27,24 @@ struct SettingsView: View {
                         }
                     }
                 }
+                Section("Account") {
+                    NavigationLink {
+                        DevicesView()
+                    } label: {
+                        LabeledContent(
+                            "Devices", value: app.unconfirmedDevices > 0 ? "\(app.unconfirmedDevices) new" : "")
+                    }
+                    .accessibilityIdentifier("devices")
+                    NavigationLink("Add a device") { PairDeviceView() }.accessibilityIdentifier("pair-device")
+                    NavigationLink("Security log") { SecurityLogView() }
+                    NavigationLink("Password") { PasswordView() }
+                    NavigationLink("Formats") { FormatsView() }
+                }
+                if app.isOwner {
+                    Section {
+                        NavigationLink("Look after the server") { AdminView() }.accessibilityIdentifier("admin")
+                    }
+                }
                 if let backup = app.backup, backup.onlyOneCopy {
                     Section {
                         Label(

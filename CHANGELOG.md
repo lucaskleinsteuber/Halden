@@ -8,6 +8,11 @@ There are no version numbers yet; entries are grouped by date until the first re
 
 ### Added
 
+- iPhone settings for the account and the server: devices (confirm, block, sign out), adding a
+  device with a pairing QR code, the security log, the password and the preferred formats; for
+  owners the whole server: status, doctor, settings (with the password where needed; the server
+  restarts with them), accounts, mirror, database backups, failed jobs, updates and restart.
+  The app finds servers in the home network by Bonjour.
 - iPhone and Apple Photos: new photos and videos there come into Halden and are backed up (Live
   Photos with their video, as the server's `paired_video`), also what was added while Halden
   wasn't running; deleted there they go to Halden's trash; photos taken with Halden are saved

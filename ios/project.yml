@@ -45,6 +45,7 @@ targets:
         NSPhotoLibraryUsageDescription: Halden backs up the photos and videos in Apple Photos to your own server.
         NSPhotoLibraryAddUsageDescription: Halden saves the photos and videos you take with it in Apple Photos too.
         NSLocalNetworkUsageDescription: Halden connects to your own Halden server in your home network.
+        NSBonjourServices: [_halden._tcp]
         NSAppTransportSecurity:
           NSAllowsLocalNetworking: true
         UIBackgroundModes: [processing]

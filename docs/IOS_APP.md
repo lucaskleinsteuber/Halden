@@ -18,6 +18,9 @@ the design comes after that. What works today is described below.
 
 ## How it works
 
+- **Finding the server**: in the home network the app lists Halden servers announcing
+  themselves with Bonjour (`_halden._tcp`); choosing one fills in its address for signing in.
+  Finding is not trusting: the fingerprint is still shown to compare.
 - **Connecting**: scan the QR code from `sudo halden pair` (or paste its link). It carries the
   server's addresses, its certificate fingerprint and a one-time code. The app tries all
   addresses at once and takes the first that answers with exactly that certificate. Signing in
@@ -75,6 +78,15 @@ the design comes after that. What works today is described below.
   - The photos from before Halden come in on request, 50 at a time, going on where it stopped.
   - Importing needs access to all photos (or the ones chosen); saving needs only adding. All
     three directions can be turned off.
+- **The account** (Settings › Account): the devices signed in (new ones to confirm with "That
+  was me" or block, others to sign out), adding a device with a pairing code shown as QR code,
+  the security log, the password, and the preferred formats (`/me/settings`).
+- **Looking after the server** (owners, Settings › Look after the server): status with disks,
+  numbers per account, jobs and memory; the doctor; every setting `halden config` knows except
+  folders, port and certificate (saved together, the server restarts with them; settings that
+  open the server up ask for the password again); accounts (add, disable, delete, pairing codes
+  for them); the mirror; database backups; failed jobs; updates (in Docker: the command to run
+  instead); restart.
 - **Lock Screen and Control Center**: a control ("Halden Camera") for Control Center, the Lock
   Screen and the Action button opens Halden's camera, also on a locked iPhone. There it runs as
   an extension that may only keep what it takes in a folder the system gives it; Halden takes it

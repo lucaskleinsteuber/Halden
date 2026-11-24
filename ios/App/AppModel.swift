@@ -32,6 +32,10 @@ final class AppModel {
     private(set) var uploadSummary = UploadSummary()
     /// Days photos stay in the trash before they are deleted for good (the server says).
     private(set) var trashDays = 30
+    /// The signed-in account owns the server: it may look after it.
+    private(set) var isOwner = false
+    /// New devices waiting for "That was me" or "Block".
+    private(set) var unconfirmedDevices = 0
     /// Goes up when something (a control, the lock-screen camera) asks for the camera.
     private(set) var cameraRequests = 0
 
@@ -384,6 +388,8 @@ final class AppModel {
                     let me = try await client.me()
                     self?.backup = me.backup
                     if let days = me.trashDays { self?.trashDays = days }
+                    self?.isOwner = me.user.role == "owner"
+                    self?.unconfirmedDevices = me.unconfirmedDevices
                 } catch let error as APIError {
                     if case .unreachable = error { reachable = false }
                     if error.signedOut {
@@ -395,6 +401,14 @@ final class AppModel {
                 try? await Task.sleep(for: .seconds(30))
             }
         }
+    }
+
+    // MARK: Account and server
+
+    /// The connection to the server, for the account and server screens.
+    func api() throws -> APIClient {
+        guard let client else { throw APIError.unreachable("not connected") }
+        return client
     }
 
     // MARK: The library

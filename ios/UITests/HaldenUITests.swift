@@ -126,7 +126,9 @@ final class HaldenUITests: XCTestCase {
         XCTAssertGreaterThanOrEqual(videos.count, 1, "the video is on the server")
 
         tabs.buttons["Settings"].tap()
-        app.buttons["uploads"].tap()
+        let uploads = app.buttons["uploads"]
+        for _ in 0..<6 where !uploads.isHittable { app.swipeUp() }
+        uploads.tap()
         let round = app.descendants(matching: .any)
             .matching(NSPredicate(format: "label CONTAINS '3 of 3 uploaded' OR value CONTAINS '3 of 3 uploaded'"))
             .firstMatch
@@ -216,7 +218,8 @@ final class HaldenUITests: XCTestCase {
         app.buttons["trash"].tap()
         let trashed = app.descendants(matching: .any)["trashed-\(id)"]
         XCTAssertTrue(trashed.waitForExistence(timeout: 10), "in the trash")
-        XCTAssertTrue(trashed.label.hasSuffix("30 days left"), trashed.label)
+        // 30 by default; another test may have changed the server's setting.
+        XCTAssertNotNil(trashed.label.range(of: #"\d+ days left$"#, options: .regularExpression), trashed.label)
         trashed.tap()
         app.buttons["restore"].tap()
         XCTAssertTrue(trashed.waitForNonExistence(timeout: 10))
@@ -267,6 +270,78 @@ final class HaldenUITests: XCTestCase {
         let deadline = Date().addingTimeInterval(120)
         while backedUp.count == 0 && Date() < deadline { Thread.sleep(forTimeInterval: 1) }
         XCTAssertGreaterThan(backedUp.count, 0, "imported photos are on the server")
+    }
+
+    /// The account and the server from the iPhone: devices, a pairing QR code, the server's
+    /// status and doctor, a setting changed with the password, and a new account.
+    @MainActor
+    func testLookingAfterTheServerFromTheiPhone() throws {
+        let environment = ProcessInfo.processInfo.environment
+        guard let server = environment["HALDEN_TEST_SERVER"], let password = environment["HALDEN_TEST_PASSWORD"]
+        else {
+            throw XCTSkip("no server: run ios/ui-tests.sh")
+        }
+        let app = XCUIApplication()
+        app.launchArguments = ["-ui-testing", "-ui-testing-sign-in"]
+        app.launchEnvironment = ["HALDEN_TEST_SERVER": server, "HALDEN_TEST_PASSWORD": password]
+        app.launch()
+        let tabs = app.tabBars.firstMatch
+        XCTAssertTrue(tabs.waitForExistence(timeout: 60), "signed in")
+        tabs.buttons["Settings"].tap()
+        let back = { app.navigationBars.buttons.firstMatch.tap() }
+
+        app.buttons["devices"].tap()
+        XCTAssertTrue(app.staticTexts["this iPhone"].waitForExistence(timeout: 10), "this iPhone is listed")
+        back()
+        app.buttons["pair-device"].tap()
+        XCTAssertTrue(app.images["pairing-qr"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.staticTexts["pairing-code"].exists)
+        back()
+
+        let admin = app.buttons["admin"]
+        for _ in 0..<8 where !admin.isHittable { app.swipeUp() }
+        XCTAssertTrue(admin.waitForExistence(timeout: 30), "the owner may look after the server")
+        admin.tap()
+        let name = app.descendants(matching: .any)["admin-name"]
+        XCTAssertTrue(name.waitForExistence(timeout: 10))
+        XCTAssertTrue(name.label.contains("ui-tests") || (name.value as? String ?? "").contains("ui-tests"), name.label)
+
+        let doctor = app.buttons["admin-doctor"]
+        for _ in 0..<6 where !doctor.isHittable { app.swipeUp() }
+        doctor.tap()
+        XCTAssertTrue(app.descendants(matching: .any)["check-database"].waitForExistence(timeout: 10))
+        back()
+
+        app.buttons["admin-settings"].tap()
+        let trashDays = app.textFields["setting-library.trash_days"]
+        for _ in 0..<6 where !trashDays.isHittable { app.swipeUp() }
+        // Replace the number: select it all, then type.
+        trashDays.tap()
+        trashDays.press(forDuration: 1)
+        if app.menuItems["Select All"].waitForExistence(timeout: 2) { app.menuItems["Select All"].tap() }
+        trashDays.typeText("31")
+        app.buttons["save-settings"].tap()
+        let field = app.alerts.firstMatch.secureTextFields.firstMatch
+        XCTAssertTrue(field.waitForExistence(timeout: 5), "asks for the password")
+        field.typeText(password)
+        app.alerts.firstMatch.buttons["Continue"].firstMatch.tap()
+        let saved = NSPredicate(format: "value == '31'")
+        expectation(for: saved, evaluatedWith: app.textFields["setting-library.trash_days"])
+        waitForExpectations(timeout: 15)
+        back()
+
+        app.buttons["admin-accounts"].tap()
+        app.buttons["add-account"].tap()
+        let username = app.textFields["new-username"]
+        XCTAssertTrue(username.waitForExistence(timeout: 5))
+        username.tap()
+        username.typeText("anna")
+        app.buttons["create-account"].tap()
+        let again = app.alerts.firstMatch.secureTextFields.firstMatch
+        XCTAssertTrue(again.waitForExistence(timeout: 5))
+        again.typeText(password)
+        app.alerts.firstMatch.buttons["Continue"].firstMatch.tap()
+        XCTAssertTrue(app.descendants(matching: .any)["account-anna"].waitForExistence(timeout: 10), "the new account")
     }
 
     /// Answers the question for the place, should the simulator ask.

@@ -24,6 +24,7 @@
 		5FD91AEBB32417E33BA60285 /* StandInCamera.swift in Sources */ = {isa = PBXBuildFile; fileRef = 74E37347C080BB6AA9E72883 /* StandInCamera.swift */; };
 		62C41FB582518DFF154BB936 /* CameraScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE56A441B2CFDD9C6F0A36EE /* CameraScreen.swift */; };
 		66986C431A10928BD13E6424 /* CameraScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE56A441B2CFDD9C6F0A36EE /* CameraScreen.swift */; };
+		6BBB5CD4E7E10F304D97B71F /* PerformanceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11DCCBE9E6F18A02FCC7FE6E /* PerformanceTests.swift */; };
 		6C637643DD40A5422A144B37 /* CaptureBackend.swift in Sources */ = {isa = PBXBuildFile; fileRef = 28B6F0CD3C366126B6E02E33 /* CaptureBackend.swift */; };
 		7002EEBD674D90FA00CA5D22 /* UploadsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 371EA27A9FA82A61CA687680 /* UploadsView.swift */; };
 		71B99CF29DE1A7DD33488186 /* SharedIntents.swift in Sources */ = {isa = PBXBuildFile; fileRef = F3B360B4ABEBAD5E54337C81 /* SharedIntents.swift */; };
@@ -33,8 +34,10 @@
 		9308131D436654AB7AB96174 /* CaptureBackend.swift in Sources */ = {isa = PBXBuildFile; fileRef = 28B6F0CD3C366126B6E02E33 /* CaptureBackend.swift */; };
 		97449D449BB9B1DC96C1267A /* RootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1FE32D68F3EDCDF19843B399 /* RootView.swift */; };
 		9F64B285C463AC47333BECF3 /* CameraModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = DBEEA719E7976B95C7A812F2 /* CameraModel.swift */; };
+		AC905610DA82DFA5531F1278 /* AdminViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 70F615205779FE0156F57C22 /* AdminViews.swift */; };
 		C5BEB796768D84CB9050598F /* Viewer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B4EC6EBA149179462421878 /* Viewer.swift */; };
 		C6F2BAB2216CDFB906390167 /* HaldenApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5C56DCD1A8AC3F879F869CCE /* HaldenApp.swift */; };
+		D02EC56937064A49FA03124A /* AccountViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = C9042D37089100C0A5DBF4C6 /* AccountViews.swift */; };
 		D190BA231FC90D7AF3D76836 /* UploadActivity.swift in Sources */ = {isa = PBXBuildFile; fileRef = 62E1A8A22DAC6A515A2252D0 /* UploadActivity.swift */; };
 		D5399A90556FBEC26C5A5648 /* TrashView.swift in Sources */ = {isa = PBXBuildFile; fileRef = EC66D3547031D67063F9441E /* TrashView.swift */; };
 		D816E69AF03071F4318B0F5A /* WithoutPlaceView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B3DC81E0143A53F37F02DDAE /* WithoutPlaceView.swift */; };
@@ -100,6 +103,7 @@
 /* Begin PBXFileReference section */
 		0E09071DF9BF3412A74CE12D /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		0F17118A2396C5FD041B1729 /* NetworkWatcher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NetworkWatcher.swift; sourceTree = "<group>"; };
+		11DCCBE9E6F18A02FCC7FE6E /* PerformanceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PerformanceTests.swift; sourceTree = "<group>"; };
 		167446EF95B9BA95A0B76FA7 /* PhotosWatcher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotosWatcher.swift; sourceTree = "<group>"; };
 		1FE32D68F3EDCDF19843B399 /* RootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RootView.swift; sourceTree = "<group>"; };
 		20E7E327CD3E758EB9FBEAC9 /* CameraView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraView.swift; sourceTree = "<group>"; };
@@ -115,6 +119,7 @@
 		5C6A70B0F5041CC14CECE7FA /* HaldenLockedCamera.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.extensionkit-extension"; includeInIndex = 0; path = HaldenLockedCamera.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		62E1A8A22DAC6A515A2252D0 /* UploadActivity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UploadActivity.swift; sourceTree = "<group>"; };
 		6DD877D2F81600FDB2E6B24E /* HaldenWidgets.appex */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = "wrapper.app-extension"; path = HaldenWidgets.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		70F615205779FE0156F57C22 /* AdminViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AdminViews.swift; sourceTree = "<group>"; };
 		74E37347C080BB6AA9E72883 /* StandInCamera.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StandInCamera.swift; sourceTree = "<group>"; };
 		80A08A19CFB7DE203B87EE2F /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		84E944B12B866D15937D76FD /* HaldenUITests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = HaldenUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -131,6 +136,7 @@
 		C06E109E4E6B69033341E2A7 /* Halden.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = Halden.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		C24C0EE92119A576C7B20EEF /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		C765E5168916BA5A5355EF98 /* PhotosView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotosView.swift; sourceTree = "<group>"; };
+		C9042D37089100C0A5DBF4C6 /* AccountViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AccountViews.swift; sourceTree = "<group>"; };
 		CCDEB459ACF35A5382B17B06 /* PhotoView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoView.swift; sourceTree = "<group>"; };
 		DBEEA719E7976B95C7A812F2 /* CameraModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraModel.swift; sourceTree = "<group>"; };
 		EC66D3547031D67063F9441E /* TrashView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TrashView.swift; sourceTree = "<group>"; };
@@ -181,6 +187,8 @@
 		6BDBA3E07DB8913CDDCA7D72 /* Views */ = {
 			isa = PBXGroup;
 			children = (
+				C9042D37089100C0A5DBF4C6 /* AccountViews.swift */,
+				70F615205779FE0156F57C22 /* AdminViews.swift */,
 				20E7E327CD3E758EB9FBEAC9 /* CameraView.swift */,
 				B5DE17A5A6B072AE573A3107 /* LibraryGrid.swift */,
 				BD8F20F7C6963AF7826E38E6 /* OnboardingView.swift */,
@@ -276,6 +284,7 @@
 			isa = PBXGroup;
 			children = (
 				330BB49007FE4A8212AE2A53 /* HaldenUITests.swift */,
+				11DCCBE9E6F18A02FCC7FE6E /* PerformanceTests.swift */,
 			);
 			path = UITests;
 			sourceTree = "<group>";
@@ -436,6 +445,8 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				D02EC56937064A49FA03124A /* AccountViews.swift in Sources */,
+				AC905610DA82DFA5531F1278 /* AdminViews.swift in Sources */,
 				169F24FE07DB4AA45218A7A1 /* AppDelegate.swift in Sources */,
 				F208962660CBA8090DB0272F /* AppModel.swift in Sources */,
 				9F64B285C463AC47333BECF3 /* CameraModel.swift in Sources */,
@@ -469,6 +480,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				49FC6542BD2AE2DE9BB10B29 /* HaldenUITests.swift in Sources */,
+				6BBB5CD4E7E10F304D97B71F /* PerformanceTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

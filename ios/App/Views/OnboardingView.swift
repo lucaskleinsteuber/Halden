@@ -7,10 +7,29 @@ struct OnboardingView: View {
     @Environment(AppModel.self) private var model
     @State private var scanning = false
     @State private var pastedLink = ""
+    @State private var found: [FoundServer] = []
+    @State private var finder = ServerFinder()
 
     var body: some View {
         NavigationStack {
             Form {
+                if !found.isEmpty {
+                    Section("In this network") {
+                        ForEach(found) { server in
+                            NavigationLink {
+                                LoginView(address: server.address, port: server.port)
+                            } label: {
+                                VStack(alignment: .leading) {
+                                    Text(server.name)
+                                    Text(Fingerprint.display(server.fingerprint).prefix(14) + " …")
+                                        .font(.system(.caption2, design: .monospaced))
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
+                            .accessibilityIdentifier("found-\(server.name)")
+                        }
+                    }
+                }
                 Section {
                     Text("Connect this iPhone to your Halden server.")
                     Button("Scan the QR code", systemImage: "qrcode.viewfinder") { scanning = true }
@@ -40,6 +59,11 @@ struct OnboardingView: View {
                 }
             }
             .navigationTitle("Halden")
+            .onAppear {
+                finder.changed = { servers in found = servers }
+                finder.start()
+            }
+            .onDisappear { finder.stop() }
             .sheet(isPresented: $scanning) {
                 QRScannerView { text in
                     scanning = false
@@ -57,13 +81,19 @@ struct OnboardingView: View {
 /// password. Nothing secret is sent before the person confirmed the fingerprint.
 struct LoginView: View {
     @Environment(AppModel.self) private var model
-    @State private var address = ""
-    @State private var port = "47130"
+    @State private var address: String
+    @State private var port: String
     @State private var server: ServerInfo?
     @State private var confirmed = false
     @State private var username = ""
     @State private var password = ""
     @State private var problem: String?
+
+    /// A server found in the network fills in where it answers.
+    init(address: String = "", port: Int = 47130) {
+        _address = State(initialValue: address)
+        _port = State(initialValue: String(port))
+    }
 
     var body: some View {
         Form {
