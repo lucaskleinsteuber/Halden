@@ -8,6 +8,9 @@ There are no version numbers yet; entries are grouped by date until the first re
 
 ### Added
 
+- iPhone measurements on request (`PerformanceTests`): launch, the camera's start, memory and
+  processor while scrolling through 50,000 photos. In the simulator: responsive after 1.9 s,
+  146 MB at most while scrolling fast.
 - iPhone settings for the account and the server: devices (confirm, block, sign out), adding a
   device with a pairing QR code, the security log, the password and the preferred formats; for
   owners the whole server: status, doctor, settings (with the password where needed; the server

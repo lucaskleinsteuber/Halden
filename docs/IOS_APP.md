@@ -158,5 +158,12 @@ reaches it on 127.0.0.1) and stops it afterwards; extra arguments go to `xcodebu
 Started with `-ui-testing-library 50000`, the app fills its database with that many photos
 instead of connecting.
 
+Measurements (launch, the camera's start, memory and processor while scrolling through 50,000
+photos) run only on purpose:
+
+```sh
+TEST_RUNNER_HALDEN_MEASURE=1 ios/ui-tests.sh -only-testing:HaldenUITests/PerformanceTests
+```
+
 The CI (`.github/workflows/ios.yml`) runs all of it on macOS and checks that the Xcode project
 matches `project.yml`.
