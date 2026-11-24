@@ -41,6 +41,8 @@ pub struct Asset {
     pub capture_mode: Option<String>,
     /// How it plays: the slow part of a slow-motion video (a correction).
     pub playback: Option<Value>,
+    /// The edit (light, colour, crop, trim) the apps apply; `null` for none.
+    pub edit: Option<Value>,
     pub files: Vec<AssetFile>,
     pub created_at: i64,
     pub updated_at: i64,
@@ -91,7 +93,7 @@ macro_rules! asset_columns {
          a.updated_at, a.seq, a.trashed_at, a.deleted_at, a.title, a.description, \
          a.edit_taken_at, a.edit_tz_offset_min, a.edit_latitude, a.edit_longitude, \
          a.edit_altitude, a.edit_location_source, a.location_hidden, a.capture_mode, \
-         a.playback_json"
+         a.playback_json, a.edit_json"
     };
 }
 pub(crate) use asset_columns;
@@ -131,6 +133,7 @@ pub(crate) struct AssetRow {
     location_hidden: bool,
     capture_mode: Option<String>,
     pub playback_json: Option<String>,
+    pub edit_json: Option<String>,
 }
 
 impl AssetRow {
@@ -203,6 +206,10 @@ impl AssetRow {
             capture_mode: self.capture_mode,
             playback: self
                 .playback_json
+                .as_deref()
+                .and_then(|json| serde_json::from_str(json).ok()),
+            edit: self
+                .edit_json
                 .as_deref()
                 .and_then(|json| serde_json::from_str(json).ok()),
             files,

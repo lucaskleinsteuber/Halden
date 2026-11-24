@@ -59,6 +59,23 @@ impl Playback {
     }
 }
 
+/// Longest edit the server keeps, as JSON.
+pub const MAX_EDIT_BYTES: usize = 16 * 1024;
+
+/// An edit is the apps' business; the server only checks it is one: an object with a version.
+fn check_edit(edit: &Value) -> Result<(), String> {
+    let version = edit.get("version").and_then(Value::as_i64);
+    if !edit.is_object() || version.is_none_or(|v| v < 1) {
+        return Err("edit must be an object with a version of 1 or more.".into());
+    }
+    if edit.to_string().len() > MAX_EDIT_BYTES {
+        return Err(format!(
+            "edit may be at most {MAX_EDIT_BYTES} bytes as JSON."
+        ));
+    }
+    Ok(())
+}
+
 /// What to change. A missing field stays as it is.
 #[derive(Debug, Default)]
 pub struct Correction {
@@ -70,6 +87,8 @@ pub struct Correction {
     pub description: Option<Option<String>>,
     /// `Some(None)`: play as recorded.
     pub playback: Option<Option<Playback>>,
+    /// `Some(None)`: back to the original.
+    pub edit: Option<Option<Value>>,
     /// Drop corrections and show the original again: `takenAt` and/or `location`.
     pub restore: Vec<String>,
 }
@@ -81,6 +100,9 @@ impl Correction {
         }
         if let Some(Some(playback)) = &self.playback {
             playback.check()?;
+        }
+        if let Some(Some(edit)) = &self.edit {
+            check_edit(edit)?;
         }
         if let Some(taken) = self.taken_at
             && !(super::EARLIEST_TAKEN_AT..=super::LATEST_TAKEN_AT).contains(&taken)
@@ -120,6 +142,7 @@ impl Correction {
             && self.title.is_none()
             && self.description.is_none()
             && self.playback.is_none()
+            && self.edit.is_none()
             && self.restore.is_empty()
     }
 }
@@ -315,6 +338,28 @@ async fn apply(
             "playback",
             old,
             new.unwrap_or(Value::Null),
+        )
+        .await?;
+    }
+
+    if let Some(edit) = &correction.edit {
+        sqlx::query("UPDATE assets SET edit_json = ? WHERE id = ?")
+            .bind(edit.as_ref().map(Value::to_string))
+            .bind(id)
+            .execute(&mut *tx)
+            .await?;
+        let old = row
+            .edit_json
+            .as_deref()
+            .and_then(|json| serde_json::from_str(json).ok())
+            .unwrap_or(Value::Null);
+        record(
+            tx,
+            id,
+            device_id,
+            "edit",
+            old,
+            edit.clone().unwrap_or(Value::Null),
         )
         .await?;
     }

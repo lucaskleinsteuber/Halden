@@ -443,6 +443,50 @@ struct EndToEndTests {
         #expect(try other.asset(id)?.playback == nil)
     }
 
+    /// An edit reaches the server as what was set and comes to another phone; back to the
+    /// original, it is gone everywhere.
+    @Test func editsReachTheServerAndOtherPhones() async throws {
+        let server = try RealServer()
+        let info = try await server.ready()
+        let (connection, token) = try await Connector.login(
+            address: "127.0.0.1", port: server.port, fingerprint: info.fingerprint,
+            username: "lucas", password: RealServer.password, device: device)
+        let client = APIClient(
+            base: APIClient.base(address: "127.0.0.1", port: server.port)!, trust: .pinned(connection.fingerprint),
+            token: token)
+        let database = try HaldenDatabase()
+        try database.save(
+            server: StoredServer(serverId: connection.serverId, connection: connection, syncSince: 0, backup: nil))
+        let root = server.folder.appendingPathComponent("phone")
+        let files = try FileLocations(root: root, caches: root.appendingPathComponent("caches"))
+        let id = UUID().uuidString.lowercased()
+        try noiseJPEG(at: files.original("e.jpg"), seed: 99)
+        try Uploader.enqueue(
+            database: database, files: files, assetId: id, fileName: "e.jpg", kind: "photo",
+            mimeType: "image/jpeg", metadata: UploadMetadata(takenAt: 1_795_443_730_000))
+        #expect(await Uploader(database: database, files: files, client: client).drain() == 1)
+
+        var recipe = EditRecipe()
+        recipe.exposure = 0.7
+        recipe.quarterTurns = 1
+        recipe.crop = .init(x: 0.1, y: 0.1, width: 0.6, height: 0.8)
+        let actions = Actions(database: database)
+        try actions.correct(id, AssetCorrection(edit: .set(recipe)))
+        #expect(try database.asset(id)?.edit == recipe, "shows at once")
+        #expect(await actions.send(with: client) == .done)
+        #expect(try await client.asset(id).edit == recipe)
+        let other = try HaldenDatabase()
+        try other.save(
+            server: StoredServer(serverId: connection.serverId, connection: connection, syncSince: 0, backup: nil))
+        try await Syncer(database: other, client: client).run()
+        #expect(try other.asset(id)?.edit == recipe)
+
+        try actions.correct(id, AssetCorrection(edit: .clear))
+        #expect(await actions.send(with: client) == .done)
+        try await Syncer(database: other, client: client).run()
+        #expect(try other.asset(id)?.edit == nil)
+    }
+
     /// Albums made here, also without a connection and with a photo still uploading: they reach
     /// the server once it can be reached (the photo once it is there) and every other phone.
     @Test func albumsReachTheServerAndOtherPhones() async throws {

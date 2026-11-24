@@ -120,6 +120,8 @@ public struct Asset: Codable, Sendable, Equatable {
     public var captureMode: String?
     /// The slow part of a slow-motion video, if it was changed.
     public var playback: SlowMotion?
+    /// Light, colour, crop and trim as set by hand; the original stays as it is.
+    public var edit: EditRecipe?
 
     public func file(_ role: String) -> AssetFile? {
         files.first { $0.role == role }
@@ -250,14 +252,18 @@ public struct AssetCorrection: Codable, Sendable, Equatable {
     public var description: Change<String> = .keep
     /// The slow part of a slow-motion video; `.clear` plays it as recorded.
     public var playback: Change<SlowMotion> = .keep
+    /// The edit; `.clear` goes back to the original.
+    public var edit: Change<EditRecipe> = .keep
     public var restore: [String] = []
 
     public init(
         takenAt: Change<Int64> = .keep, timeZoneOffsetMinutes: Change<Int> = .keep,
         location: Change<CorrectedLocation> = .keep, title: Change<String> = .keep,
-        description: Change<String> = .keep, playback: Change<SlowMotion> = .keep, restore: [String] = []
+        description: Change<String> = .keep, playback: Change<SlowMotion> = .keep, edit: Change<EditRecipe> = .keep,
+        restore: [String] = []
     ) {
         self.playback = playback
+        self.edit = edit
         self.takenAt = takenAt
         self.timeZoneOffsetMinutes = timeZoneOffsetMinutes
         self.location = location
@@ -267,7 +273,7 @@ public struct AssetCorrection: Codable, Sendable, Equatable {
     }
 
     enum CodingKeys: String, CodingKey {
-        case takenAt, timeZoneOffsetMinutes, location, title, description, playback, restore
+        case takenAt, timeZoneOffsetMinutes, location, title, description, playback, edit, restore
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -285,6 +291,7 @@ public struct AssetCorrection: Codable, Sendable, Equatable {
         try put(title, .title)
         try put(description, .description)
         try put(playback, .playback)
+        try put(edit, .edit)
         if !restore.isEmpty { try container.encode(restore, forKey: .restore) }
     }
 
@@ -301,6 +308,7 @@ public struct AssetCorrection: Codable, Sendable, Equatable {
         title = try get(.title)
         description = try get(.description)
         playback = try get(.playback)
+        edit = try get(.edit)
         restore = try container.decodeIfPresent([String].self, forKey: .restore) ?? []
     }
 }

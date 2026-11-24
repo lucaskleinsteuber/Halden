@@ -229,6 +229,8 @@ mod upgrade_tests {
              VALUES ('al1', 'u1', 'Rome', 1, 1, 2); \
              UPDATE counters SET value = 2 WHERE name = 'asset_seq'; \
              INSERT INTO album_assets (album_id, asset_id, added_at) VALUES ('al1', 'a1', 1)",
+            // 10
+            "UPDATE assets SET edit_json = '{\"version\":1,\"exposure\":0.5}' WHERE id = 'a1'",
         ];
         for statement in &statements[..level.min(statements.len())] {
             sqlx::raw_sql(*statement)

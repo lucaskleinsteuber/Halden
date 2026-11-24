@@ -83,7 +83,8 @@ struct ViewerPager: UIViewControllerRepresentable {
 
 /// One photo or video, full screen. A Live Photo plays while it is held.
 final class PageController: UIViewController, UIScrollViewDelegate, PHLivePhotoViewDelegate {
-    let asset: LocalAsset
+    /// As it is now (it changes when it is edited here).
+    private(set) var asset: LocalAsset
     let app: AppModel
     private let scroll = UIScrollView()
     private let imageView = UIImageView()
@@ -92,6 +93,7 @@ final class PageController: UIViewController, UIScrollViewDelegate, PHLivePhotoV
     private var hasOriginal = false
     private var liveView: PHLivePhotoView?
     private var playbackObserver: NSObjectProtocol?
+    private var editObserver: NSObjectProtocol?
     private var liveLoading: Task<PHLivePhoto?, Never>?
 
     init(asset: LocalAsset, app: AppModel) {
@@ -124,6 +126,11 @@ final class PageController: UIViewController, UIScrollViewDelegate, PHLivePhotoV
         doubleTap.numberOfTapsRequired = 2
         scroll.addGestureRecognizer(doubleTap)
         if asset.isLivePhoto { addLive() }
+        editObserver = NotificationCenter.default.addObserver(
+            forName: .haldenEditChanged, object: asset.id, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.edited() }
+        }
         if asset.isSlowMotion { addBadge(symbol: "slowmo", text: "SLO-MO", label: "Slow motion") }
         if asset.isTimeLapse { addBadge(symbol: "timelapse", text: "TIME-LAPSE", label: "Time-lapse") }
         // The thumbnail at once, if it is decoded already.
@@ -135,17 +142,46 @@ final class PageController: UIViewController, UIScrollViewDelegate, PHLivePhotoV
     override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
         guard loading == nil else { return }
+        loadPictures()
+    }
+
+    /// Edited here: the new picture (or the video as edited), from the start.
+    private func edited() {
+        asset = app.asset(asset.id) ?? asset
+        if asset.isVideo {
+            if asset.isSlowMotion {
+                playSlowly()
+            } else if asset.edit != nil {
+                playEdited()
+            } else if let video = app.playable(asset) {
+                player?.player?.replaceCurrentItem(with: AVPlayerItem(asset: video))
+            }
+            return
+        }
+        loading?.cancel()
+        hasOriginal = false
+        scroll.setZoomScale(1, animated: false)
+        loadPictures()
+    }
+
+    /// The thumbnail at once, then the preview (as edited) over it.
+    private func loadPictures() {
         let pixels = Int(max(view.bounds.width, view.bounds.height) * traitCollection.displayScale)
         loading = Task { [weak self, asset, app] in
             if self?.imageView.image == nil, let small = await app.pipeline.image(for: asset, pixels: 512) {
                 self?.show(small, fade: false)
             }
+            let edit = asset.isVideo ? nil : asset.edit
             if let preview = await app.media.preview(of: asset),
-                let decoded = await Task.detached(operation: { ImagePipeline.decode(preview, pixels: pixels) }).value
+                let decoded = await Task.detached(operation: {
+                    ImagePipeline.decode(preview, pixels: pixels, edit: edit)
+                }).value
             {
                 self?.show(decoded, fade: true)
             } else if !asset.isVideo, let local = app.media.localOriginal(of: asset),
-                let decoded = await Task.detached(operation: { ImagePipeline.decode(local, pixels: pixels) }).value
+                let decoded = await Task.detached(operation: { ImagePipeline.decode(local, pixels: pixels, edit: edit) }
+                )
+                .value
             {
                 self?.show(decoded, fade: true)
             }
@@ -282,6 +318,7 @@ final class PageController: UIViewController, UIScrollViewDelegate, PHLivePhotoV
         controller.didMove(toParent: self)
         controller.view.accessibilityIdentifier = "video-player"
         player = controller
+        if asset.edit != nil && !asset.isSlowMotion { playEdited() }
         if asset.isSlowMotion {
             playSlowly()
             playbackObserver = NotificationCenter.default.addObserver(
@@ -295,11 +332,32 @@ final class PageController: UIViewController, UIScrollViewDelegate, PHLivePhotoV
     /// A slow-motion video with its slow part (as it is now): the sound slows down with it.
     private func playSlowly() {
         Task { [weak self, asset, app] in
-            guard let current = app.asset(asset.id) ?? Optional(asset), let video = app.playable(current),
-                let played = try? await Retiming.slowMotion(video, slow: await app.slowMotion(of: current))
-            else { return }
-            let item = AVPlayerItem(asset: played)
+            guard let current = app.asset(asset.id) ?? Optional(asset), let video = app.playable(current) else {
+                return
+            }
+            let slow = await app.slowMotion(of: current)
+            let item: AVPlayerItem
+            if let edit = current.edit, let edited = try? await Retiming.edited(video, edit: edit, slow: slow) {
+                item = AVPlayerItem(asset: edited.composition)
+                item.videoComposition = edited.video
+            } else if let played = try? await Retiming.slowMotion(video, slow: slow) {
+                item = AVPlayerItem(asset: played)
+            } else {
+                return
+            }
             item.audioTimePitchAlgorithm = .varispeed
+            self?.player?.player?.replaceCurrentItem(with: item)
+        }
+    }
+
+    /// An edited video: trimmed, with its light and colour.
+    private func playEdited() {
+        Task { [weak self, asset, app] in
+            guard let current = app.asset(asset.id) ?? Optional(asset), let edit = current.edit,
+                let video = app.playable(current), let edited = try? await Retiming.edited(video, edit: edit)
+            else { return }
+            let item = AVPlayerItem(asset: edited.composition)
+            item.videoComposition = edited.video
             self?.player?.player?.replaceCurrentItem(with: item)
         }
     }
@@ -313,8 +371,10 @@ final class PageController: UIViewController, UIScrollViewDelegate, PHLivePhotoV
         guard scrollView.zoomScale > 1.5, !hasOriginal, !asset.isVideo else { return }
         hasOriginal = true
         Task { [weak self, asset, app] in
+            let edit = asset.edit
             guard let url = try? await app.media.original(of: asset),
-                let decoded = await Task.detached(operation: { ImagePipeline.decode(url, pixels: 6000) }).value
+                let decoded = await Task.detached(operation: { ImagePipeline.decode(url, pixels: 6000, edit: edit) })
+                    .value
             else { return }
             self?.show(decoded, fade: true)
         }

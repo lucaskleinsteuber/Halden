@@ -90,6 +90,15 @@ the design comes after that. What works today is described below.
   and come out in the album. All of it shows at once and reaches the server when it can (an
   album change waits for photos still uploading), and every device gets it with the sync.
   Photos in the trash aren't shown in albums and are back when restored.
+- **Editing** (the slider button full screen; `EditRecipe`, `EditRenderer`): light (exposure,
+  brightness, contrast, highlights, shadows), colour (saturation, vibrance, warmth, tint), and
+  for photos turning, straightening and cropping (free or in a shape), for videos trimming.
+  "Auto" suggests light and colour from the picture. The picture follows every slider at once
+  (Core Image on the GPU). Only what was set is kept, as the asset's `edit` (a correction with
+  its history on the server); the original stays, and "Original" goes back to it. Every device
+  applies the edit itself when it shows the photo (grid, full screen, zoomed in) or plays the
+  video (`AVVideoComposition`), so nothing has to be uploaded again and nothing can get out of
+  step. Shared "as edited", written anew in full size with the original's metadata.
 - **Map** (Photos › Map): every photo with a place, grouped (`MapClusters`): the visible part
   of the map on a grid fixed to the earth, in steps of two, so groups don't jump while the map
   moves and split in four when zooming in; each group shows its newest photo and how many there

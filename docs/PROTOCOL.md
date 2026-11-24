@@ -397,6 +397,7 @@ Corrections. The original values are never changed; every correction is kept in 
   "title": "Munich",
   "description": null,
   "playback": { "slowFromMs": 1000, "slowToMs": 6000, "rate": 0.125 },
+  "edit": { "version": 1, "exposure": 0.5, "crop": { "x": 0.1, "y": 0, "width": 0.8, "height": 1 } },
   "restore": []
 }
 ```
@@ -404,7 +405,16 @@ Corrections. The original values are never changed; every correction is kept in 
 Every field is optional. `location: null` removes the place (the original stays stored but is not
 shown); `title: null` and `description: null` remove them. `playback` sets the slow part of a
 slow-motion video (`0 <= slowFromMs < slowToMs`, `rate` from 0.01 to 1, 0.125 is eight times
-slower); `null` plays it as recorded. The file is never changed. `restore: ["takenAt", "location"]`
+slower); `null` plays it as recorded. The file is never changed.
+
+`edit` is an edit as the apps set it (light, colour, turning, straightening, crop, trim), which
+they apply whenever they show or export the photo; the server keeps it as it is (a JSON object
+with a `version` of 1 or more, at most 16 KB, `422` otherwise) and never changes the file.
+`null` goes back to the original. The apps' fields (version 1): `exposure` (stops, -3…3),
+`brightness`, `contrast`, `highlights`, `shadows`, `saturation`, `vibrance`, `warmth`, `tint`
+(each -1…1), `quarterTurns` (clockwise), `straighten` (degrees), `crop` (`x`, `y`, `width`,
+`height`, 0…1 of the turned and straightened picture, from the top left), `trimStartMs`,
+`trimEndMs`. The asset object carries it as `edit`. `restore: ["takenAt", "location"]`
 drops corrections and shows the originals again. Answers with the asset.
 
 ### `POST /assets/location`

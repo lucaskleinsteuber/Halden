@@ -55,17 +55,56 @@ public enum Retiming {
         return composition
     }
 
+    /// An edited video as it plays: trimmed, with its light and colour (the shape is for photos).
+    /// `slow`: a slow-motion video's slow part, applied first.
+    public static func edited(_ asset: AVAsset, edit: EditRecipe, slow: SlowMotion? = nil) async throws
+        -> (composition: AVMutableComposition, video: AVVideoComposition?)
+    {
+        let composition: AVMutableComposition
+        if let slow {
+            composition = try await slowMotion(asset, slow: slow)
+        } else {
+            let duration = try await asset.load(.duration)
+            composition = try await copy(asset, duration: duration)
+            let timescale = CMTimeScale(600)
+            let end = edit.trimEndMs.map { CMTime(value: $0 * Int64(timescale) / 1000, timescale: timescale) }
+            if let end, end < duration {
+                composition.removeTimeRange(CMTimeRange(start: end, end: duration))
+            }
+            if let start = edit.trimStartMs, start > 0 {
+                let cut = CMTime(value: start * Int64(timescale) / 1000, timescale: timescale)
+                if cut < (end ?? duration) { composition.removeTimeRange(CMTimeRange(start: .zero, end: cut)) }
+            }
+        }
+        let colour = {
+            var colour = edit
+            colour.quarterTurns = 0
+            colour.straighten = 0
+            colour.crop = nil
+            return colour
+        }()
+        guard colour.changesColour else { return (composition, nil) }
+        let video = try await AVVideoComposition.videoComposition(with: composition) { request in
+            let edited = EditRenderer.apply(colour, to: request.sourceImage.clampedToExtent())
+                .cropped(to: request.sourceImage.extent)
+            request.finish(with: edited, context: nil)
+        }
+        return (composition, video)
+    }
+
     /// Writes a composition (as played) into a file: HEVC, with the metadata (place, time) of
     /// `metadataOf`, the original.
-    public static func export(_ composition: AVAsset, to destination: URL, metadataOf original: AVAsset? = nil)
-        async throws
-    {
+    public static func export(
+        _ composition: AVAsset, to destination: URL, metadataOf original: AVAsset? = nil,
+        video: AVVideoComposition? = nil
+    ) async throws {
         let metadata = (try? await original?.load(.metadata)) ?? []
         guard
             let session = AVAssetExportSession(asset: composition, presetName: AVAssetExportPresetHEVCHighestQuality)
                 ?? AVAssetExportSession(asset: composition, presetName: AVAssetExportPresetHighestQuality)
         else { throw CocoaError(.fileWriteUnknown) }
         session.metadata = metadata
+        session.videoComposition = video
         try? FileManager.default.removeItem(at: destination)
         try await session.export(to: destination, as: .mov)
     }

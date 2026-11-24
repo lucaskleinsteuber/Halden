@@ -364,6 +364,49 @@ final class HaldenUITests: XCTestCase {
         XCTAssertTrue(grid.cells.element(boundBy: 1).waitForExistence(timeout: 10), "its photos stay")
     }
 
+    /// A photo edited (exposure, turned), the edit kept; then back to the original.
+    @MainActor
+    func testEditingAPhoto() throws {
+        let environment = ProcessInfo.processInfo.environment
+        guard let server = environment["HALDEN_TEST_SERVER"], let password = environment["HALDEN_TEST_PASSWORD"]
+        else {
+            throw XCTSkip("no server: run ios/ui-tests.sh")
+        }
+        allowLocation()
+        let app = XCUIApplication()
+        app.launchArguments = ["-ui-testing", "-ui-testing-sign-in"]
+        app.launchEnvironment = ["HALDEN_TEST_SERVER": server, "HALDEN_TEST_PASSWORD": password]
+        app.launch()
+        let tabs = app.tabBars.firstMatch
+        XCTAssertTrue(tabs.waitForExistence(timeout: 60), "signed in")
+        tabs.buttons["Camera"].tap()
+        XCTAssertTrue(app.buttons["shutter"].waitForExistence(timeout: 10))
+        app.buttons["shutter"].tap()
+        tabs.buttons["Photos"].tap()
+        let newest = app.collectionViews["library-grid"].cells.firstMatch
+        XCTAssertTrue(newest.waitForExistence(timeout: 30))
+        newest.tap()
+
+        app.buttons["edit"].tap()
+        let exposure = app.sliders["edit-exposure"]
+        XCTAssertTrue(exposure.waitForExistence(timeout: 15), "the editor with the picture")
+        exposure.adjust(toNormalizedSliderPosition: 0.75)
+        app.segmentedControls["edit-tool"].buttons["Crop"].tap()
+        app.buttons["edit-turn"].tap()
+        app.buttons["save-edit"].tap()
+        app.buttons["info"].tap()
+        XCTAssertTrue(app.descendants(matching: .any)["info-edited"].waitForExistence(timeout: 10), "edited")
+        app.swipeDown(velocity: .fast)
+
+        app.buttons["edit"].tap()
+        XCTAssertTrue(app.buttons["edit-original"].waitForExistence(timeout: 15))
+        app.buttons["edit-original"].tap()
+        app.buttons["save-edit"].tap()
+        app.buttons["info"].tap()
+        XCTAssertTrue(app.buttons["correct"].waitForExistence(timeout: 10))
+        XCTAssertFalse(app.descendants(matching: .any)["info-edited"].exists, "back to the original")
+    }
+
     /// A correction shows at once and reaches the server, which keeps it next to the original.
     @MainActor
     func testACorrectionShowsAtOnceAndReachesTheServer() throws {

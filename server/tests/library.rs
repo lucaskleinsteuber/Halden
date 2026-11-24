@@ -514,6 +514,71 @@ async fn slow_motion_keeps_its_slow_part_next_to_the_original() {
     assert_eq!(edits[1]["new"], Value::Null);
 }
 
+/// An edit is kept as what was set, next to the unchanged original, with its history; the
+/// server only checks it is one, and forgets it with the photo.
+#[tokio::test]
+async fn edits_are_kept_next_to_the_original() {
+    let api = Api::start().await;
+    let token = owner(&api).await;
+    let id = Uuid::new_v4().to_string();
+    let original = random_bytes(300);
+    api.upload(
+        &token,
+        &id,
+        &original,
+        "image/heic",
+        taken(1_795_443_730_000, None),
+    )
+    .await;
+    let path = format!("/api/v1/assets/{id}");
+    let edit = json!({ "version": 1, "exposure": 0.5, "crop": { "x": 0.1, "y": 0, "width": 0.8, "height": 1 } });
+    let changed = api
+        .call(
+            Method::PATCH,
+            &path,
+            Some(&token),
+            Some(json!({ "edit": edit })),
+        )
+        .await;
+    assert_eq!(changed.status, 200, "{}", changed.body);
+    assert_eq!(changed.body["edit"], edit);
+    let files = changed.body["files"].as_array().unwrap();
+    let kept = files.iter().find(|f| f["role"] == "original").unwrap();
+    assert_eq!(
+        kept["sha256"],
+        sha_hex(&original),
+        "the original never changes"
+    );
+    for wrong in [
+        json!([1, 2]),
+        json!({ "exposure": 1 }),
+        json!({ "version": 0 }),
+        json!({ "version": 1, "notes": "x".repeat(20_000) }),
+    ] {
+        let refused = api
+            .call(
+                Method::PATCH,
+                &path,
+                Some(&token),
+                Some(json!({ "edit": wrong })),
+            )
+            .await;
+        assert_eq!(refused.status, 422, "{}", refused.body);
+    }
+    let back = api
+        .call(
+            Method::PATCH,
+            &path,
+            Some(&token),
+            Some(json!({ "edit": null })),
+        )
+        .await;
+    assert_eq!(back.body["edit"], Value::Null);
+    let edits = api.get(&path, &token).await.body["edits"].clone();
+    assert_eq!(edits.as_array().unwrap().len(), 2, "{edits}");
+    assert_eq!(edits[1]["old"], edit);
+}
+
 #[tokio::test]
 async fn photos_without_a_place_get_one_suggested() {
     let api = Api::start().await;

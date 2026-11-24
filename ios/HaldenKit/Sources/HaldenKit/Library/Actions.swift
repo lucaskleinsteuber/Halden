@@ -86,6 +86,11 @@ public struct Actions: Sendable {
             case .clear: asset.playback = nil
             case .keep: break
             }
+            switch correction.edit {
+            case .set(let edit): asset.edit = edit
+            case .clear: asset.edit = nil
+            case .keep: break
+            }
             try asset.update(db)
         }
     }

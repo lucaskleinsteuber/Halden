@@ -15,6 +15,7 @@ struct PhotoView: View {
     @State private var confirmDelete = false
     @State private var editingSlowMotion = false
     @State private var addingToAlbum: ChosenPhotos?
+    @State private var editing = false
     @Environment(\.dismiss) private var dismiss
 
     init(start: String, assets: [LocalAsset]) {
@@ -38,6 +39,9 @@ struct PhotoView: View {
                         Button("Original") { share(.original) }
                         Button("With corrected time and place") { share(.corrected) }
                         Button("In the preferred format") { share(.preferred) }
+                        if asset?.edit != nil {
+                            Button("As edited") { share(.edited) }.accessibilityIdentifier("share-edited")
+                        }
                         if asset?.isSlowMotion == true {
                             Button("As played, slowed down") { share(.asPlayed) }
                         }
@@ -61,6 +65,16 @@ struct PhotoView: View {
                     }
                     .accessibilityLabel("Delete")
                     .accessibilityIdentifier("delete")
+                }
+                ToolbarSpacer(.flexible, placement: .bottomBar)
+                ToolbarItem(placement: .bottomBar) {
+                    Button {
+                        editing = true
+                    } label: {
+                        Image(systemName: "slider.horizontal.3")
+                    }
+                    .accessibilityLabel("Edit")
+                    .accessibilityIdentifier("edit")
                 }
                 if asset?.isSlowMotion == true {
                     ToolbarSpacer(.flexible, placement: .bottomBar)
@@ -106,6 +120,9 @@ struct PhotoView: View {
             }
             .sheet(isPresented: $showInfo) { InfoView(id: current) }
             .sheet(item: $addingToAlbum) { chosen in AlbumPicker(assetIds: chosen.ids) }
+            .fullScreenCover(isPresented: $editing) {
+                if let asset { EditView(asset: asset) }
+            }
             .sheet(isPresented: $editingSlowMotion) {
                 if let asset { SlowMotionEditor(asset: asset) }
             }
@@ -235,6 +252,9 @@ struct InfoView: View {
                 ? "Live Photo" : asset.isSlowMotion ? "Slow motion" : asset.isTimeLapse ? "Time-lapse" : nil
             {
                 LabeledContent("Taken as", value: kind)
+            }
+            if asset.edit != nil {
+                LabeledContent("Edited", value: "yes, the original is kept").accessibilityIdentifier("info-edited")
             }
             if let slow = asset.playback {
                 LabeledContent(

@@ -180,6 +180,9 @@ pub struct CorrectionBody {
     /// The slow part of a slow-motion video; `null` removes it.
     #[serde(default, deserialize_with = "present")]
     playback: Option<Option<Playback>>,
+    /// The edit the apps apply; `null` goes back to the original.
+    #[serde(default, deserialize_with = "present")]
+    edit: Option<Option<serde_json::Value>>,
     /// Drop corrections: `["takenAt", "location"]`.
     #[serde(default)]
     restore: Vec<String>,
@@ -194,6 +197,7 @@ impl From<CorrectionBody> for Correction {
             title: body.title,
             description: body.description,
             playback: body.playback,
+            edit: body.edit,
             restore: body.restore,
         }
     }

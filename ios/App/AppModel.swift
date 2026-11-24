@@ -11,6 +11,8 @@ import UniformTypeIdentifiers
 extension Notification.Name {
     /// A slow-motion video's slow part changed (the object is its id).
     static let haldenPlaybackChanged = Notification.Name("halden.playback-changed")
+    /// A photo or video was edited (the object is its id).
+    static let haldenEditChanged = Notification.Name("halden.edit-changed")
 }
 
 /// Everything the screens show and do. Lives as long as the app.
@@ -468,6 +470,19 @@ final class AppModel {
         }
     }
 
+    // MARK: Editing
+
+    /// The edit (or `nil`: back to the original); shown at once, sent when the server can be reached.
+    func setEdit(_ id: String, _ recipe: EditRecipe?) {
+        do {
+            try actions.correct(id, AssetCorrection(edit: recipe.map { .set($0) } ?? .clear))
+            refresh()
+            NotificationCenter.default.post(name: .haldenEditChanged, object: id)
+        } catch {
+            problem = "The edit could not be saved: \(error.localizedDescription)"
+        }
+    }
+
     // MARK: Albums
 
     func photos(inAlbum id: String) -> [LocalAsset] {
@@ -629,6 +644,8 @@ final class AppModel {
         case preferred
         /// A slow-motion video as it plays, with its slow part (written anew).
         case asPlayed
+        /// As edited, in full size (written anew).
+        case edited
     }
 
     /// A file to share; fetched from the server when it isn't on this iPhone.
@@ -659,9 +676,29 @@ final class AppModel {
             return named
         case .asPlayed:
             let original = AVURLAsset(url: try await media.original(of: asset))
-            let played = try await Retiming.slowMotion(original, slow: await slowMotion(of: asset))
+            let slow = await slowMotion(of: asset)
             let named = folder.appendingPathComponent("Halden-\(asset.id.prefix(8))-slow.mov")
-            try await Retiming.export(played, to: named, metadataOf: original)
+            if let edit = asset.edit {
+                let edited = try await Retiming.edited(original, edit: edit, slow: slow)
+                try await Retiming.export(edited.composition, to: named, metadataOf: original, video: edited.video)
+            } else {
+                try await Retiming.export(
+                    try await Retiming.slowMotion(original, slow: slow), to: named, metadataOf: original)
+            }
+            return named
+        case .edited:
+            let source = try await media.original(of: asset)
+            guard let edit = asset.edit else { return source }
+            if asset.isVideo {
+                let original = AVURLAsset(url: source)
+                let edited = try await Retiming.edited(original, edit: edit)
+                let named = folder.appendingPathComponent("Halden-\(asset.id.prefix(8))-edited.mov")
+                try await Retiming.export(edited.composition, to: named, metadataOf: original, video: edited.video)
+                return named
+            }
+            let named = folder.appendingPathComponent(
+                "Halden-\(asset.id.prefix(8))-edited.\(source.pathExtension.lowercased() == "heic" ? "heic" : "jpg")")
+            try await Task.detached { try EditRenderer.render(source, with: edit, to: named) }.value
             return named
         }
     }

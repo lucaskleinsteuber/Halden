@@ -49,6 +49,7 @@
 		D190BA231FC90D7AF3D76836 /* UploadActivity.swift in Sources */ = {isa = PBXBuildFile; fileRef = 62E1A8A22DAC6A515A2252D0 /* UploadActivity.swift */; };
 		D5399A90556FBEC26C5A5648 /* TrashView.swift in Sources */ = {isa = PBXBuildFile; fileRef = EC66D3547031D67063F9441E /* TrashView.swift */; };
 		D816E69AF03071F4318B0F5A /* WithoutPlaceView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B3DC81E0143A53F37F02DDAE /* WithoutPlaceView.swift */; };
+		E14DD68941D58D824A8EA46A /* EditView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F69A0135F96B9BBFE1F20138 /* EditView.swift */; };
 		E3BA005A93D6AF34E0722BFD /* HaldenKit in Frameworks */ = {isa = PBXBuildFile; productRef = 52C9458930B85A4D8D21B7D8 /* HaldenKit */; };
 		E5569A0CC388C712D638DB6F /* HaldenLockedCamera.appex in Embed ExtensionKit Extensions */ = {isa = PBXBuildFile; fileRef = 5C6A70B0F5041CC14CECE7FA /* HaldenLockedCamera.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		E640748C0B9FBEFC7342C21F /* SharedIntents.swift in Sources */ = {isa = PBXBuildFile; fileRef = F3B360B4ABEBAD5E54337C81 /* SharedIntents.swift */; };
@@ -155,6 +156,7 @@
 		DBEEA719E7976B95C7A812F2 /* CameraModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraModel.swift; sourceTree = "<group>"; };
 		EC66D3547031D67063F9441E /* TrashView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TrashView.swift; sourceTree = "<group>"; };
 		F3B360B4ABEBAD5E54337C81 /* SharedIntents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SharedIntents.swift; sourceTree = "<group>"; };
+		F69A0135F96B9BBFE1F20138 /* EditView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EditView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -207,6 +209,7 @@
 				70F615205779FE0156F57C22 /* AdminViews.swift */,
 				4720DFD3016CAEA4E93C4BF4 /* AlbumsView.swift */,
 				20E7E327CD3E758EB9FBEAC9 /* CameraView.swift */,
+				F69A0135F96B9BBFE1F20138 /* EditView.swift */,
 				B5DE17A5A6B072AE573A3107 /* LibraryGrid.swift */,
 				CF10462761DAD01DC9A3FAFA /* MapLibraryView.swift */,
 				BD8F20F7C6963AF7826E38E6 /* OnboardingView.swift */,
@@ -477,6 +480,7 @@
 				0CDFEFC6CE12BBEDF37B2362 /* CameraView.swift in Sources */,
 				9308131D436654AB7AB96174 /* CaptureBackend.swift in Sources */,
 				0B003A7B5B667EC060B3BE9E /* DeviceCamera.swift in Sources */,
+				E14DD68941D58D824A8EA46A /* EditView.swift in Sources */,
 				C6F2BAB2216CDFB906390167 /* HaldenApp.swift in Sources */,
 				1A3071743BB7165FCFE51777 /* LibraryGrid.swift in Sources */,
 				0D392F59853052F455C35A95 /* ManualPanel.swift in Sources */,

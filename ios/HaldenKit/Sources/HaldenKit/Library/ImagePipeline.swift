@@ -1,4 +1,5 @@
 import CoreGraphics
+import CoreImage
 import Foundation
 import ImageIO
 
@@ -37,7 +38,9 @@ public actor ImagePipeline {
     }
 
     nonisolated static func key(_ asset: LocalAsset, pixels: Int) -> NSString {
-        "\(asset.thumbnailSha256 ?? asset.id)-\(pixels)" as NSString
+        // An edited photo is another picture.
+        let edit = asset.edit.map { "-e\($0.hashValue)" } ?? ""
+        return "\(asset.thumbnailSha256 ?? asset.id)-\(pixels)\(edit)" as NSString
     }
 
     /// The picture if it is decoded already; never waits.
@@ -54,8 +57,9 @@ public actor ImagePipeline {
             url = await fetch(asset)
         }
         guard let url, !Task.isCancelled else { return nil }
+        let edit = asset.edit
         let decoded = await Task.detached(priority: .userInitiated) {
-            Self.decode(url, pixels: pixels)
+            Self.decode(url, pixels: pixels, edit: edit)
         }.value
         if let decoded {
             memory.setObject(decoded, forKey: key, cost: decoded.cgImage.bytesPerRow * decoded.cgImage.height)
@@ -99,6 +103,25 @@ public actor ImagePipeline {
         }
     }
 
+    /// Shared by everything that applies edits: Core Image keeps its caches in it.
+    public nonisolated static var editContext: CIContext { SharedContext.shared.context }
+
+    /// Decodes a picture and applies an edit to it (light, colour, crop and turn), at no more
+    /// than `pixels` on its longer side.
+    public nonisolated static func decode(_ url: URL, pixels: Int, edit: EditRecipe?) -> DecodedImage? {
+        guard let edit, !edit.isEmpty else { return decode(url, pixels: pixels) }
+        // Read a little larger: a crop keeps only part of it.
+        guard let plain = decode(url, pixels: pixels * 2) else { return nil }
+        var edited = EditRenderer.apply(edit, to: CIImage(cgImage: plain.cgImage))
+        let longest = max(edited.extent.width, edited.extent.height)
+        if longest > CGFloat(pixels) {
+            let scale = CGFloat(pixels) / longest
+            edited = edited.transformed(by: CGAffineTransform(scaleX: scale, y: scale))
+        }
+        guard let image = editContext.createCGImage(edited, from: edited.extent.integral) else { return plain }
+        return DecodedImage(image)
+    }
+
     /// Decodes a JPEG (or any picture ImageIO reads) at no more than `pixels` on its longer side.
     public nonisolated static func decode(_ url: URL, pixels: Int) -> DecodedImage? {
         guard let source = CGImageSourceCreateWithURL(url as CFURL, [kCGImageSourceShouldCache: false] as CFDictionary)
@@ -113,4 +136,10 @@ public actor ImagePipeline {
         guard let image = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else { return nil }
         return DecodedImage(image)
     }
+}
+
+/// A Core Image context is safe to use from any thread (Apple says so; older SDKs don't mark it).
+final class SharedContext: @unchecked Sendable {
+    static let shared = SharedContext()
+    let context = CIContext(options: [.cacheIntermediates: false])
 }

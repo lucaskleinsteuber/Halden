@@ -82,6 +82,7 @@ public actor Syncer {
         local.pairedVideoSha256 = asset.file("paired_video")?.sha256 ?? local.pairedVideoSha256
         local.captureMode = asset.captureMode ?? local.captureMode
         local.playback = asset.playback
+        local.edit = asset.edit
         try local.save(db)
     }
 }

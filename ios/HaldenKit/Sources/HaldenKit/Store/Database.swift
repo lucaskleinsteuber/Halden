@@ -180,6 +180,12 @@ public final class HaldenDatabase: Sendable {
             }
             try db.create(index: "albumAsset_by_asset", on: "albumAsset", columns: ["assetId"])
         }
+        migrator.registerMigration("7: edits") { db in
+            try db.alter(table: "asset") { t in
+                // Light, colour, crop and trim as set by hand (JSON); applied when shown.
+                t.add(column: "edit", .jsonText)
+            }
+        }
         return migrator
     }
 }
@@ -234,6 +240,8 @@ public struct LocalAsset: Codable, Sendable, Equatable, Identifiable, FetchableR
     public var captureMode: String?
     /// The slow part of a slow-motion video, when it was changed; else the standard one.
     public var playback: SlowMotion?
+    /// Light, colour, crop and trim as set by hand; the original stays as it is.
+    public var edit: EditRecipe?
 
     public var isVideo: Bool { kind == "video" }
     public var isSlowMotion: Bool { isVideo && captureMode == "slowmo" }

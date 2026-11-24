@@ -8,6 +8,10 @@ There are no version numbers yet; entries are grouped by date until the first re
 
 ### Added
 
+- iPhone editing without touching the original: light, colour, turning, straightening,
+  cropping (photos) and trimming (videos), with Auto and a live picture; kept as what was set
+  (the asset's `edit` on the server, with its history) and applied by every device when it shows
+  or plays it; shared as edited in full size.
 - iPhone map with all photos (Photos › Map): groups with their newest photo and count, steady
   while the map moves, estimated places marked, a tap shows the photos; the photos without a
   place a tap away. Measured with 50,000 photos (`PerformanceTests`).
