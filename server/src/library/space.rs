@@ -38,10 +38,20 @@ impl SpaceBook {
             .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
-    /// Reserves `bytes` for an upload, or says how much is missing.
-    pub fn reserve(&self, upload: Uuid, bytes: u64) -> Result<(), NotEnoughSpace> {
-        let free = fs4::available_space(&self.library).unwrap_or(0);
-        self.reserve_with_free(upload, bytes, free)
+    /// Reserves `bytes` for an upload, or says how much is missing. A library the server can't
+    /// look into (gone, or no permission) is an error of its own: reporting it as a full disk
+    /// would send people looking for space instead of the real problem.
+    pub fn reserve(&self, upload: Uuid, bytes: u64) -> std::io::Result<Result<(), NotEnoughSpace>> {
+        let free = fs4::available_space(&self.library).map_err(|error| {
+            std::io::Error::new(
+                error.kind(),
+                format!(
+                    "could not read the free space of the library {}: {error}",
+                    self.library.display()
+                ),
+            )
+        })?;
+        Ok(self.reserve_with_free(upload, bytes, free))
     }
 
     fn reserve_with_free(&self, upload: Uuid, bytes: u64, free: u64) -> Result<(), NotEnoughSpace> {

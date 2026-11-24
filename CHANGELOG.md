@@ -4,6 +4,44 @@ Notable changes to Halden. Newest first. Dates are day.month.year.
 
 There are no version numbers yet; entries are grouped by date until the first release.
 
+## 24.11.2026
+
+### Added
+
+- `halden doctor`, run as root, checks that the server's own user can get through every folder
+  on the way to its data and library and write there, and names the folder that stops it.
+- Tests for things happening at the same time (the same photo from two phones at once; trash,
+  restore and delete-for-good from three devices at once), for the life of an upload (announced
+  again, replaced, given up, finished early, expired, partial files left by a crash), and a
+  4.3 GB file sent whole with offsets and ranges past 4 GiB (nightly, or `HALDEN_BIG_FILE=1`).
+
+### Changed
+
+- Server: the system allocator on Linux too. Measured on Linux with 100,000 photos: 26 MB at
+  rest and 114–120 MB under load, against 54 MB and 184–226 MB with mimalloc. mimalloc stays
+  available as `--features mimalloc` to compare.
+
+### Fixed
+
+- Server: `halden setup` made missing parent folders (like `/srv/halden` for the default library
+  `/srv/halden/library`) with the library's restrictive permissions and owned by root, so the
+  server's user could not get to its library: under systemd every upload and the daily database
+  backup failed. Missing parents are now made 0755. Found by the new system test on Linux.
+- Server: a library the server can't get into (gone, or no permission) was reported to the apps
+  as a full disk (`insufficient_storage`). It is now a server error, and the log names the
+  folder and the reason.
+- Server: a photo restored on one device at the moment another device deleted it for good (or
+  the trash emptied itself) was deleted anyway, although the first device had been told it was
+  back. Deleting now checks inside its own transaction that the photo is still in the trash.
+- Server: the same photo sent from two devices at once (both announced before either had
+  finished) was stored twice. The second one now ends as `duplicate` with the first one's id,
+  as it would have when announced later; the iPhone app understands that answer at every step
+  of an upload.
+- Tests: the HEIC tests accept `heif-convert` where `heif-dec` is missing (Ubuntu 24.04).
+- Tests: servers started as their own process are stopped like systemd does (SIGTERM first), so
+  coverage builds count what they ran; the nightly "long" job runs a debug build again (the
+  failpoint and updater tests need it).
+
 ## 23.11.2026
 
 ### Added
@@ -77,7 +115,7 @@ There are no version numbers yet; entries are grouped by date until the first re
   ten times the random cases; the load test with both allocators and a 15-minute soak; fuzzing
   of every parser; `cargo audit`. `docs/TESTING.md` describes all of it.
 - Load test: `SOAK_MINUTES` keeps it running and watches memory, open files and speed;
-  `HALDEN_BINARY` compares builds; `--features system-allocator` builds without mimalloc.
+  `HALDEN_BINARY` compares builds; `--features mimalloc` builds with mimalloc.
 - Fuzzing (`server/fuzz`, cargo-fuzz): range headers, path templates, EXIF and QuickTime
   metadata, picture decoding, the updater's release list and signatures, config files and
   changes, pairing codes.

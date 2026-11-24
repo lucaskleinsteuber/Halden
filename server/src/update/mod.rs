@@ -126,7 +126,17 @@ mod tests {
     /// carry the same key as the program.
     #[test]
     fn the_install_script_has_the_same_key() {
-        let script = include_str!("../../../packaging/linux/get-halden.sh");
+        let path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../packaging/linux/get-halden.sh"
+        );
+        let script = match std::fs::read_to_string(path) {
+            Ok(script) => script,
+            // cargo-mutants copies only `server/` (run it with HALDEN_MUTANTS=1); everywhere
+            // else the script must be there.
+            Err(_) if std::env::var_os("HALDEN_MUTANTS").is_some() => return,
+            Err(error) => panic!("{path}: {error}"),
+        };
         let line = script
             .lines()
             .find(|line| line.starts_with("signing_public_key="))

@@ -111,6 +111,10 @@ public actor Uploader {
                     try await finished(item, url: url, asset: state.asset)
                     return
                 }
+                if state.state == "duplicate" {
+                    try duplicate(item, existing: state.existingAssetId)
+                    return
+                }
                 item.sent = state.offset ?? 0
             } catch let error as APIError where [404, 410].contains(error.status ?? 0) {
                 // The server forgot the upload (expired, or it failed): announce it again.
@@ -152,6 +156,11 @@ public actor Uploader {
                     try await finished(item, url: url, asset: state.asset)
                     return
                 }
+                // Another device sent the same photo while this one was on its way.
+                if state.state == "duplicate" {
+                    try duplicate(item, existing: state.existingAssetId)
+                    return
+                }
                 item.sent = state.offset ?? (item.sent + Int64(piece.count))
                 try save(item)
             } catch APIError.server(409, "offset_mismatch", _, let offset?) {
@@ -161,6 +170,10 @@ public actor Uploader {
         }
         // Everything arrived, but the answer to the last piece was lost: ask to finish.
         let state = try await client.complete(upload: id)
+        if state.state == "duplicate" {
+            try duplicate(item, existing: state.existingAssetId)
+            return
+        }
         try await finished(item, url: url, asset: state.asset)
     }
 

@@ -511,11 +511,15 @@ pub fn gradient_jpeg() -> Vec<u8> {
 
 /// Is an external tool installed? With `HALDEN_REQUIRE_TOOLS` set (in CI), a missing tool fails
 /// the test instead of skipping that part.
+/// `name` may list alternatives: `heif-dec|heif-convert` (older libheif has only the latter,
+/// e.g. on Ubuntu 24.04; the server uses either).
 pub fn tool(name: &str) -> bool {
-    let found = std::process::Command::new(name)
-        .arg("-version")
-        .output()
-        .is_ok();
+    let found = name.split('|').any(|program| {
+        std::process::Command::new(program)
+            .arg("-version")
+            .output()
+            .is_ok()
+    });
     if !found && std::env::var_os("HALDEN_REQUIRE_TOOLS").is_some() {
         panic!("{name} is required for this test (HALDEN_REQUIRE_TOOLS is set)");
     }
@@ -523,8 +527,10 @@ pub fn tool(name: &str) -> bool {
 }
 
 /// Waits until the server has files in all these roles for an asset (made in the background).
+/// Background work runs at the lowest priority, so on a busy machine this can take a while.
 pub async fn wait_for_files(api: &Api, token: &str, id: &str, roles: &[&str]) -> Value {
-    for _ in 0..300 {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+    while std::time::Instant::now() < deadline {
         let asset = api.get(&format!("/api/v1/assets/{id}"), token).await.body;
         let files = asset["files"].as_array().unwrap();
         if roles
@@ -536,4 +542,25 @@ pub async fn wait_for_files(api: &Api, token: &str, id: &str, roles: &[&str]) ->
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
     }
     panic!("the server did not make {roles:?} for {id}");
+}
+
+/// Stops a `halden serve` started as its own process the way systemd does: SIGTERM, then
+/// SIGKILL if it hasn't ended after five seconds. A clean end also lets a coverage build write
+/// its counts (a killed process writes none).
+pub fn stop_process(child: &mut std::process::Child) {
+    if matches!(child.try_wait(), Ok(Some(_))) {
+        return;
+    }
+    let _ = std::process::Command::new("kill")
+        .args(["-TERM", &child.id().to_string()])
+        .status();
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    while std::time::Instant::now() < deadline {
+        if matches!(child.try_wait(), Ok(Some(_))) {
+            return;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    let _ = child.kill();
+    let _ = child.wait();
 }

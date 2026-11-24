@@ -76,7 +76,7 @@ pub async fn delete(
     .fetch_all(db.read())
     .await?;
     let ids: Vec<String> = trashed.into_iter().map(|(id,)| id).collect();
-    purge(db, roots, &ids).await
+    purge(db, roots, &ids, i64::MAX).await
 }
 
 /// Where an asset's files can be: the library, the derived folder, the mirror.
@@ -98,17 +98,44 @@ pub async fn purge_expired(
     .fetch_all(db.read())
     .await?;
     let ids: Vec<String> = expired.into_iter().map(|(id,)| id).collect();
-    purge(db, roots, &ids).await
+    purge(db, roots, &ids, cutoff).await
 }
 
 /// Turns assets into tombstones and removes their files. The database goes first, and notes in
 /// the same transaction which files are to go (the file journal): if the server stops halfway,
 /// the next start removes what is left, so a deleted photo never stays on any disk, and no
 /// record ever points at a missing file.
-async fn purge(db: &Db, roots: Roots<'_>, ids: &[String]) -> Result<u64, sqlx::Error> {
+///
+/// Only assets that are still in the trash (since before `trashed_before`) when their
+/// transaction runs: a photo restored by another device a moment ago stays.
+pub async fn purge(
+    db: &Db,
+    roots: Roots<'_>,
+    ids: &[String],
+    trashed_before: i64,
+) -> Result<u64, sqlx::Error> {
     let mut purged = 0;
     for id in ids {
         let mut tx = db.begin().await?;
+        // Checked again here, inside the transaction: what was in the trash when the request
+        // came may have been restored since. A tombstone keeps only what devices need to forget
+        // the photo, not where or when it was.
+        let claimed = sqlx::query(
+            "UPDATE assets SET deleted_at = ?, exif_json = NULL, client_json = NULL, \
+                 title = NULL, description = NULL, latitude = NULL, longitude = NULL, \
+                 altitude = NULL, location_accuracy_m = NULL, heading = NULL, \
+                 edit_latitude = NULL, edit_longitude = NULL, edit_altitude = NULL, \
+                 camera_make = NULL, camera_model = NULL, lens = NULL \
+             WHERE id = ? AND deleted_at IS NULL AND trashed_at IS NOT NULL AND trashed_at < ?",
+        )
+        .bind(now_ms())
+        .bind(id)
+        .bind(trashed_before)
+        .execute(&mut *tx)
+        .await?;
+        if claimed.rows_affected() == 0 {
+            continue;
+        }
         let files: Vec<(String, String)> =
             sqlx::query_as("SELECT storage, path FROM asset_files WHERE asset_id = ?")
                 .bind(id)
@@ -141,19 +168,6 @@ async fn purge(db: &Db, roots: Roots<'_>, ids: &[String]) -> Result<u64, sqlx::E
             .bind(id)
             .execute(&mut *tx)
             .await?;
-        // A tombstone keeps only what devices need to forget the photo, not where or when it was.
-        sqlx::query(
-            "UPDATE assets SET deleted_at = ?, exif_json = NULL, client_json = NULL, \
-                 title = NULL, description = NULL, latitude = NULL, longitude = NULL, \
-                 altitude = NULL, location_accuracy_m = NULL, heading = NULL, \
-                 edit_latitude = NULL, edit_longitude = NULL, edit_altitude = NULL, \
-                 camera_make = NULL, camera_model = NULL, lens = NULL \
-             WHERE id = ?",
-        )
-        .bind(now_ms())
-        .bind(id)
-        .execute(&mut *tx)
-        .await?;
         assets::touch(&mut tx, id).await?;
         tx.commit().await?;
         purged += 1;

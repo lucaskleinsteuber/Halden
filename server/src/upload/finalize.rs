@@ -32,6 +32,13 @@ use crate::{
     },
 };
 
+/// What finishing an upload ended in.
+pub(super) enum Finished {
+    Stored(Box<Asset>),
+    /// The same content was stored meanwhile under this other asset id; this upload is dropped.
+    Duplicate(String),
+}
+
 /// Reading metadata never holds up an upload for longer than this.
 const METADATA_TIMEOUT: Duration = Duration::from_secs(10);
 
@@ -41,7 +48,7 @@ pub(super) async fn finish(
     user: &User,
     row: &UploadRow,
     hasher: Sha256,
-) -> Result<Asset, UploadError> {
+) -> Result<Finished, UploadError> {
     let part = uploads.part_path(&row.id);
     let digest: [u8; 32] = hasher.finalize().into();
     if digest.as_slice() != row.sha256.as_slice() {
@@ -79,6 +86,18 @@ pub(super) async fn finish(
     let capture = capture_time(&client, &file_metadata, now);
 
     let placing = uploads.placing.lock().await;
+    // Another device of this account may have sent the same photo while this one arrived: it is
+    // kept once, as if the duplicate had been found when the upload was announced.
+    if row.role() == UploadRole::Original
+        && let Some(existing) = assets::original_with_hash(db, &user.id, &digest).await?
+        && existing != row.asset_id
+    {
+        drop(placing);
+        uploads
+            .discard(db, row, &format!("{}{existing}", super::DUPLICATE_OF))
+            .await?;
+        return Ok(Finished::Duplicate(existing));
+    }
     let base = match row.role() {
         UploadRole::Original => uploads.template.render(&user.username, capture.local),
         // A Live Photo's video or a RAW sits next to its original, with the same name.
@@ -124,6 +143,7 @@ pub(super) async fn finish(
 
     assets::get(db.read(), &user.id, &row.asset_id)
         .await?
+        .map(|asset| Finished::Stored(Box::new(asset)))
         .ok_or(UploadError::NotFound)
 }
 

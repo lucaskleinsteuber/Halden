@@ -31,13 +31,12 @@ const MIB: usize = 1024 * 1024;
 const SIZE: usize = 200 * MIB;
 const HALF: usize = SIZE / 2;
 
-/// Kills the server when the test ends, however it ends.
+/// Stops the server when the test ends, however it ends.
 struct Server(Child);
 
 impl Drop for Server {
     fn drop(&mut self) {
-        let _ = self.0.kill();
-        let _ = self.0.wait();
+        common::stop_process(&mut self.0);
     }
 }
 
@@ -73,7 +72,9 @@ async fn json(response: reqwest::Response) -> Value {
     response.json().await.unwrap()
 }
 
-#[tokio::test]
+// Two threads: the client must be able to answer the server's goodbye while the test waits for
+// the server to stop at the end.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn kill_dash_nine_in_the_middle_of_an_upload_loses_nothing() {
     let dir = tempfile::tempdir().unwrap();
     let config_path = dir.path().join("config.toml");

@@ -297,6 +297,68 @@ struct EndToEndTests {
         #expect(library.first?.backedUp == true)
         #expect(try await client.sync(since: 0).assets.count == 1)
     }
+
+    /// Two phones send the same photo; the second finishes while the first is halfway. When the
+    /// first one's last piece arrives, the server says "duplicate", and the first phone's photo
+    /// becomes the one that is already there.
+    @Test func aPhotoSentFromTwoPhonesAtOnceIsKeptOnce() async throws {
+        let server = try RealServer()
+        let info = try await server.ready()
+        func phone(_ name: String) async throws -> (HaldenDatabase, FileLocations, APIClient) {
+            let (connection, token) = try await Connector.login(
+                address: "127.0.0.1", port: server.port, fingerprint: info.fingerprint,
+                username: "lucas", password: RealServer.password,
+                device: DeviceDescription(name: name, platform: "ios", installationId: "install-e2e-\(name)"))
+            let database = try HaldenDatabase()
+            try database.save(
+                server: StoredServer(serverId: connection.serverId, connection: connection, syncSince: 0, backup: nil))
+            let root = server.folder.appendingPathComponent(name)
+            let files = try FileLocations(root: root, caches: root.appendingPathComponent("caches"))
+            let client = APIClient(
+                base: APIClient.base(address: "127.0.0.1", port: server.port)!,
+                trust: .pinned(connection.fingerprint), token: token)
+            return (database, files, client)
+        }
+        let (databaseA, filesA, clientA) = try await phone("phone-a")
+        let (databaseB, filesB, clientB) = try await phone("phone-b")
+        try noiseJPEG(at: filesA.original("a.jpg"))
+        try FileManager.default.copyItem(at: filesA.original("a.jpg"), to: filesB.original("b.jpg"))
+        let a = UUID().uuidString.lowercased()
+        let b = UUID().uuidString.lowercased()
+        try Uploader.enqueue(
+            database: databaseA, files: filesA, assetId: a, fileName: "a.jpg", kind: "photo",
+            mimeType: "image/jpeg", metadata: UploadMetadata(takenAt: 1))
+        try Uploader.enqueue(
+            database: databaseB, files: filesB, assetId: b, fileName: "b.jpg", kind: "photo",
+            mimeType: "image/jpeg", metadata: UploadMetadata(takenAt: 1))
+
+        // Phone A gets halfway …
+        let uploaderA = Uploader(database: databaseA, files: filesA, client: clientA, pieceSize: 128 << 10)
+        let first = Task { await uploaderA.drain() }
+        for _ in 0..<400 {
+            if let item = try databaseA.upload(a), item.sent > 0 { break }
+            try await Task.sleep(for: .milliseconds(5))
+        }
+        first.cancel()
+        _ = await first.value
+        let cut = try #require(try databaseA.upload(a))
+        #expect(cut.sent > 0 && cut.sent < cut.size)
+
+        // … phone B sends all of it …
+        #expect(await Uploader(database: databaseB, files: filesB, client: clientB).drain() == 1)
+        #expect(try databaseB.asset(b)?.backedUp == true)
+
+        // … and phone A finishes: its photo is B's.
+        try await databaseA.writer.write { db in try db.execute(sql: "UPDATE upload SET retryAt = 0") }
+        let againA = Uploader(database: databaseA, files: filesA, client: clientA, pieceSize: 128 << 10)
+        #expect(await againA.drain() == 1)
+        #expect(try databaseA.upload(a) == nil)
+        let library = try databaseA.library()
+        #expect(library.map(\.id) == [b])
+        #expect(library.first?.backedUp == true)
+        #expect(library.first?.localFile == "a.jpg", "the photo taken here stays on the phone")
+        #expect(try await clientA.sync(since: 0).assets.map { $0.id.lowercased() } == [b])
+    }
 }
 
 /// `halden pair` in the terminal: shows a code and waits until a device uses it.

@@ -3,7 +3,7 @@
 
 mod common;
 
-use std::path::Path;
+use std::{path::Path, time::Duration};
 
 use bytes::Bytes;
 use common::{ANNA_PASSWORD, Api, LUCAS_PASSWORD, Reply, device, iphone};
@@ -349,6 +349,33 @@ async fn a_full_disk_is_reported_before_anything_is_sent() {
     )
     .await;
     assert_eq!((reply.status, reply.error()), (507, "insufficient_storage"));
+    api.stop().await;
+}
+
+/// Found on Linux: a library the server's user can't get into was reported as a full disk.
+#[tokio::test]
+async fn an_unreachable_library_is_not_reported_as_a_full_disk() {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = tempfile::tempdir().unwrap();
+    let locked = dir.path().join("locked");
+    let api = Api::start_in(&dir.path().join("data"), &locked.join("library"), |_| {}).await;
+    api.add_user("lucas", LUCAS_PASSWORD, Role::Owner).await;
+    let token = api.token("lucas", LUCAS_PASSWORD, iphone()).await;
+    std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o000)).unwrap();
+    let reply = announce(
+        &api,
+        &token,
+        &Uuid::new_v4().to_string(),
+        b"tiny",
+        "image/jpeg",
+        json!({}),
+    )
+    .await;
+    std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o755)).unwrap();
+    // Root gets in anyway; everyone else must not see "insufficient_storage".
+    if reply.status != 201 {
+        assert_eq!((reply.status, reply.error()), (500, "internal_error"));
+    }
     api.stop().await;
 }
 
@@ -754,5 +781,334 @@ async fn without_phone_metadata_the_file_tells_time_and_place() {
         std::fs::read(library_file(&api, "lucas/2026/11/2026-11-23_15-22-10.jpg")).unwrap(),
         photo
     );
+    api.stop().await;
+}
+
+fn incoming_parts(api: &Api) -> Vec<String> {
+    std::fs::read_dir(api.config.incoming_dir())
+        .unwrap()
+        .flatten()
+        .map(|entry| entry.file_name().to_string_lossy().into_owned())
+        .collect()
+}
+
+/// The app announces again after losing its upload id, sends something else for the same photo,
+/// gives up, or asks to finish early: each leaves exactly one upload and no stray file.
+#[tokio::test]
+async fn an_upload_can_be_announced_again_replaced_given_up_and_finished() {
+    let api = Api::start().await;
+    api.add_user("lucas", LUCAS_PASSWORD, Role::Owner).await;
+    let token = api.token("lucas", LUCAS_PASSWORD, iphone()).await;
+    let asset = Uuid::new_v4().to_string();
+    let data = random_bytes(300_000);
+
+    let first = announce(&api, &token, &asset, &data, "image/heic", json!({})).await;
+    assert_eq!(first.status, 201, "{}", first.body);
+    let upload = first.body["uploadId"].as_str().unwrap().to_string();
+    let part = send(&api, &token, &upload, 0, data[..100_000].to_vec()).await;
+    assert_eq!(part.body["offset"], 100_000);
+
+    // Announced again (the app lost the id): the same upload, where it stands.
+    let again = announce(&api, &token, &asset, &data, "image/heic", json!({})).await;
+    assert_eq!(again.body["uploadId"], upload.as_str(), "{}", again.body);
+    assert_eq!(again.body["offset"], 100_000);
+
+    // Finishing early says how much is missing.
+    let early = api
+        .call(
+            Method::POST,
+            &format!("/api/v1/uploads/{upload}/complete"),
+            Some(&token),
+            None,
+        )
+        .await;
+    assert_eq!((early.status, early.error()), (409, "upload_incomplete"));
+    assert_eq!(early.headers["upload-offset"], "100000");
+
+    // Other content for the same photo replaces the first upload.
+    let other = random_bytes(200_000);
+    let replaced = announce(&api, &token, &asset, &other, "image/heic", json!({})).await;
+    assert_eq!(replaced.status, 201, "{}", replaced.body);
+    let second = replaced.body["uploadId"].as_str().unwrap().to_string();
+    assert_ne!(second, upload);
+    let old = send(&api, &token, &upload, 100_000, data[100_000..].to_vec()).await;
+    assert_eq!(
+        (old.status, old.error()),
+        (410, "upload_failed"),
+        "{}",
+        old.body
+    );
+    assert!(old.body["message"].as_str().unwrap().contains("replaced"));
+    assert_eq!(incoming_parts(&api), vec![format!("{second}.part")]);
+
+    // Given up: gone, and giving up again is fine.
+    let path = format!("/api/v1/uploads/{second}");
+    let cancelled = api.call(Method::DELETE, &path, Some(&token), None).await;
+    assert_eq!(cancelled.status, 204);
+    assert!(incoming_is_empty(&api));
+    let status = api.get(&path, &token).await;
+    assert_eq!((status.status, status.error()), (410, "upload_failed"));
+    assert_eq!(
+        api.call(Method::DELETE, &path, Some(&token), None)
+            .await
+            .status,
+        204
+    );
+    // Nobody else can give up someone's upload.
+    api.add_user("anna", ANNA_PASSWORD, Role::Member).await;
+    let anna = api
+        .token("anna", ANNA_PASSWORD, device("Anna's iPhone", "anna-phone"))
+        .await;
+    assert_eq!(
+        api.call(Method::DELETE, &path, Some(&anna), None)
+            .await
+            .status,
+        404
+    );
+
+    // A fresh start goes through; asking to finish a finished upload just says so.
+    let fresh = announce(&api, &token, &asset, &other, "image/heic", json!({})).await;
+    let third = fresh.body["uploadId"].as_str().unwrap().to_string();
+    let done = send(&api, &token, &third, 0, other.clone()).await;
+    assert_eq!(done.body["state"], "completed", "{}", done.body);
+    let finished = api
+        .call(
+            Method::POST,
+            &format!("/api/v1/uploads/{third}/complete"),
+            Some(&token),
+            None,
+        )
+        .await;
+    assert_eq!(
+        (finished.status, &finished.body["state"]),
+        (200, &json!("completed"))
+    );
+    // Giving up a finished upload changes nothing.
+    let after = api
+        .call(
+            Method::DELETE,
+            &format!("/api/v1/uploads/{third}"),
+            Some(&token),
+            None,
+        )
+        .await;
+    assert_eq!(after.status, 204);
+    assert_eq!(
+        api.get(&format!("/api/v1/assets/{asset}"), &token)
+            .await
+            .status,
+        200
+    );
+    // Announcing the stored photo again: nothing to send.
+    let stored = announce(&api, &token, &asset, &other, "image/heic", json!({})).await;
+    assert_eq!(stored.body["state"], "completed", "{}", stored.body);
+    // But not different content under its id.
+    let clash = announce(&api, &token, &asset, &data, "image/heic", json!({})).await;
+    assert_eq!(clash.error(), "conflict");
+    api.stop().await;
+}
+
+/// A Live Photo's second file must be a video, a RAW file a photo.
+#[tokio::test]
+async fn extra_files_must_fit_their_role() {
+    let api = Api::start().await;
+    api.add_user("lucas", LUCAS_PASSWORD, Role::Owner).await;
+    let token = api.token("lucas", LUCAS_PASSWORD, iphone()).await;
+    let asset = Uuid::new_v4().to_string();
+    upload(&api, &token, &asset, &random_bytes(1000), json!({})).await;
+    for (role, mime) in [("paired_video", "image/jpeg"), ("raw", "video/quicktime")] {
+        let data = random_bytes(500);
+        let reply = api
+            .post(
+                "/api/v1/uploads",
+                Some(&token),
+                json!({
+                    "assetId": asset, "role": role, "size": data.len(),
+                    "sha256": sha_hex(&data), "mimeType": mime,
+                }),
+            )
+            .await;
+        assert_eq!((reply.status, reply.error()), (409, "conflict"), "{role}");
+    }
+    api.stop().await;
+}
+
+/// Uploads nobody continues are thrown away after `storage.upload_expiry_days`, and partial files
+/// without an upload (left by a crash) when the server starts.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn forgotten_uploads_and_stray_files_are_thrown_away() {
+    let mut api = Api::start_supervised().await;
+    api.add_user("lucas", LUCAS_PASSWORD, Role::Owner).await;
+    let token = api.token("lucas", LUCAS_PASSWORD, iphone()).await;
+    let data = random_bytes(300_000);
+    let created = announce(
+        &api,
+        &token,
+        &Uuid::new_v4().to_string(),
+        &data,
+        "image/heic",
+        json!({}),
+    )
+    .await;
+    let upload = created.body["uploadId"].as_str().unwrap().to_string();
+    send(&api, &token, &upload, 0, data[..100_000].to_vec()).await;
+    // Still wanted: continued later.
+    let kept = announce(
+        &api,
+        &token,
+        &Uuid::new_v4().to_string(),
+        &data,
+        "image/heic",
+        json!({}),
+    )
+    .await;
+    let kept = kept.body["uploadId"].as_str().unwrap().to_string();
+
+    // Its time ran out (as if days had passed), and a crash left a partial file behind.
+    let db = api.pool().await;
+    sqlx::query("UPDATE uploads SET expires_at = 0 WHERE id = ?")
+        .bind(&upload)
+        .execute(db.write())
+        .await
+        .unwrap();
+    db.close().await;
+    let stray = api
+        .config
+        .incoming_dir()
+        .join(format!("{}.part", Uuid::new_v4()));
+    std::fs::write(&stray, b"left over").unwrap();
+
+    let generation = api.generation();
+    let restart = api
+        .post("/api/v1/admin/restart", Some(&token), json!({}))
+        .await;
+    assert_eq!(restart.status, 202, "{}", restart.body);
+    api.restarted_after(generation).await;
+
+    let path = format!("/api/v1/uploads/{upload}");
+    let mut gone = None;
+    for _ in 0..100 {
+        let status = api.get(&path, &token).await;
+        if status.status == 410 {
+            gone = Some(status);
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    let gone = gone.expect("the forgotten upload was not thrown away");
+    assert!(gone.body["message"].as_str().unwrap().contains("expired"));
+    assert!(!stray.exists(), "the stray partial file is removed");
+    assert_eq!(incoming_parts(&api), vec![format!("{kept}.part")]);
+    assert_eq!(
+        api.get(&format!("/api/v1/uploads/{kept}"), &token)
+            .await
+            .status,
+        200
+    );
+    api.stop().await;
+}
+
+/// A file over 4 GiB (a long 4K video) goes through whole: sizes, offsets and ranges past 32
+/// bits. Needs 4.6 GB of disk, so it runs in the nightly run (`HALDEN_TEST_SCALE` ≥ 10) or with
+/// `HALDEN_BIG_FILE=1`.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_file_over_four_gib_goes_through_whole() {
+    let scale: u32 = std::env::var("HALDEN_TEST_SCALE")
+        .ok()
+        .and_then(|value| value.parse().ok())
+        .unwrap_or(1);
+    if std::env::var_os("HALDEN_BIG_FILE").is_none() && scale < 10 {
+        eprintln!("skipped: set HALDEN_BIG_FILE=1 to send a 4.6 GB file");
+        return;
+    }
+    const MIB: u64 = 1024 * 1024;
+    const SIZE: u64 = 4396 * MIB + 7;
+    const PIECE: u64 = 512 * MIB;
+    // Each MiB is the same random block with its number in front: fast to make, never repeating.
+    let block = random_bytes(MIB as usize);
+    let bytes = |start: u64, len: u64| -> Vec<u8> {
+        let mut out = Vec::with_capacity(len as usize);
+        let mut index = start / MIB;
+        let mut skip = (start % MIB) as usize;
+        while (out.len() as u64) < len {
+            let mut piece = block.clone();
+            piece[..8].copy_from_slice(&index.to_le_bytes());
+            let want = (len as usize - out.len()).min(piece.len() - skip);
+            out.extend_from_slice(&piece[skip..skip + want]);
+            skip = 0;
+            index += 1;
+        }
+        out
+    };
+    let mut hasher = Sha256::new();
+    let mut at = 0;
+    while at < SIZE {
+        let len = PIECE.min(SIZE - at);
+        hasher.update(bytes(at, len));
+        at += len;
+    }
+    let sha = hex::encode(hasher.finalize());
+
+    let api = Api::start().await;
+    api.add_user("lucas", LUCAS_PASSWORD, Role::Owner).await;
+    let token = api.token("lucas", LUCAS_PASSWORD, iphone()).await;
+    let asset = Uuid::new_v4().to_string();
+    let created = api
+        .post(
+            "/api/v1/uploads",
+            Some(&token),
+            json!({ "assetId": asset, "size": SIZE, "sha256": sha, "mimeType": "video/quicktime" }),
+        )
+        .await;
+    assert_eq!(created.status, 201, "{}", created.body);
+    let upload = created.body["uploadId"].as_str().unwrap().to_string();
+
+    let mut offset = 0;
+    let mut checked_past_32_bits = false;
+    while offset < SIZE {
+        let len = PIECE.min(SIZE - offset);
+        let reply = send(&api, &token, &upload, offset as usize, bytes(offset, len)).await;
+        assert_eq!(reply.status, 200, "{}", reply.body);
+        offset += len;
+        if offset < SIZE {
+            assert_eq!(reply.body["offset"], offset);
+            if offset > u64::from(u32::MAX) && !checked_past_32_bits {
+                let head = api
+                    .http
+                    .head(api.url(&format!("/api/v1/uploads/{upload}")))
+                    .bearer_auth(&token)
+                    .send()
+                    .await
+                    .unwrap();
+                assert_eq!(head.headers()["upload-offset"], offset.to_string().as_str());
+                checked_past_32_bits = true;
+            }
+        } else {
+            assert_eq!(reply.body["state"], "completed", "{}", reply.body);
+            assert_eq!(reply.body["asset"]["files"][0]["size"], SIZE);
+        }
+    }
+    assert!(checked_past_32_bits);
+    let stored = find_original(&api.config.storage.library_dir.join("lucas"));
+    assert_eq!(std::fs::metadata(&stored).unwrap().len(), SIZE);
+
+    // A piece from just before to just after the 4 GiB mark, and the very end.
+    for start in [4096 * MIB - 5, SIZE - 3] {
+        let end = (start + 15).min(SIZE - 1);
+        let part = api
+            .http
+            .get(api.url(&format!("/api/v1/assets/{asset}/files/original")))
+            .bearer_auth(&token)
+            .header("range", format!("bytes={start}-{end}"))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(part.status(), 206);
+        assert_eq!(
+            part.headers()["content-range"],
+            format!("bytes {start}-{end}/{SIZE}").as_str()
+        );
+        assert_eq!(part.bytes().await.unwrap(), bytes(start, end - start + 1));
+    }
     api.stop().await;
 }

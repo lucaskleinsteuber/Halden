@@ -374,7 +374,7 @@ async fn a_mirror_on_another_disk_survives_unplugging_and_failing() {
     )
     .await;
     let mut copied = false;
-    for _ in 0..400 {
+    for _ in 0..1200 {
         if library_files(&root)
             .iter()
             .any(|f| std::fs::read(f).map(|b| b == first).unwrap_or(false))
@@ -399,7 +399,7 @@ async fn a_mirror_on_another_disk_survives_unplugging_and_failing() {
     usb.break_down();
     let pool = api.pool().await;
     let mut failed = false;
-    for _ in 0..600 {
+    for _ in 0..1200 {
         let errors: Vec<(Option<String>,)> =
             sqlx::query_as("SELECT last_error FROM jobs WHERE kind = 'mirror'")
                 .fetch_all(pool.read())

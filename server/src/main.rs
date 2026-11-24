@@ -1,7 +1,6 @@
-/// mimalloc on Linux: fast, and it keeps a long-running server's memory from fragmenting and
-/// slowly growing over weeks. Elsewhere the system allocator is used (it measured better on
-/// macOS).
-#[cfg(all(target_os = "linux", not(feature = "system-allocator")))]
+/// The system allocator is used: it measured better than mimalloc for Halden on macOS and on
+/// Linux (see `docs/TESTING.md`). `--features mimalloc` builds with mimalloc to compare again.
+#[cfg(feature = "mimalloc")]
 #[global_allocator]
 static ALLOCATOR: mimalloc::MiMalloc = mimalloc::MiMalloc;
 

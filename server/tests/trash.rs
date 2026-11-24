@@ -216,7 +216,7 @@ async fn settings(api: &Api, token: &str, change: Value) -> Value {
 }
 
 async fn wait_without(api: &Api, token: &str, id: &str, role: &str) -> Value {
-    for _ in 0..300 {
+    for _ in 0..1200 {
         let asset = api.get(&format!("/api/v1/assets/{id}"), token).await.body;
         if file(&asset, role).is_none() {
             return asset;

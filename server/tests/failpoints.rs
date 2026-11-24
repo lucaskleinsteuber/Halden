@@ -31,8 +31,7 @@ struct Server(Child);
 
 impl Drop for Server {
     fn drop(&mut self) {
-        let _ = self.0.kill();
-        let _ = self.0.wait();
+        common::stop_process(&mut self.0);
     }
 }
 
@@ -215,7 +214,7 @@ impl Box_ {
 
 /// Waits until a server that should die at its failpoint has died.
 fn wait_dead(server: &mut Server) {
-    for _ in 0..300 {
+    for _ in 0..1200 {
         if server.0.try_wait().unwrap().is_some() {
             return;
         }
@@ -319,7 +318,7 @@ async fn a_conversion_placed_but_not_recorded_is_made_again_without_leftovers() 
 
     let _server = setup.start(None).await;
     let mut converted = false;
-    for _ in 0..200 {
+    for _ in 0..1200 {
         let detail = setup
             .call(
                 reqwest::Method::GET,

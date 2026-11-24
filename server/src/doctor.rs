@@ -189,7 +189,67 @@ fn folders(config: &Config) -> Check {
         )
         .fix("sudo halden setup gives them to the server's user");
     }
+    // As root everything is writable; what counts is whether the server's own user gets there.
+    if as_root && let Some((uid, gid)) = crate::setup::service_ids() {
+        for dir in [
+            config.storage.data_dir.clone(),
+            config.storage.library_dir.clone(),
+            config.incoming_dir(),
+            config.backup_dir(),
+        ] {
+            if let Err(blocking) = service_user_may_write(&dir, uid, gid) {
+                return Check::new(
+                    "folders",
+                    "Folders",
+                    Level::Problem,
+                    format!(
+                        "the server's user ({}) can't get into {}",
+                        crate::setup::SERVICE_USER,
+                        blocking.display()
+                    ),
+                )
+                .fix(if blocking == dir {
+                    "sudo halden setup gives it to the server's user".to_string()
+                } else {
+                    format!("let it pass through: sudo chmod o+x {}", blocking.display())
+                });
+            }
+        }
+    }
     Check::new("folders", "Folders", Level::Ok, "all there and writable")
+}
+
+/// Can the user `uid` (group `gid`) pass through every folder on the way to `dir` and create
+/// files in it? Otherwise the first folder that stops it.
+fn service_user_may_write(dir: &Path, uid: u32, gid: u32) -> Result<(), PathBuf> {
+    may_write_below(Path::new("/"), dir, uid, gid)
+}
+
+/// Like [`service_user_may_write`], looking only at the folders below `base`.
+fn may_write_below(base: &Path, dir: &Path, uid: u32, gid: u32) -> Result<(), PathBuf> {
+    use std::os::unix::fs::MetadataExt;
+    let allowed = |meta: &std::fs::Metadata, bits: u32| {
+        let mode = meta.mode();
+        if meta.uid() == uid {
+            mode & (bits << 6) != 0
+        } else if meta.gid() == gid {
+            mode & (bits << 3) != 0
+        } else {
+            mode & bits != 0
+        }
+    };
+    let mut current = base.to_path_buf();
+    for part in dir.strip_prefix(base).unwrap_or(dir).components() {
+        current.push(part);
+        match std::fs::metadata(&current) {
+            Ok(meta) if allowed(&meta, 0o1) => {}
+            _ => return Err(current),
+        }
+    }
+    match std::fs::metadata(dir) {
+        Ok(meta) if allowed(&meta, 0o2) => Ok(()),
+        _ => Err(dir.to_path_buf()),
+    }
 }
 
 /// The server writes settings changed in the app to its config file. It replaces the file, so
@@ -981,6 +1041,46 @@ mod tests {
         .await;
         assert_eq!(broken.level, Level::Problem);
         db.close().await;
+    }
+
+    #[test]
+    fn a_folder_on_the_way_can_lock_the_server_out() {
+        use std::os::unix::fs::{MetadataExt, PermissionsExt};
+        let dir = tempfile::tempdir().unwrap();
+        let library = dir.path().join("srv/halden/library");
+        std::fs::create_dir_all(&library).unwrap();
+        let meta = std::fs::metadata(&library).unwrap();
+        // Another user than the owner of these folders, in another group.
+        let (uid, gid) = (meta.uid() + 1, meta.gid() + 1);
+        let open = std::fs::Permissions::from_mode(0o777);
+        for folder in [
+            dir.path().join("srv"),
+            dir.path().join("srv/halden"),
+            library.clone(),
+        ] {
+            std::fs::set_permissions(&folder, open.clone()).unwrap();
+        }
+        assert_eq!(may_write_below(dir.path(), &library, uid, gid), Ok(()));
+        std::fs::set_permissions(
+            dir.path().join("srv/halden"),
+            std::fs::Permissions::from_mode(0o750),
+        )
+        .unwrap();
+        assert_eq!(
+            may_write_below(dir.path(), &library, uid, gid),
+            Err(dir.path().join("srv/halden"))
+        );
+        std::fs::set_permissions(dir.path().join("srv/halden"), open).unwrap();
+        std::fs::set_permissions(&library, std::fs::Permissions::from_mode(0o755)).unwrap();
+        assert_eq!(
+            may_write_below(dir.path(), &library, uid, gid),
+            Err(library.clone())
+        );
+        // Its owner may.
+        assert_eq!(
+            may_write_below(dir.path(), &library, meta.uid(), meta.gid()),
+            Ok(())
+        );
     }
 
     #[test]

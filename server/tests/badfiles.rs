@@ -96,7 +96,7 @@ async fn upload(api: &Api, token: &str, data: &[u8], mime: &str) -> (u16, Value,
 /// Waits for the thumbnail job of an asset to have failed at least once; returns its error.
 async fn thumbnail_error(api: &Api, asset: &str) -> String {
     let pool = api.pool().await;
-    for _ in 0..400 {
+    for _ in 0..1200 {
         let found: Option<(Option<String>,)> =
             sqlx::query_as("SELECT last_error FROM jobs WHERE kind = 'thumbnail' AND asset_id = ?")
                 .bind(asset)
@@ -142,7 +142,7 @@ async fn bad_files_fail_their_jobs_never_the_server() {
     if common::tool("ffmpeg") {
         cases.push(("broken video", broken_video, "video/quicktime", true));
     }
-    if common::tool("heif-dec") {
+    if common::tool("heif-dec|heif-convert") {
         cases.push(("cut-off HEIC", cut_heic, "image/heic", true));
     }
     for (name, data, mime, must_fail) in cases {

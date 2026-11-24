@@ -471,8 +471,7 @@ async fn an_update_asked_for_in_the_app() {
         .unwrap();
     assert_eq!(asked.status(), 202);
     assert!(request.exists());
-    let _ = server.kill();
-    let _ = server.wait();
+    common::stop_process(&mut server);
 
     // What halden-update-request.service runs when the request appears.
     let (ok, out) = halden(&setup, &base, Some(&key), &["update", "--from-app"]);

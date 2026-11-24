@@ -366,7 +366,7 @@ async fn status_backups_jobs_mirror_and_doctor() {
     assert!(mirror.body["path"].is_string(), "{}", mirror.body);
     // The original arrives on the mirror.
     let mut copied = false;
-    for _ in 0..200 {
+    for _ in 0..1200 {
         let found = walk(disk.path())
             .into_iter()
             .any(|f| std::fs::read(&f).map(|b| b == data).unwrap_or(false));

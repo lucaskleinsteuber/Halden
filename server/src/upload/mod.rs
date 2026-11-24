@@ -190,6 +190,22 @@ pub enum UploadState {
     Duplicate { existing_asset_id: String },
 }
 
+/// The reason of an upload dropped because its content arrived from another device meanwhile;
+/// the other asset's id follows.
+const DUPLICATE_OF: &str = "duplicate of ";
+
+/// The answer for an upload that ended without being stored: a duplicate stored meanwhile is not
+/// an error.
+fn ended(row: &UploadRow) -> Result<UploadState, UploadError> {
+    let reason = row.error.clone().unwrap_or_default();
+    match reason.strip_prefix(DUPLICATE_OF) {
+        Some(existing) => Ok(UploadState::Duplicate {
+            existing_asset_id: existing.to_string(),
+        }),
+        None => Err(UploadError::Failed(reason)),
+    }
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum UploadError {
     #[error("no such upload")]
@@ -436,7 +452,7 @@ impl Uploads {
 
         let id = Uuid::new_v4();
         self.space
-            .reserve(id, new.size)
+            .reserve(id, new.size)?
             .map_err(UploadError::NotEnoughSpace)?;
         let now = now_ms();
         let metadata_json = serde_json::to_string(&new.metadata).ok();
@@ -522,7 +538,7 @@ impl Uploads {
         let row = self.load(db, &user.id, id).await?;
         match row.state.as_str() {
             "completed" => self.completed(db, &user.id, &row.asset_id).await,
-            "failed" => Err(UploadError::Failed(row.error.unwrap_or_default())),
+            "failed" => ended(&row),
             _ => {
                 let offset = self.offset_of(&row).await;
                 Ok(UploadState::Receiving(self.progress(&row, offset)))
@@ -543,7 +559,7 @@ impl Uploads {
         let row = self.load(db, &user.id, id).await?;
         match row.state.as_str() {
             "completed" => return self.completed(db, &user.id, &row.asset_id).await,
-            "failed" => return Err(UploadError::Failed(row.error.unwrap_or_default())),
+            "failed" => return ended(&row),
             _ => {}
         }
         let uuid = Uuid::parse_str(&row.id).map_err(|_| UploadError::NotFound)?;
@@ -612,11 +628,11 @@ impl Uploads {
         let result = finishing
             .await
             .map_err(|join| UploadError::Io(std::io::Error::other(join.to_string())))?;
-        match result {
-            Ok(asset) => Ok(UploadState::Completed {
-                asset: Box::new(asset),
+        match result? {
+            finalize::Finished::Stored(asset) => Ok(UploadState::Completed { asset }),
+            finalize::Finished::Duplicate(existing) => Ok(UploadState::Duplicate {
+                existing_asset_id: existing,
             }),
-            Err(error) => Err(error),
         }
     }
 

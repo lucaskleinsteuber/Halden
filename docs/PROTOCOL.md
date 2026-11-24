@@ -307,7 +307,10 @@ MiB per request suits background uploads on iOS. A request that breaks off keeps
 Answers `200` with `{"state": "receiving", …, "offset": …}` and an `Upload-Offset` header, or,
 when the last byte arrived, `{"state": "completed", "asset": {…}}`: the SHA-256 was checked, the
 file flushed to disk and moved into the library, and the database updated. A wrong hash gives
-`422 checksum_mismatch` and the upload is thrown away.
+`422 checksum_mismatch` and the upload is thrown away. If another device of the account stored
+the same content while this upload was arriving, the answer is
+`{"state": "duplicate", "existingAssetId": "…"}` as for the announcement: the photo is kept once,
+and this device's photo is that asset.
 
 Unfinished uploads are thrown away after `[storage] upload_expiry_days` (default 7) without
 progress.
@@ -315,7 +318,9 @@ progress.
 ### `GET /uploads/{id}` and `HEAD /uploads/{id}`
 
 The same body as `PATCH`, with `Upload-Offset` and `Upload-Length` headers. Use it after a
-restart of the app or the server to learn where to continue.
+restart of the app or the server to learn where to continue. An upload that was given up,
+replaced by a newer announcement of the same asset, or expired answers `410 upload_failed`:
+announce it again.
 
 ### `POST /uploads/{id}/complete`
 
@@ -324,7 +329,8 @@ For retries: finishes an upload whose bytes all arrived, or returns its result i
 
 ### `DELETE /uploads/{id}`
 
-Gives up on an upload. `204`.
+Gives up on an upload and throws away what arrived. `204`, also when it was given up or
+finished before (a finished upload stays stored).
 
 ## Assets
 

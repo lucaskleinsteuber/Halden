@@ -74,8 +74,20 @@ fn write_atomic_owned(
     result
 }
 
-/// Creates `path` (and missing parents) and sets its permissions to exactly `mode`.
+/// Creates `path` and sets its permissions to exactly `mode`. Missing parent folders are made
+/// with the usual 0755, never with `mode`: a parent only root may enter (like `/srv/halden` made
+/// 0750 by root) would lock the server's own user out of everything below it.
 pub fn create_dir(path: &Path, mode: u32) -> Result<()> {
+    if let Some(parent) = path.parent()
+        && !parent.as_os_str().is_empty()
+        && !parent.exists()
+    {
+        DirBuilder::new()
+            .recursive(true)
+            .mode(0o755)
+            .create(parent)
+            .with_context(|| format!("could not create the folder {}", parent.display()))?;
+    }
     DirBuilder::new()
         .recursive(true)
         .mode(mode)
@@ -148,5 +160,18 @@ mod tests {
         assert_eq!(mode, 0o640);
         // No temporary files are left behind.
         assert_eq!(fs::read_dir(dir.path()).unwrap().count(), 1);
+    }
+
+    /// Found by the system test: `/srv/halden` made 0750 by root locked the server out of its
+    /// library below it.
+    #[test]
+    fn missing_parents_stay_open_to_enter() {
+        let dir = tempfile::tempdir().unwrap();
+        let library = dir.path().join("srv/halden/library");
+        create_dir(&library, 0o750).unwrap();
+        let mode = |p: &Path| fs::metadata(p).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode(&dir.path().join("srv")), 0o755);
+        assert_eq!(mode(&dir.path().join("srv/halden")), 0o755);
+        assert_eq!(mode(&library), 0o750);
     }
 }
