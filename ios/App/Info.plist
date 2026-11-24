@@ -37,6 +37,10 @@
 	<string>Halden notes where a photo was taken, how precisely, and which way the camera pointed.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Halden records the sound of your videos.</string>
+	<key>NSPhotoLibraryAddUsageDescription</key>
+	<string>Halden saves the photos and videos you take with it in Apple Photos too.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>Halden backs up the photos and videos in Apple Photos to your own server.</string>
 	<key>NSSupportsLiveActivities</key>
 	<true/>
 	<key>UIApplicationSceneManifest</key>

@@ -19,6 +19,7 @@
 		41B53AF02D73AB8EE6107451 /* HaldenWidgets.swift in Sources */ = {isa = PBXBuildFile; fileRef = C021AAFC98EA6F297083D1E9 /* HaldenWidgets.swift */; };
 		442C9FD29309011799EB92F9 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 80A08A19CFB7DE203B87EE2F /* SettingsView.swift */; };
 		49FC6542BD2AE2DE9BB10B29 /* HaldenUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 330BB49007FE4A8212AE2A53 /* HaldenUITests.swift */; };
+		5A96811187A6415234B7B946 /* PhotosWatcher.swift in Sources */ = {isa = PBXBuildFile; fileRef = 167446EF95B9BA95A0B76FA7 /* PhotosWatcher.swift */; };
 		5DC6FC1AA6B6262A8DC98DE8 /* StandInCamera.swift in Sources */ = {isa = PBXBuildFile; fileRef = 74E37347C080BB6AA9E72883 /* StandInCamera.swift */; };
 		5FD91AEBB32417E33BA60285 /* StandInCamera.swift in Sources */ = {isa = PBXBuildFile; fileRef = 74E37347C080BB6AA9E72883 /* StandInCamera.swift */; };
 		62C41FB582518DFF154BB936 /* CameraScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE56A441B2CFDD9C6F0A36EE /* CameraScreen.swift */; };
@@ -99,6 +100,7 @@
 /* Begin PBXFileReference section */
 		0E09071DF9BF3412A74CE12D /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		0F17118A2396C5FD041B1729 /* NetworkWatcher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NetworkWatcher.swift; sourceTree = "<group>"; };
+		167446EF95B9BA95A0B76FA7 /* PhotosWatcher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotosWatcher.swift; sourceTree = "<group>"; };
 		1FE32D68F3EDCDF19843B399 /* RootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RootView.swift; sourceTree = "<group>"; };
 		20E7E327CD3E758EB9FBEAC9 /* CameraView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraView.swift; sourceTree = "<group>"; };
 		28B6F0CD3C366126B6E02E33 /* CaptureBackend.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CaptureBackend.swift; sourceTree = "<group>"; };
@@ -211,6 +213,7 @@
 				5C56DCD1A8AC3F879F869CCE /* HaldenApp.swift */,
 				C24C0EE92119A576C7B20EEF /* Info.plist */,
 				0F17118A2396C5FD041B1729 /* NetworkWatcher.swift */,
+				167446EF95B9BA95A0B76FA7 /* PhotosWatcher.swift */,
 				8C8F6CBCE5F738CE28E84C59 /* UITestWorld.swift */,
 				62E1A8A22DAC6A515A2252D0 /* UploadActivity.swift */,
 				1CB52E6F41434C026F97955B /* Camera */,
@@ -446,6 +449,7 @@
 				9051085D202825975E1E609C /* OnboardingView.swift in Sources */,
 				3DAEFCB4BCCF0F1420801D9D /* PhotoView.swift in Sources */,
 				F43C263C31DC78D082C53F87 /* PhotosView.swift in Sources */,
+				5A96811187A6415234B7B946 /* PhotosWatcher.swift in Sources */,
 				064F948830F9B67FA84C37D2 /* QRScannerView.swift in Sources */,
 				97449D449BB9B1DC96C1267A /* RootView.swift in Sources */,
 				442C9FD29309011799EB92F9 /* SettingsView.swift in Sources */,

@@ -113,6 +113,36 @@ public final class HaldenDatabase: Sendable {
                 t.column("value", .blob)
             }
         }
+        migrator.registerMigration("3: several files per asset") { db in
+            // A Live Photo is a photo and a short video: two uploads for one asset.
+            try db.create(table: "upload_new") { t in
+                t.column("assetId", .text).notNull().references("asset", onDelete: .cascade)
+                // `original`, or `paired_video` for a Live Photo's video (after the original).
+                t.column("role", .text).notNull().defaults(to: "original")
+                t.column("file", .text).notNull()
+                t.column("mimeType", .text).notNull()
+                t.column("size", .integer).notNull()
+                t.column("sha256", .text)
+                t.column("metadata", .jsonText)
+                t.column("uploadId", .text)
+                t.column("sent", .integer).notNull().defaults(to: 0)
+                t.column("state", .text).notNull().defaults(to: "waiting")
+                t.column("attempts", .integer).notNull().defaults(to: 0)
+                t.column("lastError", .text)
+                t.column("retryAt", .integer).notNull().defaults(to: 0)
+                t.column("createdAt", .integer).notNull()
+                t.primaryKey(["assetId", "role"])
+            }
+            try db.execute(
+                sql: """
+                    INSERT INTO upload_new (assetId, role, file, mimeType, size, sha256, metadata, uploadId,
+                                            sent, state, attempts, lastError, retryAt, createdAt)
+                    SELECT assetId, 'original', file, mimeType, size, sha256, metadata, uploadId,
+                           sent, state, attempts, lastError, retryAt, createdAt FROM upload
+                    """)
+            try db.drop(table: "upload")
+            try db.rename(table: "upload_new", to: "upload")
+        }
         return migrator
     }
 }
@@ -185,6 +215,8 @@ public struct LocalAsset: Codable, Sendable, Equatable, Identifiable, FetchableR
 public struct UploadItem: Codable, Sendable, Equatable, FetchableRecord, PersistableRecord {
     public static let databaseTableName = "upload"
     public var assetId: String
+    /// `original`, or `paired_video` for a Live Photo's video.
+    public var role = "original"
     public var file: String
     public var mimeType: String
     public var size: Int64
@@ -197,6 +229,9 @@ public struct UploadItem: Codable, Sendable, Equatable, FetchableRecord, Persist
     public var lastError: String?
     public var retryAt: Int64
     public var createdAt: Int64
+
+    /// One upload: an asset's file in one role.
+    public var key: String { "\(assetId)|\(role)" }
 }
 
 /// A change made on this device, waiting for the server.
@@ -303,7 +338,7 @@ extension HaldenDatabase {
         }
     }
 
-    public func upload(_ assetId: String) throws -> UploadItem? {
-        try writer.read { db in try UploadItem.fetchOne(db, key: assetId) }
+    public func upload(_ assetId: String, role: String = "original") throws -> UploadItem? {
+        try writer.read { db in try UploadItem.fetchOne(db, key: ["assetId": assetId, "role": role]) }
     }
 }

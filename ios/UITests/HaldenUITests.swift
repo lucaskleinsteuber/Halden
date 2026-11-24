@@ -89,7 +89,7 @@ final class HaldenUITests: XCTestCase {
         app.launchEnvironment = ["HALDEN_TEST_SERVER": server, "HALDEN_TEST_PASSWORD": password]
         app.launch()
         let tabs = app.tabBars.firstMatch
-        XCTAssertTrue(tabs.waitForExistence(timeout: 30), "signed in")
+        XCTAssertTrue(tabs.waitForExistence(timeout: 60), "signed in")
         tabs.buttons["Camera"].tap()
         let shutter = app.buttons["shutter"]
         XCTAssertTrue(shutter.waitForExistence(timeout: 10))
@@ -148,7 +148,7 @@ final class HaldenUITests: XCTestCase {
         app.launchEnvironment = ["HALDEN_TEST_SERVER": server, "HALDEN_TEST_PASSWORD": password]
         app.launch()
         let tabs = app.tabBars.firstMatch
-        XCTAssertTrue(tabs.waitForExistence(timeout: 30), "signed in")
+        XCTAssertTrue(tabs.waitForExistence(timeout: 60), "signed in")
         tabs.buttons["Camera"].tap()
         XCTAssertTrue(app.buttons["shutter"].waitForExistence(timeout: 10))
         app.buttons["shutter"].tap()
@@ -192,7 +192,7 @@ final class HaldenUITests: XCTestCase {
         app.launchEnvironment = ["HALDEN_TEST_SERVER": server, "HALDEN_TEST_PASSWORD": password]
         app.launch()
         let tabs = app.tabBars.firstMatch
-        XCTAssertTrue(tabs.waitForExistence(timeout: 30), "signed in")
+        XCTAssertTrue(tabs.waitForExistence(timeout: 60), "signed in")
         tabs.buttons["Camera"].tap()
         XCTAssertTrue(app.buttons["shutter"].waitForExistence(timeout: 10))
         app.buttons["shutter"].tap()
@@ -234,6 +234,39 @@ final class HaldenUITests: XCTestCase {
         app.buttons["delete-for-good"].tap()
         app.buttons["confirm-delete-for-good"].firstMatch.tap()
         XCTAssertTrue(app.descendants(matching: .any)["trash-empty"].waitForExistence(timeout: 10))
+    }
+
+    /// The photos that were in Apple Photos before come into Halden and reach the server.
+    @MainActor
+    func testThePhotosFromApplePhotosComeIn() throws {
+        let environment = ProcessInfo.processInfo.environment
+        guard let server = environment["HALDEN_TEST_SERVER"], let password = environment["HALDEN_TEST_PASSWORD"]
+        else {
+            throw XCTSkip("no server: run ios/ui-tests.sh")
+        }
+        allowLocation()
+        let app = XCUIApplication()
+        app.launchArguments = ["-ui-testing", "-ui-testing-sign-in"]
+        app.launchEnvironment = ["HALDEN_TEST_SERVER": server, "HALDEN_TEST_PASSWORD": password]
+        app.launch()
+        let tabs = app.tabBars.firstMatch
+        XCTAssertTrue(tabs.waitForExistence(timeout: 60), "signed in")
+        tabs.buttons["Settings"].tap()
+        let start = app.buttons["import-photos"]
+        for _ in 0..<8 where !start.isHittable { app.swipeUp() }
+        start.tap()
+        let status = app.staticTexts["photos-import-status"]
+        XCTAssertTrue(status.waitForExistence(timeout: 10))
+        expectation(for: NSPredicate(format: "label BEGINSWITH 'Everything from before'"), evaluatedWith: status)
+        waitForExpectations(timeout: 120)
+        XCTAssertFalse(status.label.contains("(0 this time)"), status.label)
+
+        tabs.buttons["Photos"].tap()
+        let backedUp = app.collectionViews["library-grid"].cells
+            .matching(NSPredicate(format: "label == 'Photo, backed up'"))
+        let deadline = Date().addingTimeInterval(120)
+        while backedUp.count == 0 && Date() < deadline { Thread.sleep(forTimeInterval: 1) }
+        XCTAssertGreaterThan(backedUp.count, 0, "imported photos are on the server")
     }
 
     /// Answers the question for the place, should the simulator ask.

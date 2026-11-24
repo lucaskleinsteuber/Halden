@@ -60,10 +60,22 @@ public actor Uploader {
         }
     }
 
+    /// The video of a Live Photo (already written to `files.originals`), sent after its photo.
+    public static func enqueuePairedVideo(
+        database: HaldenDatabase, files: FileLocations, assetId: String, fileName: String, mimeType: String
+    ) throws {
+        let size = try FileManager.default.attributesOfItem(atPath: files.original(fileName).path)[.size] as? Int64 ?? 0
+        let item = UploadItem(
+            assetId: assetId.lowercased(), role: "paired_video", file: fileName, mimeType: mimeType, size: size,
+            sha256: nil, metadata: nil, uploadId: nil, sent: 0, state: "waiting", attempts: 0, lastError: nil,
+            retryAt: 0, createdAt: Int64(Date().timeIntervalSince1970 * 1000))
+        try database.writer.write { db in try item.insert(db) }
+    }
+
     /// Works through every due upload. Returns how many finished; stops early when the server
-    /// can't be reached (the next call continues).
+    /// can't be reached (the next call continues). `skipping`: uploads the system is sending in
+    /// the background right now (by `UploadItem.key`).
     @discardableResult
-    /// `skipping`: uploads the system is sending in the background right now.
     public func drain(permit: UploadPermit = .all, skipping: Set<String> = []) async -> Int {
         var finished = 0
         while let item = nextDue(permit: permit, skipping: skipping) {
@@ -90,7 +102,15 @@ public actor Uploader {
         return try? database.writer.read { db in
             try UploadItem
                 .filter(sql: "state <> 'done' AND state <> 'failed' AND retryAt <= ?", arguments: [now])
-                .filter(sql: "assetId NOT IN (SELECT value FROM json_each(?))", arguments: [skipped])
+                .filter(sql: "(assetId || '|' || role) NOT IN (SELECT value FROM json_each(?))", arguments: [skipped])
+                // A Live Photo's video goes once its photo is on the server.
+                .filter(
+                    sql: """
+                        role = 'original' OR NOT EXISTS (
+                            SELECT 1 FROM upload AS photo WHERE photo.assetId = upload.assetId
+                            AND photo.role = 'original' AND photo.state NOT IN ('thumbnails', 'done'))
+                        """
+                )
                 .filter(
                     sql: "(mimeType LIKE 'video/%' AND ?) OR (mimeType NOT LIKE 'video/%' AND ?)",
                     arguments: [permit.videos, permit.photos]
@@ -105,7 +125,7 @@ public actor Uploader {
     }
 
     private func failed(_ item: UploadItem, _ error: Error) {
-        var item = (try? database.upload(item.assetId)) ?? item
+        var item = (try? database.upload(item.assetId, role: item.role)) ?? item
         item.attempts += 1
         item.lastError = error.localizedDescription
         let waits: [Int64] = [5, 30, 120, 600, 3600]
@@ -201,7 +221,7 @@ public actor Uploader {
         if item.uploadId == nil {
             let state = try await client.announce(
                 UploadRequest(
-                    assetId: item.assetId, role: "original", size: item.size,
+                    assetId: item.assetId, role: item.role, size: item.size,
                     sha256: item.sha256 ?? "", mimeType: item.mimeType, metadata: item.metadata))
             switch state.state {
             case "completed":
@@ -229,20 +249,24 @@ public actor Uploader {
     @discardableResult
     static func onServer(_ start: UploadItem, seq: Int64?, database: HaldenDatabase) throws -> UploadItem {
         var item = start
-        item.state = "thumbnails"
+        // A Live Photo's video needs no thumbnails; the photo is what shows.
+        item.state = item.role == "original" ? "thumbnails" : "done"
         item.lastError = nil
         let done = item
         try database.writer.write { db in
             try done.update(db)
-            try db.execute(
-                sql: "UPDATE asset SET backedUp = 1, originalSha256 = ?, seq = coalesce(?, seq) WHERE id = ?",
-                arguments: [done.sha256, seq, done.assetId])
+            if done.role == "original" {
+                try db.execute(
+                    sql: "UPDATE asset SET backedUp = 1, originalSha256 = ?, seq = coalesce(?, seq) WHERE id = ?",
+                    arguments: [done.sha256, seq, done.assetId])
+            }
         }
         return item
     }
 
     /// Makes and sends the thumbnail and preview, unless the server has them already.
     private func sendThumbnails(_ start: UploadItem, url: URL, asset: Asset?) async throws {
+        guard start.role == "original" else { return }
         var item = start
         var thumbnailSha = asset?.file("thumbnail")?.sha256
         var previewSha = asset?.file("preview")?.sha256
@@ -276,6 +300,13 @@ public actor Uploader {
 
     /// The same photo is on the server already under another id: this one is that one.
     static func duplicate(_ item: UploadItem, existing: String?, database: HaldenDatabase) throws {
+        if item.role != "original" {
+            // The same video is stored already: nothing more to send.
+            var done = item
+            done.state = "done"
+            try database.writer.write { db in try done.update(db) }
+            return
+        }
         try database.writer.write { db in
             try db.execute(sql: "DELETE FROM upload WHERE assetId = ?", arguments: [item.assetId])
             guard let existing = existing?.lowercased(), existing != item.assetId else {

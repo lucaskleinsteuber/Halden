@@ -1,4 +1,5 @@
 import HaldenKit
+import Photos
 import SwiftUI
 
 struct SettingsView: View {
@@ -72,6 +73,7 @@ struct SettingsView: View {
                         "When off, a photo or video taken with Halden leaves this iPhone once the server has it, checked by its hash, and its thumbnail and preview are here. It is fetched from the server when you open it."
                     )
                 }
+                PhotosSettings(setting: setting)
                 Section("Camera") {
                     Picker("Photo format", selection: setting(\.photoFormat)) {
                         Text("HEIC").tag(AppSettings.PhotoFormat.heic)
@@ -129,5 +131,74 @@ struct SettingsView: View {
                 Text("Photos on this iPhone stay. Photos only on the server are no longer shown here.")
             }
         }
+    }
+}
+
+/// Apple Photos: access, what goes which way, and the import of the photos from before.
+private struct PhotosSettings: View {
+    @Environment(AppModel.self) private var app
+    @Environment(\.openURL) private var openURL
+    let setting: (WritableKeyPath<AppSettings, Bool>) -> Binding<Bool>
+    @State private var access = PHPhotoLibrary.authorizationStatus(for: .readWrite)
+
+    var body: some View {
+        Section {
+            LabeledContent("Access", value: accessText)
+            if access == .notDetermined {
+                Button("Allow access…") {
+                    Task {
+                        _ = await SystemPhotoLibrary.ask(everything: true)
+                        access = PHPhotoLibrary.authorizationStatus(for: .readWrite)
+                        app.refresh()
+                    }
+                }
+            } else if access != .authorized {
+                Button("Change in Settings…") {
+                    if let url = URL(string: UIApplication.openSettingsURLString) { openURL(url) }
+                }
+            }
+            Toggle("Take over new photos", isOn: setting(\.importFromPhotos))
+            Toggle("Save Halden's photos there", isOn: setting(\.saveToPhotos))
+            Toggle("Delete in both", isOn: setting(\.syncDeletionsWithPhotos))
+            Button(importTitle) { app.importPhotoLibrary() }
+                .disabled(app.photosImport.running || app.photosImport.done)
+                .accessibilityIdentifier("import-photos")
+            if app.photosImport.startedOnce {
+                Text(importStatus)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .accessibilityIdentifier("photos-import-status")
+            }
+        } header: {
+            Text("Apple Photos")
+        } footer: {
+            Text(
+                access == .limited
+                    ? "Halden may see only the photos you chose. New photos from other apps come in only once you add them to that choice."
+                    : "New photos and videos from Apple's camera and other apps come into Halden and are backed up. Deleted in Apple Photos, they go to Halden's trash, where you can restore them."
+            )
+        }
+        .onAppear { access = PHPhotoLibrary.authorizationStatus(for: .readWrite) }
+    }
+
+    private var accessText: String {
+        switch access {
+        case .authorized: "all photos"
+        case .limited: "only some photos"
+        case .notDetermined: "not asked yet"
+        default: "not allowed"
+        }
+    }
+
+    private var importTitle: String {
+        app.photosImport.startedOnce && !app.photosImport.done
+            ? "Go on importing the photos from before" : "Import the photos from before"
+    }
+
+    private var importStatus: String {
+        let count = app.photosImport.imported
+        if app.photosImport.done { return "Everything from before is in Halden (\(count) this time)." }
+        return app.photosImport.running
+            ? "Importing… \(count) so far" : "\(count) imported; it goes on where it stopped."
     }
 }

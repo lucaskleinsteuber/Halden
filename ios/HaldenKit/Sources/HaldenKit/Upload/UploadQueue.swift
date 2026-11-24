@@ -91,12 +91,16 @@ public enum LocalCopies {
             else { continue }
             // The database first: should the app stop in between, a file nobody points at only
             // wastes space, while a row pointing at a removed file would be wrong.
-            try database.writer.write { db in
+            let others = try database.writer.write { db in
                 try db.execute(
                     sql: "UPDATE asset SET localFile = NULL WHERE id = ? AND localFile = ?",
                     arguments: [asset.id, name])
+                // A Live Photo's video goes with its photo.
+                return try String.fetchAll(
+                    db, sql: "SELECT file FROM upload WHERE assetId = ? AND role <> 'original'", arguments: [asset.id])
             }
             try? FileManager.default.removeItem(at: files.original(name))
+            for other in others { try? FileManager.default.removeItem(at: files.original(other)) }
             removed += 1
         }
         return removed

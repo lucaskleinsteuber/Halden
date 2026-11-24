@@ -27,6 +27,8 @@ device=${SIMULATOR:-$(xcrun simctl list devices available -j \
 # The camera asks for the place; allowed beforehand, so no question covers the shutter.
 xcrun simctl boot "$device" 2> /dev/null || true
 xcrun simctl privacy "$device" grant location com.lucas.halden.ios 2> /dev/null || true
+# Apple Photos too (the simulator comes with a few sample photos to import).
+xcrun simctl privacy "$device" grant photos com.lucas.halden.ios 2> /dev/null || true
 TEST_RUNNER_HALDEN_TEST_SERVER="127.0.0.1:$port" TEST_RUNNER_HALDEN_TEST_PASSWORD="$password" \
   xcodebuild test -project Halden.xcodeproj -scheme Halden -destination "id=$device" \
   -collect-test-diagnostics never CODE_SIGNING_ALLOWED=NO "$@"

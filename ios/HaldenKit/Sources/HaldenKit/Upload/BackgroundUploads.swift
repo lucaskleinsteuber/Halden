@@ -45,7 +45,7 @@ public final class BackgroundUploads: NSObject, URLSessionDataDelegate, @uncheck
         files.thumbnails.deletingLastPathComponent().appendingPathComponent("Rest", isDirectory: true)
     }
 
-    /// Uploads the system is sending right now.
+    /// Uploads the system is sending right now (by `UploadItem.key`).
     public func running() async -> Set<String> {
         Set(
             await session.allTasks.filter { $0.state == .running || $0.state == .suspended }.compactMap(
@@ -64,7 +64,7 @@ public final class BackgroundUploads: NSObject, URLSessionDataDelegate, @uncheck
         var handed = 0
         for item in items
         where item.state != "failed" && item.state != "thumbnails" && permit.allows(mimeType: item.mimeType)
-            && !busy.contains(item.assetId)
+            && !busy.contains(item.key)
         {
             guard let ready = try? await uploader.ready(item), let id = ready.uploadId else { continue }
             guard let file = try? restFile(for: ready) else { continue }
@@ -78,7 +78,7 @@ public final class BackgroundUploads: NSObject, URLSessionDataDelegate, @uncheck
             request.allowsExpensiveNetworkAccess = metered
             request.allowsConstrainedNetworkAccess = !(video && settings.videosOnlyOnWiFi)
             let task = session.uploadTask(with: request, fromFile: file)
-            task.taskDescription = ready.assetId
+            task.taskDescription = ready.key
             task.countOfBytesClientExpectsToSend = ready.size - ready.sent
             task.countOfBytesClientExpectsToReceive = 4096
             task.resume()
@@ -92,7 +92,7 @@ public final class BackgroundUploads: NSObject, URLSessionDataDelegate, @uncheck
         let original = files.original(item.file)
         guard item.sent > 0 else { return original }
         try FileManager.default.createDirectory(at: restFolder, withIntermediateDirectories: true)
-        let rest = restFolder.appendingPathComponent("\(item.assetId)-\(item.sent).part")
+        let rest = restFolder.appendingPathComponent("\(item.assetId)-\(item.role)-\(item.sent).part")
         if FileManager.default.fileExists(atPath: rest.path) { return rest }
         let partial = rest.appendingPathExtension("writing")
         FileManager.default.createFile(atPath: partial.path, contents: nil)
@@ -140,7 +140,10 @@ public final class BackgroundUploads: NSObject, URLSessionDataDelegate, @uncheck
 
     public func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
         let body = lock.withLock { answers.removeValue(forKey: task.taskIdentifier) }
-        guard let assetId = task.taskDescription, let item = try? database.upload(assetId) else { return }
+        guard let key = task.taskDescription?.split(separator: "|").map(String.init), key.count == 2,
+            let item = try? database.upload(key[0], role: key[1])
+        else { return }
+        let assetId = item.assetId
         let status = (task.response as? HTTPURLResponse)?.statusCode ?? 0
         let state = body.flatMap { try? JSONDecoder().decode(UploadState.self, from: $0) }
         if error == nil, (200..<300).contains(status), let state {
@@ -157,7 +160,7 @@ public final class BackgroundUploads: NSObject, URLSessionDataDelegate, @uncheck
             try? database.writer.write { db in try waiting.update(db) }
         }
         if let rest = try? FileManager.default.contentsOfDirectory(at: restFolder, includingPropertiesForKeys: nil) {
-            for file in rest where file.lastPathComponent.hasPrefix("\(assetId)-") {
+            for file in rest where file.lastPathComponent.hasPrefix("\(assetId)-\(item.role)-") {
                 try? FileManager.default.removeItem(at: file)
             }
         }

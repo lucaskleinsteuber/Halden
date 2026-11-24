@@ -36,7 +36,7 @@ struct UploadsView: View {
                 }
             }
             Section(items.isEmpty ? "Everything is on the server" : "Waiting") {
-                ForEach(items, id: \.assetId) { item in
+                ForEach(items, id: \.key) { item in
                     UploadRow(item: item) {
                         try? Uploader.retry(item.assetId, database: app.database)
                         app.refresh()

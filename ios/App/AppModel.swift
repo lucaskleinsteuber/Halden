@@ -4,6 +4,7 @@ import GRDB
 import HaldenKit
 import LockedCameraCapture
 import Observation
+import Photos
 import UIKit
 import UniformTypeIdentifiers
 
@@ -42,6 +43,18 @@ final class AppModel {
     let pipeline: ImagePipeline
     /// Previews and originals for the full-screen view and sharing.
     let media: MediaFiles
+    /// Apple Photos: taking over new photos, saving Halden's, deleting in both.
+    let photos: PhotosSync
+    /// The import of the photos that were in Apple Photos before Halden.
+    private(set) var photosImport = PhotosImport()
+    private let photosWatcher = PhotosWatcher()
+
+    struct PhotosImport: Equatable {
+        var imported = 0
+        var running = false
+        var done = false
+        var startedOnce = false
+    }
     /// Made at app start, so the camera is ready the moment its screen opens.
     let camera: CameraModel
     /// Uploads the system goes on with while Halden is in the background.
@@ -78,6 +91,7 @@ final class AppModel {
         self.actions = Actions(database: database)
         self.pipeline = ImagePipeline(loader: ThumbnailLoader(files: files, client: nil))
         self.media = MediaFiles(files: files, client: nil)
+        self.photos = PhotosSync(library: SystemPhotoLibrary(), database: database, files: files)
         self.camera = CameraModel.make(standIn: standInCamera)
         self.background = BackgroundUploads(database: database, files: files, configuration: backgroundConfiguration)
         camera.settings = { [weak self] in self?.settings ?? AppSettings() }
@@ -94,6 +108,8 @@ final class AppModel {
             // A background upload ended: the thumbnails follow when the app is in front.
             Task { @MainActor in self?.backgroundUploadEnded() }
         }
+        photosWatcher.changed = { [weak self] in self?.takeOverPhotos() }
+        if (try? photosImportStarted()) == true { photosImport.startedOnce = true }
         observe()
         restore()
     }
@@ -137,9 +153,12 @@ final class AppModel {
             {
                 try! UITestWorld.fill(database, files: files, with: count)
             }
+            // The simulator's Apple Photos outlives the tests: the stand-in camera's photos stay out.
+            var testSettings = AppSettings()
+            testSettings.saveToPhotos = false
             let model = AppModel(
-                database: database, files: files, tokens: MemoryTokenStore(), settings: MemorySettingsStore(),
-                standInCamera: true, backgroundConfiguration: .ephemeral)
+                database: database, files: files, tokens: MemoryTokenStore(),
+                settings: MemorySettingsStore(testSettings), standInCamera: true, backgroundConfiguration: .ephemeral)
             // Signed in to the real server the UI tests started (`ios/ui-tests.sh`).
             let environment = ProcessInfo.processInfo.environment
             if arguments.contains("-ui-testing-sign-in"), let server = environment["HALDEN_TEST_SERVER"],
@@ -193,10 +212,13 @@ final class AppModel {
             .start(in: database.writer, scheduling: .async(onQueue: .main)) { _ in
             } onChange: { [weak self] items in
                 MainActor.assumeIsolated {
-                    self?.uploads = Dictionary(
-                        uniqueKeysWithValues: items.map {
-                            ($0.assetId, $0.size > 0 ? Double($0.sent) / Double($0.size) : 0)
-                        })
+                    // A Live Photo is two uploads: the grid shows them as one, by their bytes.
+                    var progress: [String: (sent: Int64, size: Int64)] = [:]
+                    for item in items {
+                        let before = progress[item.assetId] ?? (0, 0)
+                        progress[item.assetId] = (before.sent + item.sent, before.size + item.size)
+                    }
+                    self?.uploads = progress.mapValues { $0.size > 0 ? Double($0.sent) / Double($0.size) : 0 }
                     if let summary = try? self?.database.uploadSummary() { self?.uploadSummary = summary }
                     self?.showUploadActivity()
                 }
@@ -209,6 +231,7 @@ final class AppModel {
         connection = stored.connection
         backup = stored.backup
         connect(stored.connection, token: token)
+        photosWatcher.start()
     }
 
     private func connect(_ connection: ServerConnection, token: String) {
@@ -269,6 +292,7 @@ final class AppModel {
                 server: StoredServer(serverId: connection.serverId, connection: connection, syncSince: 0, backup: nil))
             self.connection = connection
             connect(connection, token: token)
+            askForPhotosOnce()
         } catch {
             problem = error.localizedDescription
         }
@@ -294,7 +318,7 @@ final class AppModel {
         let id = UUID().uuidString.lowercased()
         let name = "\(id).\(photo.heic ? "heic" : "jpg")"
         let mimeType = photo.heic ? "image/heic" : "image/jpeg"
-        store(what: "photo") { [database, files] in
+        store(what: "photo", assetId: id) { [database, files] in
             try photo.data.write(
                 to: files.original(name), options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
             try Uploader.enqueue(
@@ -307,7 +331,7 @@ final class AppModel {
     func keep(video url: URL, metadata: UploadMetadata) {
         let id = UUID().uuidString.lowercased()
         let name = "\(id).mov"
-        store(what: "video") { [database, files] in
+        store(what: "video", assetId: id) { [database, files] in
             try FileManager.default.moveItem(at: url, to: files.original(name))
             try? (files.original(name) as NSURL).setResourceValue(
                 URLFileProtection.completeUntilFirstUserAuthentication, forKey: .fileProtectionKey)
@@ -317,11 +341,12 @@ final class AppModel {
         }
     }
 
-    private func store(what: String, _ work: @escaping @Sendable () throws -> Void) {
+    private func store(what: String, assetId: String, _ work: @escaping @Sendable () throws -> Void) {
         Task.detached(priority: .userInitiated) { [weak self] in
             do {
                 try work()
                 await self?.work()
+                await self?.saveToPhotos(assetId)
             } catch {
                 await MainActor.run { self?.problem = "The \(what) could not be saved: \(error.localizedDescription)" }
             }
@@ -431,6 +456,9 @@ final class AppModel {
     /// "Delete everywhere": into the server's trash, on every device; restorable for `trashDays`.
     func moveToTrash(_ ids: [String]) {
         perform("moved to the trash") { try $0.trash(ids) }
+        // Also in Apple Photos, if they are there; the system asks first.
+        let settings = settings
+        Task { _ = await photos.deleteInPhotos(assetIds: ids, settings: settings) }
     }
 
     func restore(_ ids: [String]) {
@@ -515,6 +543,7 @@ final class AppModel {
     /// rest over.
     func backgroundWork() async {
         guard let client else { return }
+        _ = try? await photos.takeOverChanges(settings: settings)
         let uploader = Uploader(database: database, files: files, client: client)
         await uploader.drain(permit: uploadPermit, skipping: await background.running())
         if !Task.isCancelled {
@@ -555,9 +584,70 @@ final class AppModel {
     /// Pull to refresh, and when the app comes to the front.
     func refresh() {
         takeOverLockedCaptures()
+        takeOverPhotos()
         working?.cancel()
         working = nil
         work()
+    }
+
+    // MARK: Apple Photos
+
+    /// Asks for Apple Photos once, after connecting: everything, to take over new photos (the
+    /// person may allow only some, or only adding).
+    func askForPhotosOnce() {
+        guard PHPhotoLibrary.authorizationStatus(for: .readWrite) == .notDetermined,
+            settings.importFromPhotos || settings.saveToPhotos
+        else { return }
+        Task {
+            _ = await SystemPhotoLibrary.ask(everything: true)
+            photosWatcher.start()
+            takeOverPhotos()
+        }
+    }
+
+    /// What is new in Apple Photos comes in; what was deleted there goes to the trash here.
+    func takeOverPhotos() {
+        guard connection != nil else { return }
+        let settings = settings
+        Task {
+            guard let result = try? await photos.takeOverChanges(settings: settings), result.added + result.trashed > 0
+            else { return }
+            working?.cancel()
+            working = nil
+            work()
+        }
+    }
+
+    /// A photo or video taken here goes into Apple Photos too.
+    private func saveToPhotos(_ assetId: String) async {
+        await photos.save(assetId: assetId, settings: settings)
+    }
+
+    /// Imports what was in Apple Photos before Halden, in pieces, going on where it stopped.
+    func importPhotoLibrary() {
+        guard !photosImport.running else { return }
+        photosImport.running = true
+        photosImport.startedOnce = true
+        Task {
+            if PHPhotoLibrary.authorizationStatus(for: .readWrite) == .notDetermined {
+                _ = await SystemPhotoLibrary.ask(everything: true)
+            }
+            while true {
+                guard let (count, done) = try? await photos.importExisting(limit: 50) else { break }
+                photosImport.imported += count
+                if count > 0 { work() }
+                if done {
+                    photosImport.done = true
+                    break
+                }
+            }
+            photosImport.running = false
+            refresh()
+        }
+    }
+
+    private func photosImportStarted() throws -> Bool {
+        try database.meta("photosImportedUpTo") != nil
     }
 
 }

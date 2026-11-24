@@ -8,6 +8,12 @@ There are no version numbers yet; entries are grouped by date until the first re
 
 ### Added
 
+- iPhone and Apple Photos: new photos and videos there come into Halden and are backed up (Live
+  Photos with their video, as the server's `paired_video`), also what was added while Halden
+  wasn't running; deleted there they go to Halden's trash; photos taken with Halden are saved
+  there too and never come back as new; deleting everywhere in Halden deletes them there after
+  the system asks; the photos from before Halden can be imported, in pieces that go on where
+  they stopped.
 - iPhone deleting and trash: "Delete everywhere" (into the server's trash on every device) and
   "Remove from this iPhone" (only for photos safely on the server) as two separate actions, for
   one photo or many chosen in the grid; the trash with the days left, restoring, and deleting

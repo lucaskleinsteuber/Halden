@@ -64,6 +64,17 @@ the design comes after that. What works today is described below.
 - **Copies on this iPhone**: kept by default. With "Keep copies on this iPhone" off, an
   original leaves the phone once the server has it (checked by its hash) and its thumbnail and
   preview are here.
+- **Apple Photos** (`PhotosSync`, Settings › Apple Photos):
+  - New photos and videos there (Apple's camera, screenshots, other apps) come into Halden and
+    are backed up, found through the library's persistent change history, so also what was
+    added while Halden wasn't running. Live Photos come with their video (uploaded after the
+    photo as the asset's `paired_video`). Time and place come from Apple Photos.
+  - Deleted there: into Halden's trash, restorable. Deleted everywhere in Halden: deleted there
+    too, after the system asks.
+  - Photos taken with Halden are saved there too and linked, so they never come back as new.
+  - The photos from before Halden come in on request, 50 at a time, going on where it stopped.
+  - Importing needs access to all photos (or the ones chosen); saving needs only adding. All
+    three directions can be turned off.
 - **Lock Screen and Control Center**: a control ("Halden Camera") for Control Center, the Lock
   Screen and the Action button opens Halden's camera, also on a locked iPhone. There it runs as
   an extension that may only keep what it takes in a folder the system gives it; Halden takes it
