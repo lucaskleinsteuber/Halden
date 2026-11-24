@@ -85,6 +85,9 @@ There are no version numbers yet; entries are grouped by date until the first re
 
 ### Fixed
 
+- Tests: the iPhone UI test for importing from Apple Photos found nothing to import in the CI's
+  fresh simulator; `ios/ui-tests.sh` now adds a photo there, and the test answers the system's
+  question for the photos should it come.
 - Server: on a computer that also runs Docker (or Podman, virtual machines, containers), the
   address of their internal network (like `172.17.0.1`) was handed out in pairing QR codes and
   shown by `halden status`, and took one of the four places for addresses in the QR code; IPv6

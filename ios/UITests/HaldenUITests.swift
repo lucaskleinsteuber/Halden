@@ -258,6 +258,9 @@ final class HaldenUITests: XCTestCase {
         let start = app.buttons["import-photos"]
         for _ in 0..<8 where !start.isHittable { app.swipeUp() }
         start.tap()
+        // Should the system ask for the photos, the answer comes with the next touch (one that
+        // changes nothing on the screen).
+        app.navigationBars["Settings"].tap()
         let status = app.staticTexts["photos-import-status"]
         XCTAssertTrue(status.waitForExistence(timeout: 10))
         expectation(for: NSPredicate(format: "label BEGINSWITH 'Everything from before'"), evaluatedWith: status)
@@ -344,12 +347,14 @@ final class HaldenUITests: XCTestCase {
         XCTAssertTrue(app.descendants(matching: .any)["account-anna"].waitForExistence(timeout: 10), "the new account")
     }
 
-    /// Answers the question for the place, should the simulator ask.
+    /// Answers the simulator's questions for the place and for Apple Photos, should it ask.
     private func allowLocation() {
-        addUIInterruptionMonitor(withDescription: "Location") { alert in
+        addUIInterruptionMonitor(withDescription: "Place and photos") { alert in
             // Called on the main thread.
             MainActor.assumeIsolated {
-                for label in ["Allow While Using App", "Allow Once", "Allow"] where alert.buttons[label].exists {
+                for label in [
+                    "Allow While Using App", "Allow Once", "Allow Full Access", "Allow Access to All Photos", "Allow",
+                ] where alert.buttons[label].exists {
                     alert.buttons[label].tap()
                     return true
                 }
