@@ -92,6 +92,12 @@ the design comes after that. What works today is described below.
 - **Without place** (Photos › … › Without place): photos without a place, from this iPhone's
   library (also offline); choose some, then give them the place of the photo taken nearest in
   time (the server's suggestion, marked as estimated) or a place tapped on the map.
+- **Deleting**: two different things, named apart. "Delete everywhere" moves photos to the
+  server's trash, on every device, restorable for the days the owner set (`trashDays` from
+  `/me`). "Remove from this iPhone" only frees space: for photos safely on the server, which
+  stay in the library. Many at once with Select in the grid. Offline both wait in `Actions`.
+- **Trash** (Photos › … › Trash): what was deleted, with the days left; restore, or delete for
+  good after a question (one, chosen ones or all).
 - **Sharing**: the original, a copy with the corrected time, place, title and description
   written into the file (EXIF/GPS/IPTC for photos, QuickTime metadata for videos, the picture
   copied without encoding it again), or the copy in the account's preferred format.

@@ -35,6 +35,7 @@
 		C5BEB796768D84CB9050598F /* Viewer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B4EC6EBA149179462421878 /* Viewer.swift */; };
 		C6F2BAB2216CDFB906390167 /* HaldenApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5C56DCD1A8AC3F879F869CCE /* HaldenApp.swift */; };
 		D190BA231FC90D7AF3D76836 /* UploadActivity.swift in Sources */ = {isa = PBXBuildFile; fileRef = 62E1A8A22DAC6A515A2252D0 /* UploadActivity.swift */; };
+		D5399A90556FBEC26C5A5648 /* TrashView.swift in Sources */ = {isa = PBXBuildFile; fileRef = EC66D3547031D67063F9441E /* TrashView.swift */; };
 		D816E69AF03071F4318B0F5A /* WithoutPlaceView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B3DC81E0143A53F37F02DDAE /* WithoutPlaceView.swift */; };
 		E3BA005A93D6AF34E0722BFD /* HaldenKit in Frameworks */ = {isa = PBXBuildFile; productRef = 52C9458930B85A4D8D21B7D8 /* HaldenKit */; };
 		E5569A0CC388C712D638DB6F /* HaldenLockedCamera.appex in Embed ExtensionKit Extensions */ = {isa = PBXBuildFile; fileRef = 5C6A70B0F5041CC14CECE7FA /* HaldenLockedCamera.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
@@ -130,6 +131,7 @@
 		C765E5168916BA5A5355EF98 /* PhotosView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotosView.swift; sourceTree = "<group>"; };
 		CCDEB459ACF35A5382B17B06 /* PhotoView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoView.swift; sourceTree = "<group>"; };
 		DBEEA719E7976B95C7A812F2 /* CameraModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraModel.swift; sourceTree = "<group>"; };
+		EC66D3547031D67063F9441E /* TrashView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TrashView.swift; sourceTree = "<group>"; };
 		F3B360B4ABEBAD5E54337C81 /* SharedIntents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SharedIntents.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -185,6 +187,7 @@
 				34CBFFD46E988B3DE34FFBFD /* QRScannerView.swift */,
 				1FE32D68F3EDCDF19843B399 /* RootView.swift */,
 				80A08A19CFB7DE203B87EE2F /* SettingsView.swift */,
+				EC66D3547031D67063F9441E /* TrashView.swift */,
 				371EA27A9FA82A61CA687680 /* UploadsView.swift */,
 				9B4EC6EBA149179462421878 /* Viewer.swift */,
 				B3DC81E0143A53F37F02DDAE /* WithoutPlaceView.swift */,
@@ -448,6 +451,7 @@
 				442C9FD29309011799EB92F9 /* SettingsView.swift in Sources */,
 				71B99CF29DE1A7DD33488186 /* SharedIntents.swift in Sources */,
 				5DC6FC1AA6B6262A8DC98DE8 /* StandInCamera.swift in Sources */,
+				D5399A90556FBEC26C5A5648 /* TrashView.swift in Sources */,
 				81759963AC86569602CA84B8 /* UITestWorld.swift in Sources */,
 				D190BA231FC90D7AF3D76836 /* UploadActivity.swift in Sources */,
 				7002EEBD674D90FA00CA5D22 /* UploadsView.swift in Sources */,

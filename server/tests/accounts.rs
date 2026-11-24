@@ -28,6 +28,10 @@ async fn login_gives_a_token_that_opens_me() {
     assert_eq!(me.body["user"]["username"], "Lucas");
     assert_eq!(me.body["device"]["name"], "Lucas' iPhone");
     assert_eq!(me.body["unconfirmedDevices"], 0);
+    assert_eq!(
+        me.body["trashDays"], 30,
+        "the app shows the days left in the trash"
+    );
 
     let anonymous = api.call(Method::GET, "/api/v1/me", None, None).await;
     assert_eq!((anonymous.status, anonymous.error()), (401, "unauthorized"));

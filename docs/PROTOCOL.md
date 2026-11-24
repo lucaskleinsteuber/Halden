@@ -156,9 +156,13 @@ Signs this device out. `204`.
 {
   "user": { … }, "device": { … }, "unconfirmedDevices": 1,
   "backup": { "mirror": "ok", "onlyOneCopy": false, "filesWaiting": 0,
-              "mirrorOnSameDisk": false, "lastDatabaseBackupAt": 1795443720061 }
+              "mirrorOnSameDisk": false, "lastDatabaseBackupAt": 1795443720061 },
+  "trashDays": 30
 }
 ```
+
+`trashDays` is `[library] trash_days`: how long photos stay in the trash, so the app can show
+the days left.
 
 `backup.mirror` is `none` (no second copy), `ok`, `behind` (copies are being made) or
 `unreachable` (the mirror disk is missing). While `onlyOneCopy` is true, the app shows a lasting

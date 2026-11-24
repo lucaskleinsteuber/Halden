@@ -29,6 +29,8 @@ final class AppModel {
     private(set) var uploadsWaitBecause: String?
     /// "12 of 40" for the current round of uploads.
     private(set) var uploadSummary = UploadSummary()
+    /// Days photos stay in the trash before they are deleted for good (the server says).
+    private(set) var trashDays = 30
     /// Goes up when something (a control, the lock-screen camera) asks for the camera.
     private(set) var cameraRequests = 0
 
@@ -356,6 +358,7 @@ final class AppModel {
                     try await Syncer(database: database, client: client).run()
                     let me = try await client.me()
                     self?.backup = me.backup
+                    if let days = me.trashDays { self?.trashDays = days }
                 } catch let error as APIError {
                     if case .unreachable = error { reachable = false }
                     if error.signedOut {
@@ -421,6 +424,43 @@ final class AppModel {
             if page.count < 500 { break }
         }
         return found
+    }
+
+    // MARK: Deleting
+
+    /// "Delete everywhere": into the server's trash, on every device; restorable for `trashDays`.
+    func moveToTrash(_ ids: [String]) {
+        perform("moved to the trash") { try $0.trash(ids) }
+    }
+
+    func restore(_ ids: [String]) {
+        perform("restored") { try $0.restore(ids) }
+    }
+
+    /// For good, from the trash only.
+    func deleteForGood(_ ids: [String]) {
+        perform("deleted") { try $0.deleteForGood(ids) }
+    }
+
+    /// "Remove from this iPhone": only photos safely on the server; they stay in the library and
+    /// come from the server when opened. Returns how many were removed.
+    @discardableResult
+    func removeFromPhone(_ ids: [String]) -> Int {
+        (try? LocalCopies.remove(ids, database: database, files: files)) ?? 0
+    }
+
+    /// How many of these could be removed from this iPhone (on the server, and here).
+    func removableFromPhone(_ ids: [String]) -> Int {
+        ids.compactMap { asset($0) }.filter { $0.backedUp && $0.localFile != nil }.count
+    }
+
+    private func perform(_ what: String, _ change: (Actions) throws -> Void) {
+        do {
+            try change(actions)
+            refresh()
+        } catch {
+            problem = "The photos could not be \(what): \(error.localizedDescription)"
+        }
     }
 
     enum ShareKind {

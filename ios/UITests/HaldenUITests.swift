@@ -177,6 +177,65 @@ final class HaldenUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["title"].waitForExistence(timeout: 60), "the server keeps the correction")
     }
 
+    /// Delete everywhere, find it in the trash with its days left, restore it; then choose it in
+    /// the grid, delete it, and delete it for good.
+    @MainActor
+    func testDeletingGoesThroughTheTrash() throws {
+        let environment = ProcessInfo.processInfo.environment
+        guard let server = environment["HALDEN_TEST_SERVER"], let password = environment["HALDEN_TEST_PASSWORD"]
+        else {
+            throw XCTSkip("no server: run ios/ui-tests.sh")
+        }
+        allowLocation()
+        let app = XCUIApplication()
+        app.launchArguments = ["-ui-testing", "-ui-testing-sign-in"]
+        app.launchEnvironment = ["HALDEN_TEST_SERVER": server, "HALDEN_TEST_PASSWORD": password]
+        app.launch()
+        let tabs = app.tabBars.firstMatch
+        XCTAssertTrue(tabs.waitForExistence(timeout: 30), "signed in")
+        tabs.buttons["Camera"].tap()
+        XCTAssertTrue(app.buttons["shutter"].waitForExistence(timeout: 10))
+        app.buttons["shutter"].tap()
+        tabs.buttons["Photos"].tap()
+        let grid = app.collectionViews["library-grid"]
+        let newest = grid.cells.firstMatch
+        XCTAssertTrue(newest.waitForExistence(timeout: 30))
+        expectation(for: NSPredicate(format: "label == 'Photo, backed up'"), evaluatedWith: newest)
+        waitForExpectations(timeout: 60)
+        let id = newest.identifier.replacingOccurrences(of: "photo-", with: "")
+
+        newest.tap()
+        XCTAssertTrue(app.buttons["delete"].waitForExistence(timeout: 10))
+        app.buttons["delete"].tap()
+        let everywhere = app.buttons["delete-everywhere"].firstMatch
+        XCTAssertTrue(everywhere.waitForExistence(timeout: 5), "asks first")
+        everywhere.tap()
+        XCTAssertTrue(grid.cells["photo-\(id)"].waitForNonExistence(timeout: 10), "gone from the library")
+
+        app.buttons["photos-menu"].tap()
+        app.buttons["trash"].tap()
+        let trashed = app.descendants(matching: .any)["trashed-\(id)"]
+        XCTAssertTrue(trashed.waitForExistence(timeout: 10), "in the trash")
+        XCTAssertTrue(trashed.label.hasSuffix("30 days left"), trashed.label)
+        trashed.tap()
+        app.buttons["restore"].tap()
+        XCTAssertTrue(trashed.waitForNonExistence(timeout: 10))
+        app.navigationBars.buttons.firstMatch.tap()
+        XCTAssertTrue(grid.cells["photo-\(id)"].waitForExistence(timeout: 10), "back in the library")
+
+        app.buttons["select"].tap()
+        grid.cells["photo-\(id)"].tap()
+        app.buttons["delete-chosen"].tap()
+        app.buttons["confirm-delete"].firstMatch.tap()
+        XCTAssertTrue(grid.cells["photo-\(id)"].waitForNonExistence(timeout: 10))
+        app.buttons["photos-menu"].tap()
+        app.buttons["trash"].tap()
+        XCTAssertTrue(trashed.waitForExistence(timeout: 10))
+        app.buttons["delete-for-good"].tap()
+        app.buttons["confirm-delete-for-good"].firstMatch.tap()
+        XCTAssertTrue(app.descendants(matching: .any)["trash-empty"].waitForExistence(timeout: 10))
+    }
+
     /// Answers the question for the place, should the simulator ask.
     private func allowLocation() {
         addUIInterruptionMonitor(withDescription: "Location") { alert in

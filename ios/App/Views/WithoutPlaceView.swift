@@ -36,17 +36,20 @@ struct WithoutPlaceView: View {
         }
         .navigationTitle("Without place")
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar(.hidden, for: .tabBar)
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
                 Button(selected.count == assets.count && !assets.isEmpty ? "Select none" : "Select all") {
                     selected = selected.count == assets.count ? [] : Set(assets.map(\.id))
                 }
             }
-            ToolbarItemGroup(placement: .bottomBar) {
+            ToolbarItem(placement: .bottomBar) {
                 Button("Use suggestions (\(suggestedCount))") { useSuggestions() }
                     .disabled(suggestedCount == 0)
                     .accessibilityIdentifier("use-suggestions")
-                Spacer()
+            }
+            ToolbarSpacer(.flexible, placement: .bottomBar)
+            ToolbarItem(placement: .bottomBar) {
                 Button("Choose place…") { choosing = true }
                     .disabled(selected.isEmpty)
                     .accessibilityIdentifier("choose-place")

@@ -11,6 +11,8 @@ struct LibraryGrid: UIViewControllerRepresentable {
     let version: Int
     let uploads: [String: Double]
     let pipeline: ImagePipeline
+    /// While choosing photos (to delete many at once), a tap selects instead of opening.
+    var selection: Set<String>? = nil
     let open: (String) -> Void
 
     func makeUIViewController(context: Context) -> GridController {
@@ -19,7 +21,7 @@ struct LibraryGrid: UIViewControllerRepresentable {
 
     func updateUIViewController(_ controller: GridController, context: Context) {
         controller.open = open
-        controller.show(assets: assets, version: version, uploads: uploads)
+        controller.show(assets: assets, version: version, uploads: uploads, selection: selection)
     }
 }
 
@@ -33,6 +35,7 @@ final class GridController: UIViewController, UICollectionViewDelegate, UICollec
     private var dataSource: UICollectionViewDiffableDataSource<Int, String>!
     private var assets: [String: LocalAsset] = [:]
     private var uploads: [String: Double] = [:]
+    private var selection: Set<String>?
     private var shownVersion = -1
 
     init(pipeline: ImagePipeline, open: @escaping (String) -> Void) {
@@ -86,7 +89,10 @@ final class GridController: UIViewController, UICollectionViewDelegate, UICollec
         return Int((width / CGFloat(columns) * traitCollection.displayScale).rounded(.up))
     }
 
-    func show(assets list: [LocalAsset], version: Int, uploads newUploads: [String: Double]) {
+    func show(
+        assets list: [LocalAsset], version: Int, uploads newUploads: [String: Double],
+        selection newSelection: Set<String>?
+    ) {
         guard dataSource != nil else { return }
         var snapshot = dataSource.snapshot()
         var changed = Set<String>()
@@ -115,6 +121,18 @@ final class GridController: UIViewController, UICollectionViewDelegate, UICollec
         for (id, progress) in newUploads where uploads[id] != progress { changed.insert(id) }
         for id in uploads.keys where newUploads[id] == nil { changed.insert(id) }
         uploads = newUploads
+        if newSelection != selection {
+            let before = selection ?? []
+            let after = newSelection ?? []
+            // Entering or leaving the choosing: every visible cell; else only the ones that changed.
+            if (selection == nil) != (newSelection == nil) {
+                changed.formUnion(
+                    collectionView.indexPathsForVisibleItems.compactMap { dataSource.itemIdentifier(for: $0) })
+            } else {
+                changed.formUnion(before.symmetricDifference(after))
+            }
+            selection = newSelection
+        }
         let shown = changed.filter { snapshot.indexOfItem($0) != nil }
         if !shown.isEmpty { snapshot.reconfigureItems(Array(shown)) }
         if reorder || !shown.isEmpty {
@@ -124,7 +142,7 @@ final class GridController: UIViewController, UICollectionViewDelegate, UICollec
 
     private func configure(_ cell: GridCell, id: String) {
         guard let asset = assets[id] else { return }
-        cell.show(asset: asset, upload: uploads[id])
+        cell.show(asset: asset, upload: uploads[id], selected: selection.map { $0.contains(id) })
         let pixels = cellPixels
         if let image = pipeline.cached(asset, pixels: pixels) {
             cell.setImage(UIImage(cgImage: image.cgImage), for: id)
@@ -143,6 +161,7 @@ final class GridController: UIViewController, UICollectionViewDelegate, UICollec
     }
 
     func collectionView(_ collectionView: UICollectionView, didSelectItemAt indexPath: IndexPath) {
+        collectionView.deselectItem(at: indexPath, animated: false)
         if let id = dataSource.itemIdentifier(for: indexPath) { open(id) }
     }
 }
@@ -152,6 +171,7 @@ final class GridCell: UICollectionViewCell {
     private let badge = UIImageView()
     private let progress = ProgressRing()
     private let duration = UILabel()
+    private let check = UIImageView()
     private(set) var shownId: String?
     var loading: Task<Void, Never>?
 
@@ -164,7 +184,7 @@ final class GridCell: UICollectionViewCell {
         duration.textColor = .white
         duration.shadowColor = .black.withAlphaComponent(0.6)
         duration.shadowOffset = CGSize(width: 0, height: 1)
-        for view in [imageView, badge, progress, duration] as [UIView] {
+        for view in [imageView, badge, progress, duration, check] as [UIView] {
             view.translatesAutoresizingMaskIntoConstraints = false
             contentView.addSubview(view)
         }
@@ -183,6 +203,10 @@ final class GridCell: UICollectionViewCell {
             progress.heightAnchor.constraint(equalToConstant: 16),
             duration.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 5),
             duration.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -3),
+            check.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 4),
+            check.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -4),
+            check.widthAnchor.constraint(equalToConstant: 22),
+            check.heightAnchor.constraint(equalToConstant: 22),
         ])
         isAccessibilityElement = true
     }
@@ -196,8 +220,15 @@ final class GridCell: UICollectionViewCell {
         imageView.image = nil
     }
 
-    func show(asset: LocalAsset, upload: Double?) {
+    /// `selected`: `nil` while not choosing.
+    func show(asset: LocalAsset, upload: Double?, selected: Bool? = nil) {
         shownId = asset.id
+        check.isHidden = selected == nil
+        check.image = UIImage(systemName: selected == true ? "checkmark.circle.fill" : "circle")?
+            .withConfiguration(
+                UIImage.SymbolConfiguration(paletteColors: selected == true ? [.white, .systemBlue] : [.white]))
+        imageView.alpha = selected == true ? 0.75 : 1
+        accessibilityTraits = selected == true ? [.button, .selected] : [.button]
         accessibilityIdentifier = "photo-\(asset.id)"
         let state: String
         if asset.backedUp {

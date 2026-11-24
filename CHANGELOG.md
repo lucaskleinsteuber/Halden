@@ -8,6 +8,12 @@ There are no version numbers yet; entries are grouped by date until the first re
 
 ### Added
 
+- iPhone deleting and trash: "Delete everywhere" (into the server's trash on every device) and
+  "Remove from this iPhone" (only for photos safely on the server) as two separate actions, for
+  one photo or many chosen in the grid; the trash with the days left, restoring, and deleting
+  for good after a question; all of it also offline.
+- Server: `GET /me` tells the apps `trashDays`, so they can show how long photos stay in the
+  trash.
 - iPhone library: full screen with swiping and zooming (thumbnail, then preview, then the
   original, without jumps), videos played from the phone or streamed from the server through
   the pinned connection; info in three layers (as shown, as taken with EXIF, on the server) with

@@ -67,6 +67,8 @@ public struct Me: Codable, Sendable {
     public var device: Device
     public var unconfirmedDevices: Int
     public var backup: BackupState
+    /// Days photos stay in the trash (older servers don't say).
+    public var trashDays: Int?
 }
 
 public struct AssetFile: Codable, Sendable, Equatable {

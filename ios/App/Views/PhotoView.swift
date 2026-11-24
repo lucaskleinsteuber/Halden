@@ -12,6 +12,8 @@ struct PhotoView: View {
     @State private var sharing: SharedFile?
     @State private var preparing = false
     @State private var problem: String?
+    @State private var confirmDelete = false
+    @Environment(\.dismiss) private var dismiss
 
     init(start: String, assets: [LocalAsset]) {
         self.start = start
@@ -26,8 +28,10 @@ struct PhotoView: View {
             .ignoresSafeArea()
             .navigationTitle(asset.map { TakenAt.text($0.takenAt, offset: $0.timeZoneOffsetMinutes) } ?? "")
             .navigationBarTitleDisplayMode(.inline)
+            // Full screen: the tab bar would cover the middle of the bottom bar.
+            .toolbar(.hidden, for: .tabBar)
             .toolbar {
-                ToolbarItemGroup(placement: .bottomBar) {
+                ToolbarItem(placement: .bottomBar) {
                     Menu {
                         Button("Original") { share(.original) }
                         Button("With corrected time and place") { share(.corrected) }
@@ -37,7 +41,19 @@ struct PhotoView: View {
                     }
                     .accessibilityLabel("Share")
                     .accessibilityIdentifier("share")
-                    Spacer()
+                }
+                ToolbarSpacer(.flexible, placement: .bottomBar)
+                ToolbarItem(placement: .bottomBar) {
+                    Button {
+                        confirmDelete = true
+                    } label: {
+                        Image(systemName: "trash")
+                    }
+                    .accessibilityLabel("Delete")
+                    .accessibilityIdentifier("delete")
+                }
+                ToolbarSpacer(.flexible, placement: .bottomBar)
+                ToolbarItem(placement: .bottomBar) {
                     Button {
                         showInfo = true
                     } label: {
@@ -46,6 +62,25 @@ struct PhotoView: View {
                     .accessibilityLabel("Info")
                     .accessibilityIdentifier("info")
                 }
+            }
+            .confirmationDialog("Delete this photo?", isPresented: $confirmDelete, titleVisibility: .visible) {
+                Button("Delete everywhere", role: .destructive) {
+                    app.moveToTrash([current])
+                    dismiss()
+                }
+                .accessibilityIdentifier("delete-everywhere")
+                if let asset, asset.backedUp, asset.localFile != nil {
+                    Button("Remove from this iPhone only") {
+                        if app.removeFromPhone([current]) == 0 {
+                            problem = "Not yet: its preview isn't on this iPhone. Try again in a moment."
+                        }
+                    }
+                    .accessibilityIdentifier("remove-from-phone")
+                }
+            } message: {
+                Text(
+                    "Everywhere: it goes to the trash on the server and on all devices, and can be restored for \(app.trashDays) days. From this iPhone only: the server keeps it, and it stays in your library."
+                )
             }
             .sheet(isPresented: $showInfo) { InfoView(id: current) }
             .sheet(item: $sharing) { file in ShareSheet(items: [file.url]) }

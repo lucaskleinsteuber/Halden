@@ -257,6 +257,9 @@ pub struct Me {
     unconfirmed_devices: i64,
     /// Whether the photos exist a second time. Apps warn while `onlyOneCopy` is true.
     backup: crate::backup::mirror::BackupStatus,
+    /// How long photos stay in the trash before they are deleted for good, so apps can show the
+    /// days left.
+    trash_days: u32,
 }
 
 pub async fn me(State(state): State<AppState>, auth: Auth) -> Result<Json<Me>, ApiError> {
@@ -268,6 +271,7 @@ pub async fn me(State(state): State<AppState>, auth: Auth) -> Result<Json<Me>, A
         device: auth.device,
         unconfirmed_devices,
         backup: state.backup_status(),
+        trash_days: state.config().library.trash_days,
     }))
 }
 
