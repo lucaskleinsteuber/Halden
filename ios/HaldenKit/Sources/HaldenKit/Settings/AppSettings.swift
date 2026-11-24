@@ -42,6 +42,8 @@ public struct AppSettings: Codable, Sendable, Equatable {
     public var videoHDR = false
     public var flash = Flash.auto
     public var showGrid = false
+    /// Photos with a short video before and after, like Apple's camera; on by default there too.
+    public var livePhotos = true
 
     // Place
     public var locationAccuracyLimit = 50.0
@@ -59,7 +61,7 @@ public struct AppSettings: Codable, Sendable, Equatable {
 
     enum CodingKeys: String, CodingKey {
         case uploadOverCellular, videosOnlyOnWiFi, onlyOnHomeNetwork, keepLocalCopies, photoFormat
-        case videoResolution, videoFrameRate, videoHDR, flash, showGrid, locationAccuracyLimit
+        case videoResolution, videoFrameRate, videoHDR, flash, showGrid, livePhotos, locationAccuracyLimit
         case inaccurateLocation, importFromPhotos, saveToPhotos, syncDeletionsWithPhotos
     }
 
@@ -80,6 +82,7 @@ public struct AppSettings: Codable, Sendable, Equatable {
         read(.videoHDR, into: &settings.videoHDR)
         read(.flash, into: &settings.flash)
         read(.showGrid, into: &settings.showGrid)
+        read(.livePhotos, into: &settings.livePhotos)
         read(.locationAccuracyLimit, into: &settings.locationAccuracyLimit)
         read(.inaccurateLocation, into: &settings.inaccurateLocation)
         read(.importFromPhotos, into: &settings.importFromPhotos)

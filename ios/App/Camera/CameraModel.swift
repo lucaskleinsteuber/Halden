@@ -27,7 +27,7 @@ final class CameraModel {
     @ObservationIgnored var keepVideo: ((URL, UploadMetadata) -> Void)?
     @ObservationIgnored private var countdownTask: Task<Void, Never>?
     @ObservationIgnored private var video: (request: VideoRequest, place: ClientLocation?)?
-    @ObservationIgnored private var applied: VideoOptions?
+    @ObservationIgnored private var applied: CaptureOptions?
 
     init(backend: any CaptureBackend) {
         self.backend = backend
@@ -46,20 +46,31 @@ final class CameraModel {
 
     /// At app start, so the picture is there at once when the camera opens.
     func prepare() {
-        let options = VideoOptions(settings())
+        let options = CaptureOptions(settings())
         applied = options
-        backend.prepare(mode: mode, video: options)
+        backend.prepare(mode: mode, options: options)
     }
 
     func appear() {
         location.start(accuracyWanted: settings().locationAccuracyLimit)
-        // Video settings changed meanwhile.
-        let options = VideoOptions(settings())
-        if mode == .video, options != applied {
-            applied = options
-            backend.setMode(mode, video: options)
-        }
+        settingsChanged()
         backend.start()
+    }
+
+    /// The video or Live Photo settings may have changed (in the settings, or on the camera
+    /// screen): the camera takes them over, unless it is recording.
+    func settingsChanged() {
+        let options = CaptureOptions(settings())
+        guard options != applied, !recording else { return }
+        applied = options
+        backend.setMode(mode, options: options)
+    }
+
+    /// The next mode to the right (1) or left (-1) on the screen, as after a swipe.
+    func switchMode(by step: Int) {
+        let modes = CameraMode.strip
+        guard let index = modes.firstIndex(of: mode), modes.indices.contains(index + step) else { return }
+        switchTo(modes[index + step])
     }
 
     func disappear() {
@@ -75,9 +86,9 @@ final class CameraModel {
         cancelCountdown()
         setTorch(false)
         self.mode = mode
-        let options = VideoOptions(settings())
+        let options = CaptureOptions(settings())
         applied = options
-        backend.setMode(mode, video: options)
+        backend.setMode(mode, options: options)
     }
 
     func setTorch(_ on: Bool) {
@@ -122,7 +133,8 @@ final class CameraModel {
         shots += 1
         let request = PhotoRequest(
             format: settings.photoFormat, flash: settings.flash, location: place,
-            trueNorth: location.compass?.trueNorth ?? false, takenAt: now)
+            trueNorth: location.compass?.trueNorth ?? false, takenAt: now,
+            live: settings.livePhotos && backend.state.canLive)
         Task {
             guard let photo = await backend.takePhoto(request) else {
                 problem = "The photo could not be taken."

@@ -22,34 +22,41 @@ struct LockedCameraView: View {
     @State private var taken = 0
 
     var body: some View {
-        CameraScreen(camera: camera, settings: settings) { change in change(&settings) }
-            .overlay(alignment: .topTrailing) {
-                if taken > 0 {
-                    Button("Open Halden") {
-                        Task {
-                            try? await session.openApplication(
-                                for: NSUserActivity(activityType: NSUserActivityTypeLockedCameraCapture))
-                        }
+        CameraScreen(camera: camera, settings: settings) { change in
+            change(&settings)
+        } gallery: {
+            // Where the app shows the last photo: once something was taken, a way into Halden.
+            if taken > 0 {
+                Button {
+                    Task {
+                        try? await session.openApplication(
+                            for: NSUserActivity(activityType: NSUserActivityTypeLockedCameraCapture))
                     }
-                    .buttonStyle(.borderedProminent)
-                    .padding(.top, 50)
-                    .padding(.trailing, 16)
+                } label: {
+                    Image(systemName: "photo.on.rectangle")
+                        .font(.title3)
+                        .frame(width: 52, height: 52)
+                        .background(.white.opacity(0.15), in: .rect(cornerRadius: 8))
+                }
+                .accessibilityLabel("Open Halden")
+            }
+        }
+        .onAppear {
+            let folder = session.sessionContentURL
+            camera.settings = { settings }
+            camera.keepPhoto = { photo, metadata in
+                if (try? LockedCaptures.save(
+                    photo: photo.data, heic: photo.heic, liveVideo: photo.liveVideo, metadata: metadata,
+                    into: folder))
+                    != nil
+                {
+                    taken += 1
                 }
             }
-            .onAppear {
-                let folder = session.sessionContentURL
-                camera.settings = { settings }
-                camera.keepPhoto = { photo, metadata in
-                    if (try? LockedCaptures.save(photo: photo.data, heic: photo.heic, metadata: metadata, into: folder))
-                        != nil
-                    {
-                        taken += 1
-                    }
-                }
-                camera.keepVideo = { url, metadata in
-                    if (try? LockedCaptures.save(video: url, metadata: metadata, into: folder)) != nil { taken += 1 }
-                }
-                camera.prepare()
+            camera.keepVideo = { url, metadata in
+                if (try? LockedCaptures.save(video: url, metadata: metadata, into: folder)) != nil { taken += 1 }
             }
+            camera.prepare()
+        }
     }
 }

@@ -32,15 +32,17 @@ extension HaldenDatabase {
                     ?? Int64.fetchOne(
                         db, sql: "SELECT min(createdAt) FROM upload WHERE state <> 'done' AND state <> 'failed'")
             else { return UploadSummary() }
+            // Counted in photos and videos: a Live Photo is one, though it is two files.
             let row = try Row.fetchOne(
                 db,
                 sql: """
-                    SELECT count(*) AS total,
-                           sum(state = 'done') AS done,
-                           sum(state = 'failed') AS failed,
-                           sum(CASE WHEN state = 'done' THEN size ELSE sent END) AS sent,
-                           sum(size) AS size
-                    FROM upload WHERE createdAt >= ?
+                    SELECT count(*) AS total, sum(done) AS done, sum(failed) AS failed,
+                           sum(sent) AS sent, sum(size) AS size
+                    FROM (SELECT min(state = 'done') AS done,
+                                 max(state = 'failed') AS failed,
+                                 sum(CASE WHEN state = 'done' THEN size ELSE sent END) AS sent,
+                                 sum(size) AS size
+                          FROM upload WHERE createdAt >= ? GROUP BY assetId)
                     """, arguments: [start])
             return UploadSummary(
                 done: row?["done"] ?? 0, total: row?["total"] ?? 0, failed: row?["failed"] ?? 0,
@@ -93,7 +95,7 @@ public enum LocalCopies {
             // wastes space, while a row pointing at a removed file would be wrong.
             let others = try database.writer.write { db in
                 try db.execute(
-                    sql: "UPDATE asset SET localFile = NULL WHERE id = ? AND localFile = ?",
+                    sql: "UPDATE asset SET localFile = NULL, pairedVideoFile = NULL WHERE id = ? AND localFile = ?",
                     arguments: [asset.id, name])
                 // A Live Photo's video goes with its photo.
                 return try String.fetchAll(

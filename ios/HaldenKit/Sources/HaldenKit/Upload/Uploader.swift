@@ -69,7 +69,11 @@ public actor Uploader {
             assetId: assetId.lowercased(), role: "paired_video", file: fileName, mimeType: mimeType, size: size,
             sha256: nil, metadata: nil, uploadId: nil, sent: 0, state: "waiting", attempts: 0, lastError: nil,
             retryAt: 0, createdAt: Int64(Date().timeIntervalSince1970 * 1000))
-        try database.writer.write { db in try item.insert(db) }
+        try database.writer.write { db in
+            try item.insert(db)
+            try db.execute(
+                sql: "UPDATE asset SET pairedVideoFile = ? WHERE id = ?", arguments: [fileName, assetId.lowercased()])
+        }
     }
 
     /// Works through every due upload. Returns how many finished; stops early when the server

@@ -8,6 +8,15 @@ There are no version numbers yet; entries are grouped by date until the first re
 
 ### Added
 
+- iPhone Live Photos, on by default like Apple's camera (button on the camera, Settings ›
+  Camera): photo and short video with sound, uploaded as the asset's `original` and
+  `paired_video` and counted as one, played full screen while held, marked in the grid, saved to
+  Apple Photos as a Live Photo, shared with both files, also from the lock-screen camera.
+- iPhone zoom dial: dragging the zoom buttons sideways zooms continuously, with a mark at every
+  lens and a light tick when one is passed.
+- iPhone camera: the video format (size, frame rate, HDR) can be changed on the camera screen;
+  swiping over the picture changes the mode; the last photo is next to the shutter and opens
+  full screen.
 - iPhone measurements on request (`PerformanceTests`): launch, the camera's start, memory and
   processor while scrolling through 50,000 photos. In the simulator: responsive after 1.9 s,
   146 MB at most while scrolling fast.
@@ -76,6 +85,16 @@ There are no version numbers yet; entries are grouped by date until the first re
   for the detail view.
 
 ### Changed
+
+- iPhone zoom glides: a lens button takes 0.3 s for any distance, pinching follows the finger
+  smoothly, and the zoom shown is the camera's real one as it changes instead of jumping to the
+  target (it also no longer jumps back after focusing).
+- iPhone camera screen laid out like Apple's: the picture as it will be taken (4:3 for photos,
+  16:9 for videos), fixed places for every control so nothing moves when the mode changes, the
+  modes as a strip.
+- iPhone settings in pages (server and account, uploads, camera, place, Apple Photos, storage,
+  formats, trash, server), with the server and the upload status on top and a line explaining
+  every setting.
 
 - Server: the system allocator on Linux too. Measured on Linux with 100,000 photos: 26 MB at
   rest and 114–120 MB under load, against 54 MB and 184–226 MB with mimalloc. mimalloc stays

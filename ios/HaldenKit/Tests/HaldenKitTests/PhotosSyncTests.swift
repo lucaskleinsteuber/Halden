@@ -74,9 +74,12 @@ final class StandInPhotoLibrary: PhotoLibrary, @unchecked Sendable {
         return files
     }
 
-    func save(_ file: URL, kind: PhotoItem.Kind) async throws -> String {
+    func save(_ file: URL, kind: PhotoItem.Kind, pairedVideo: URL?) async throws -> String {
         let identifier = "saved-\(UUID().uuidString)"
-        add(PhotoItem(localIdentifier: identifier, kind: kind, creationDate: Date(), width: 64, height: 48))
+        add(
+            PhotoItem(
+                localIdentifier: identifier, kind: kind, isLivePhoto: pairedVideo != nil, creationDate: Date(),
+                width: 64, height: 48))
         return identifier
     }
 
@@ -176,6 +179,21 @@ final class StandInPhotoLibrary: PhotoLibrary, @unchecked Sendable {
         #expect(!(await sync.inPhotos(["two"])))
     }
 
+    /// A Live Photo taken with Halden goes there as a Live Photo.
+    @Test func haldensLivePhotosGoThereAsLivePhotos() async throws {
+        let (database, files, library, sync, root) = try world()
+        defer { try? FileManager.default.removeItem(at: root) }
+        try SampleMedia.photo(seed: 5, width: 64, height: 48)!.write(to: files.original("live.jpg"))
+        try Data(repeating: 1, count: 10).write(to: files.original("live-live.mov"))
+        try Uploader.enqueue(
+            database: database, files: files, assetId: "live", fileName: "live.jpg", kind: "photo",
+            mimeType: "image/jpeg", metadata: UploadMetadata(takenAt: 1))
+        try Uploader.enqueuePairedVideo(
+            database: database, files: files, assetId: "live", fileName: "live-live.mov", mimeType: "video/quicktime")
+        await sync.save(assetId: "live", settings: AppSettings())
+        #expect(try await library.items(after: nil, limit: 10).contains { $0.isLivePhoto })
+    }
+
     /// The library from before comes in pieces and goes on where it stopped.
     @Test func theLibraryFromBeforeComesInPieces() async throws {
         let (database, _, library, sync, root) = try world()
@@ -210,6 +228,25 @@ final class StandInPhotoLibrary: PhotoLibrary, @unchecked Sendable {
             try UploadItem.fetchOne(db, key: ["assetId": "a", "role": "original"])
         }
         #expect(item?.sent == 4 && item?.uploadId == "u1" && item?.state == "sending")
+    }
+
+    /// A Live Photo from Apple Photos waiting from before knows its video afterwards.
+    @Test func aWaitingLivePhotoKnowsItsVideo() throws {
+        let queue = try DatabaseQueue()
+        try HaldenDatabase.migrator.migrate(queue, upTo: "3: several files per asset")
+        try queue.write { db in
+            try db.execute(
+                sql: "INSERT INTO asset (id, kind, takenAt, localFile, backedUp) VALUES ('a', 'photo', 5, 'a.heic', 0)")
+            try db.execute(
+                sql: """
+                    INSERT INTO upload (assetId, role, file, mimeType, size, createdAt)
+                    VALUES ('a', 'original', 'a.heic', 'image/heic', 10, 1),
+                           ('a', 'paired_video', 'a-live.mov', 'video/quicktime', 10, 1)
+                    """)
+        }
+        try HaldenDatabase.migrator.migrate(queue)
+        let asset = try queue.read { db in try LocalAsset.fetchOne(db, key: "a") }
+        #expect(asset?.pairedVideoFile == "a-live.mov" && asset?.isLivePhoto == true)
     }
 }
 

@@ -10,16 +10,18 @@ enum CameraSide: Sendable {
     case back, front
 }
 
-/// How videos are recorded (from the settings).
-struct VideoOptions: Equatable, Sendable {
+/// How the camera is set up (from the settings): videos, and Live Photos.
+struct CaptureOptions: Equatable, Sendable {
     var resolution: AppSettings.VideoResolution
     var frameRate: Int
     var hdr: Bool
+    var live: Bool
 
     init(_ settings: AppSettings) {
         resolution = settings.videoResolution
         frameRate = settings.videoFrameRate
         hdr = settings.videoHDR
+        live = settings.livePhotos
     }
 }
 
@@ -36,6 +38,8 @@ struct CameraState: Equatable, Sendable {
     var hasFlash = false
     var hasTorch = false
     var focusLocked = false
+    /// Live Photos can be taken (this camera, photo mode).
+    var canLive = false
     /// The video format actually used (the wished one may not exist on this camera).
     var videoFormat: String?
 }
@@ -46,6 +50,8 @@ struct TakenPhoto: Sendable {
     var heic: Bool
     var width: Int
     var height: Int
+    /// The short video of a Live Photo, in a temporary file.
+    var liveVideo: URL? = nil
 }
 
 struct PhotoRequest: Sendable {
@@ -55,6 +61,8 @@ struct PhotoRequest: Sendable {
     var location: ClientLocation?
     var trueNorth: Bool
     var takenAt: Date
+    /// A Live Photo: with its short video (when the camera can).
+    var live = false
 }
 
 struct VideoRequest: Sendable {
@@ -73,13 +81,14 @@ protocol CaptureBackend: AnyObject {
     var previewView: UIView { get }
     /// Gets everything ready without starting, so the picture is there the moment the camera
     /// screen opens. Does nothing until the camera may be used.
-    func prepare(mode: CameraMode, video: VideoOptions)
+    func prepare(mode: CameraMode, options: CaptureOptions)
     func start()
     func stop()
-    func setMode(_ mode: CameraMode, video: VideoOptions)
+    func setMode(_ mode: CameraMode, options: CaptureOptions)
     func flip()
-    /// Zoom as shown (0.5, 1, 2, …); `smoothly` for the preset buttons, not while pinching.
-    func zoom(to factor: Double, smoothly: Bool)
+    /// Zoom as shown (0.5, 1, 2, …). `glide` for the lens buttons (about 0.3 s for any
+    /// distance); otherwise it follows a finger closely. `state.zoom` follows the camera.
+    func zoom(to factor: Double, glide: Bool)
     /// A point in `previewView`. `lock` keeps focus and exposure until the next tap.
     func focus(at point: CGPoint, lock: Bool)
     func setTorch(_ on: Bool)

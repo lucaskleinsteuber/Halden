@@ -28,13 +28,31 @@ the design comes after that. What works today is described below.
   is sent before. The device token goes to the Keychain (this device only).
 - **Trust**: every connection trusts only the certificate whose SHA-256 was pinned (TLS 1.3).
 - **The camera**: photo (HEIC in the best quality, or JPEG) and video (HEVC, 4K at 60 fps by
-  default, HDR and 1080p/30 in the settings, with sound when the microphone is allowed). Ultra
-  wide, main, 2× and tele as one virtual camera, so zooming switches lenses where Apple's camera
-  does; zoom buttons and pinching; the front camera. Tap to focus, hold to lock focus and
-  exposure, flash (auto/on/off) or the light for videos, self-timer (3 or 10 s), grid lines.
+  default, HDR and 1080p/30 in the settings or right on the camera screen, with sound when the
+  microphone is allowed). Ultra wide, main, 2× and tele as one virtual camera, so zooming
+  switches lenses where Apple's camera does; the front camera. Tap to focus, hold to lock focus
+  and exposure, flash (auto/on/off) or the light for videos, self-timer (3 or 10 s), grid lines.
   Photos and videos come out upright however the phone is held. The camera is set up when the
   app starts, all on a queue of its own, so its picture is there at once and the screen never
   waits for it.
+- **Camera screen**: laid out like Apple's camera. On top flash (or the light), self-timer,
+  grid and Live Photo, for videos the format in the middle. The picture as it will be taken: 4:3
+  under the top bar for photos, 16:9 for videos. Below the zoom buttons, the modes (also changed
+  by swiping over the picture) and the shutter between the last photo (opens it) and the button
+  that turns the camera around. Nothing moves when the mode changes.
+- **Zoom** (`Zoom`): in doublings, as people know it. A lens button glides there in 0.3 s
+  however far it is (`ramp(toVideoZoomFactor:withRate:)`), pinching and the dial follow the
+  finger with a quick ramp, so steps between touches don't show. The number shown is the
+  camera's real zoom as it changes (observed on the device), never the target. Dragging the
+  zoom buttons sideways turns them into a dial with a mark at every lens; a light tick when a
+  lens is passed.
+- **Live Photos** (on by default, like Apple's camera; the button on top or Settings ›
+  Camera): the photo and 1.5 s of video with sound before and after, taken together by
+  `AVCapturePhotoOutput` with the same content identifier, the video with place and time. The
+  photo is the asset's original, the video its `paired_video`, sent after the photo; the
+  uploads count them as one. Full screen shows "LIVE" and plays it while held
+  (`PHLivePhotoView`, the video fetched from the server when it isn't on this iPhone). Saved to
+  Apple Photos as a Live Photo; shared with both files. The lock-screen camera takes them too.
 - **Time, place and direction**: every photo and video knows when it was taken (with the time
   zone), where (with the accuracy) and which way the camera pointed, sent to the server and
   written into the file itself (EXIF/GPS for photos, QuickTime metadata for videos, as Apple's
@@ -58,7 +76,11 @@ the design comes after that. What works today is described below.
   closed, keeps the network rules, checks the pinned certificate through the app, and wakes the
   app when it is done; the thumbnails follow when Halden next runs. A `BGProcessingTask` gives
   more time for hashing and uploading.
-- **Uploads screen** (Settings › Uploads › Waiting): every upload not finished yet with its
+- **Settings**: on top the server and whether everything is on it (a tap shows the uploads),
+  then one page per topic: server and account, uploads, camera, place, Apple Photos, storage on
+  this iPhone, formats, trash, and for owners the server. Every setting says in a line what it
+  does.
+- **Uploads screen** (Settings, the server at the top): every upload not finished yet with its
   progress and error, "Try again", why uploads wait right now, and "12 of 40" for the current
   round.
 - **Live Activity**: "12 of 40 uploaded" on the Lock Screen and in the Dynamic Island, for

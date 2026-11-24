@@ -12,15 +12,28 @@ public enum LockedCaptures {
         var mimeType: String
         var file: String
         var metadata: UploadMetadata
+        /// A Live Photo's video.
+        var pairedFile: String?
     }
 
-    public static func save(photo data: Data, heic: Bool, metadata: UploadMetadata, into folder: URL) throws {
+    public static func save(
+        photo data: Data, heic: Bool, liveVideo: URL? = nil, metadata: UploadMetadata, into folder: URL
+    ) throws {
         let id = UUID().uuidString.lowercased()
         let file = "\(id).\(heic ? "heic" : "jpg")"
         try data.write(to: folder.appendingPathComponent(file), options: .atomic)
+        var paired: String?
+        if let liveVideo {
+            let name = "\(id)-live.mov"
+            if (try? FileManager.default.moveItem(at: liveVideo, to: folder.appendingPathComponent(name))) != nil {
+                paired = name
+            }
+        }
         try describe(
             id,
-            Description(kind: "photo", mimeType: heic ? "image/heic" : "image/jpeg", file: file, metadata: metadata),
+            Description(
+                kind: "photo", mimeType: heic ? "image/heic" : "image/jpeg", file: file, metadata: metadata,
+                pairedFile: paired),
             in: folder)
     }
 
@@ -56,7 +69,19 @@ public enum LockedCaptures {
                 try Uploader.enqueue(
                     database: database, files: files, assetId: id, fileName: description.file, kind: description.kind,
                     mimeType: description.mimeType, metadata: description.metadata)
+                if let paired = description.pairedFile {
+                    let pairedSource = folder.appendingPathComponent(paired)
+                    if FileManager.default.fileExists(atPath: pairedSource.path) {
+                        try FileManager.default.moveItem(at: pairedSource, to: files.original(paired))
+                        try Uploader.enqueuePairedVideo(
+                            database: database, files: files, assetId: id, fileName: paired,
+                            mimeType: "video/quicktime")
+                    }
+                }
                 taken += 1
+            }
+            if let paired = description.pairedFile {
+                try? FileManager.default.removeItem(at: folder.appendingPathComponent(paired))
             }
             try? FileManager.default.removeItem(at: source)
             try? FileManager.default.removeItem(at: descriptionURL)

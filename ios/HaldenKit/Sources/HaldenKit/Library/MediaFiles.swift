@@ -75,6 +75,29 @@ public actor MediaFiles {
         defer { loading[asset.id] = nil }
         return try await task.value
     }
+
+    /// A Live Photo's video: on this iPhone, or fetched from the server once.
+    public func pairedVideo(of asset: LocalAsset) async throws -> URL {
+        if let name = asset.pairedVideoFile {
+            let url = files.original(name)
+            if FileManager.default.fileExists(atPath: url.path) { return url }
+        }
+        guard asset.isLivePhoto else { throw APIError.unreachable("not a Live Photo") }
+        let destination = originalsCache.appendingPathComponent((asset.pairedVideoSha256 ?? asset.id) + "-live.mov")
+        if FileManager.default.fileExists(atPath: destination.path) { return destination }
+        guard let client else { throw APIError.unreachable("not connected") }
+        let key = asset.id + "|paired_video"
+        if let running = loading[key] { return try await running.value }
+        let folder = originalsCache
+        let task = Task {
+            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+            try await client.download(asset: asset.id, role: "paired_video", to: destination)
+            return destination
+        }
+        loading[key] = task
+        defer { loading[key] = nil }
+        return try await task.value
+    }
 }
 
 /// Feeds `AVPlayer` with a video from the server in ranges, over the API client with the pinned

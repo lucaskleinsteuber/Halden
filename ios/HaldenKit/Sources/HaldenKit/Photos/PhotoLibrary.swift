@@ -75,8 +75,9 @@ public protocol PhotoLibrary: Sendable {
     func items(after date: Date?, limit: Int) async throws -> [PhotoItem]
     /// The item's original file, and for a Live Photo its video too (second).
     func export(_ item: PhotoItem, into folder: URL) async throws -> [ExportedFile]
-    /// Adds a photo or video file; returns its identifier there.
-    func save(_ file: URL, kind: PhotoItem.Kind) async throws -> String
+    /// Adds a photo or video file (a photo with `pairedVideo` as a Live Photo); returns its
+    /// identifier there.
+    func save(_ file: URL, kind: PhotoItem.Kind, pairedVideo: URL?) async throws -> String
     /// Deletes items (the system asks the person first). Returns whether they were deleted.
     func delete(_ identifiers: [String]) async -> Bool
 }

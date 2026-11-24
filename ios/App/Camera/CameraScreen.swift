@@ -2,56 +2,33 @@ import HaldenKit
 import SwiftUI
 import UIKit
 
-/// The camera screen, in the app and on the Lock Screen. No design yet: the system's controls,
-/// everything there and working.
-struct CameraScreen: View {
+/// The camera screen, in the app and on the Lock Screen. No design yet, but laid out like Apple's
+/// camera: flash and options on top, the picture as it will be taken (4:3 for photos, 16:9 for
+/// videos), the zoom buttons over its lower edge, the modes, and the shutter between the last
+/// photo and the button that turns the camera around. Nothing moves when the mode changes.
+struct CameraScreen<Gallery: View>: View {
     let camera: CameraModel
     let settings: AppSettings
-    /// Changes a setting (flash, grid) and keeps it.
+    /// Changes a setting (flash, grid, video format) and keeps it.
     let update: ((inout AppSettings) -> Void) -> Void
+    /// Left of the shutter: the last photo in the app, "Open Halden" on the Lock Screen.
+    @ViewBuilder let gallery: () -> Gallery
+
     @State private var focusPoint: CGPoint?
     @State private var flash = false
+    @State private var pinchStart = 1.0
+    /// While the zoom dial is dragged: the zoom it started at.
+    @State private var dialStart: Double?
+    @State private var dialShown = false
+    @State private var dialTouches = 0
 
     private var state: CameraState { camera.backend.state }
+    static var topBarHeight: CGFloat { 44 }
 
     var body: some View {
         ZStack {
             Color.black.ignoresSafeArea()
-            if state.ready {
-                CameraPreviewHost(
-                    preview: camera.backend.previewView,
-                    tap: { point in
-                        focusPoint = point
-                        camera.backend.focus(at: point, lock: false)
-                    },
-                    hold: { point in
-                        focusPoint = point
-                        camera.backend.focus(at: point, lock: true)
-                    },
-                    pinch: { scale, began in
-                        if began { pinchStart = state.zoom }
-                        camera.backend.zoom(to: pinchStart * scale, smoothly: false)
-                    }
-                )
-                .ignoresSafeArea()
-                // In the same place as the picture, so a tap and its square line up.
-                .overlay {
-                    if settings.showGrid { ThirdsGrid().allowsHitTesting(false) }
-                    if let focusPoint {
-                        Rectangle()
-                            .strokeBorder(.yellow, lineWidth: 1.5)
-                            .frame(width: 72, height: 72)
-                            .position(focusPoint)
-                            .allowsHitTesting(false)
-                    }
-                }
-                .accessibilityIdentifier("camera-preview")
-            } else {
-                Text(state.problem ?? "Starting the camera…")
-                    .foregroundStyle(.white)
-                    .padding()
-                    .accessibilityIdentifier("no-camera")
-            }
+            viewfinder
             controls
             if let left = camera.countdown {
                 Text("\(left)")
@@ -74,113 +51,223 @@ struct CameraScreen: View {
         }
     }
 
-    @State private var pinchStart = 1.0
+    /// The picture as it will be taken: 4:3 under the top bar for photos, 16:9 in the middle for
+    /// videos (like Apple's camera, the controls lie over it).
+    @ViewBuilder private var viewfinder: some View {
+        let photo = camera.mode == .photo
+        Group {
+            if state.ready {
+                CameraPreviewHost(
+                    preview: camera.backend.previewView,
+                    tap: { point in
+                        focusPoint = point
+                        camera.backend.focus(at: point, lock: false)
+                    },
+                    hold: { point in
+                        focusPoint = point
+                        camera.backend.focus(at: point, lock: true)
+                    },
+                    pinch: { scale, began in
+                        if began { pinchStart = state.zoom }
+                        camera.backend.zoom(
+                            to: Zoom.pinched(from: pinchStart, scale: scale, in: state.zoomRange), glide: false)
+                    },
+                    swipe: { towardsLeft in camera.switchMode(by: towardsLeft ? 1 : -1) }
+                )
+                // In the same place as the picture, so a tap and its square line up.
+                .overlay {
+                    if settings.showGrid { ThirdsGrid().allowsHitTesting(false) }
+                    if let focusPoint {
+                        Rectangle()
+                            .strokeBorder(.yellow, lineWidth: 1.5)
+                            .frame(width: 72, height: 72)
+                            .position(focusPoint)
+                            .allowsHitTesting(false)
+                    }
+                }
+                .overlay(alignment: .top) {
+                    if state.focusLocked {
+                        Text("AE/AF LOCK")
+                            .font(.caption.bold())
+                            .padding(.horizontal, 6)
+                            .background(.yellow, in: .rect(cornerRadius: 4))
+                            .foregroundStyle(.black)
+                            .padding(.top, photo ? 10 : Self.topBarHeight + 70)
+                            .allowsHitTesting(false)
+                    }
+                }
+                .accessibilityIdentifier("camera-preview")
+            } else {
+                Text(state.problem ?? "Starting the camera…")
+                    .foregroundStyle(.white)
+                    .padding()
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .accessibilityIdentifier("no-camera")
+            }
+        }
+        .aspectRatio(photo ? 3.0 / 4.0 : 9.0 / 16.0, contentMode: .fit)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: photo ? .top : .center)
+        .padding(.top, photo ? Self.topBarHeight : 0)
+        .ignoresSafeArea(edges: photo ? [] : .all)
+    }
 
     private var controls: some View {
-        VStack(spacing: 14) {
+        VStack(spacing: 0) {
             topBar
-            Spacer()
+            Spacer(minLength: 0)
             if let problem = camera.problem {
-                Text(problem).font(.footnote).foregroundStyle(.yellow)
+                Text(problem)
+                    .font(.footnote)
+                    .foregroundStyle(.yellow)
+                    .padding(6)
+                    .background(.black.opacity(0.5), in: .rect(cornerRadius: 6))
+                    .padding(.bottom, 8)
             }
-            zoomButtons
-            Picker("Mode", selection: Binding(get: { camera.mode }, set: { camera.switchTo($0) })) {
-                Text("Photo").tag(CameraMode.photo)
-                Text("Video").tag(CameraMode.video)
-            }
-            .pickerStyle(.segmented)
-            .frame(width: 200)
-            .disabled(camera.recording)
-            .accessibilityIdentifier("camera-mode")
-            HStack {
-                Color.clear.frame(width: 50, height: 50)
-                Spacer()
-                shutterButton
-                Spacer()
-                Button {
-                    camera.backend.flip()
-                } label: {
-                    Image(systemName: "arrow.triangle.2.circlepath.camera")
-                        .font(.title2)
-                        .frame(width: 50, height: 50)
-                }
-                .disabled(!state.canFlip || camera.recording)
-                .accessibilityLabel("Switch camera")
-                .accessibilityIdentifier("flip-camera")
-            }
-            .padding(.horizontal, 30)
-            .padding(.bottom, 16)
+            zoomControl.frame(height: 64)
+            modeStrip.frame(height: 34)
+            shutterRow.frame(height: 92)
         }
         .foregroundStyle(.white)
         .tint(.white)
     }
 
+    // MARK: Top
+
     private var topBar: some View {
-        HStack(spacing: 20) {
-            if camera.mode == .photo {
-                Button {
-                    let next: AppSettings.Flash =
-                        switch settings.flash {
-                        case .auto: .on
-                        case .on: .off
-                        case .off: .auto
-                        }
-                    update { $0.flash = next }
-                } label: {
-                    Image(systemName: flashSymbol)
-                }
-                .disabled(!state.hasFlash)
-                .accessibilityLabel("Flash \(settings.flash.rawValue)")
-                .accessibilityIdentifier("flash")
-            } else {
-                Button {
-                    camera.setTorch(!camera.torch)
-                } label: {
-                    Image(systemName: camera.torch ? "flashlight.on.fill" : "flashlight.off.fill")
-                }
-                .disabled(!state.hasTorch)
-                .accessibilityLabel(camera.torch ? "Light on" : "Light off")
-                .accessibilityIdentifier("torch")
+        HStack(spacing: 0) {
+            lightButton.frame(width: 44, height: 44)
+            Spacer(minLength: 0)
+            HStack(spacing: 6) {
+                timerButton.frame(height: 44)
+                gridButton.frame(width: 44, height: 44)
+                liveButton.frame(width: 44, height: 44)
             }
+        }
+        .overlay { topMiddle }
+        .font(.title3)
+        .frame(height: Self.topBarHeight)
+        .padding(.horizontal, 12)
+        .background(camera.mode == .video ? Color.black.opacity(0.25) : .clear)
+    }
+
+    /// Flash for photos, the light for videos.
+    @ViewBuilder private var lightButton: some View {
+        if camera.mode == .photo {
             Button {
-                camera.timer = camera.timer == 0 ? 3 : camera.timer == 3 ? 10 : 0
+                let next: AppSettings.Flash =
+                    switch settings.flash {
+                    case .auto: .on
+                    case .on: .off
+                    case .off: .auto
+                    }
+                update { $0.flash = next }
             } label: {
-                Label(camera.timer == 0 ? "Off" : "\(camera.timer) s", systemImage: "timer")
+                Image(systemName: flashSymbol)
+                    .foregroundStyle(settings.flash == .on ? .yellow : .white)
+                    .frame(width: 44, height: 44)
             }
-            .accessibilityLabel(camera.timer == 0 ? "Self-timer off" : "Self-timer \(camera.timer) seconds")
-            .accessibilityIdentifier("timer")
+            .disabled(!state.hasFlash)
+            .accessibilityLabel("Flash \(settings.flash.rawValue)")
+            .accessibilityIdentifier("flash")
+        } else {
             Button {
-                update { $0.showGrid.toggle() }
+                camera.setTorch(!camera.torch)
             } label: {
-                Image(systemName: settings.showGrid ? "grid.circle.fill" : "grid.circle")
+                Image(systemName: camera.torch ? "flashlight.on.fill" : "flashlight.off.fill")
+                    .foregroundStyle(camera.torch ? .yellow : .white)
+                    .frame(width: 44, height: 44)
             }
-            .accessibilityLabel(settings.showGrid ? "Hide grid" : "Show grid")
-            .accessibilityIdentifier("grid")
-            Spacer()
-            if state.focusLocked {
-                Text("AE/AF LOCK")
-                    .font(.caption.bold())
-                    .padding(.horizontal, 6)
-                    .background(.yellow, in: .rect(cornerRadius: 4))
-                    .foregroundStyle(.black)
+            .disabled(!state.hasTorch)
+            .accessibilityLabel(camera.torch ? "Light on" : "Light off")
+            .accessibilityIdentifier("torch")
+        }
+    }
+
+    private var timerButton: some View {
+        Button {
+            camera.timer = camera.timer == 0 ? 3 : camera.timer == 3 ? 10 : 0
+        } label: {
+            HStack(spacing: 3) {
+                Image(systemName: "timer")
+                if camera.timer > 0 { Text("\(camera.timer)s").font(.footnote.bold().monospacedDigit()) }
             }
-            if let since = camera.recordingSince {
-                TimelineView(.periodic(from: since, by: 1)) { context in
-                    Text(
-                        Duration.seconds(context.date.timeIntervalSince(since)).formatted(.time(pattern: .minuteSecond))
-                    )
+            .foregroundStyle(camera.timer > 0 ? .yellow : .white)
+            .frame(minWidth: 44, minHeight: 44)
+        }
+        .accessibilityLabel(camera.timer == 0 ? "Self-timer off" : "Self-timer \(camera.timer) seconds")
+        .accessibilityIdentifier("timer")
+    }
+
+    private var gridButton: some View {
+        Button {
+            update { $0.showGrid.toggle() }
+        } label: {
+            Image(systemName: "grid")
+                .foregroundStyle(settings.showGrid ? .yellow : .white)
+                .frame(width: 44, height: 44)
+        }
+        .accessibilityLabel(settings.showGrid ? "Hide grid" : "Show grid")
+        .accessibilityIdentifier("grid")
+    }
+
+    /// Live Photos on or off; in its place for videos, so nothing moves.
+    @ViewBuilder private var liveButton: some View {
+        if camera.mode == .photo && state.canLive {
+            Button {
+                update { $0.livePhotos.toggle() }
+                camera.settingsChanged()
+            } label: {
+                Image(systemName: settings.livePhotos ? "livephoto" : "livephoto.slash")
+                    .foregroundStyle(settings.livePhotos ? .yellow : .white)
+                    .frame(width: 44, height: 44)
+            }
+            .accessibilityLabel(settings.livePhotos ? "Live Photo on" : "Live Photo off")
+            .accessibilityIdentifier("live")
+        } else {
+            Color.clear
+        }
+    }
+
+    /// The recording time while recording; for videos otherwise the format, to change it here.
+    @ViewBuilder private var topMiddle: some View {
+        if let since = camera.recordingSince {
+            TimelineView(.periodic(from: since, by: 1)) { context in
+                Text(Duration.seconds(context.date.timeIntervalSince(since)).formatted(.time(pattern: .minuteSecond)))
                     .font(.body.monospacedDigit())
                     .padding(.horizontal, 6)
                     .background(.red, in: .rect(cornerRadius: 4))
-                }
-                .accessibilityIdentifier("recording-time")
-            } else if camera.mode == .video, let format = state.videoFormat {
-                Text(format).font(.caption)
             }
+            .accessibilityIdentifier("recording-time")
+        } else if camera.mode == .video {
+            Menu {
+                Picker("Size", selection: videoSetting(\.videoResolution)) {
+                    Text("4K").tag(AppSettings.VideoResolution.uhd4K)
+                    Text("1080p").tag(AppSettings.VideoResolution.hd1080)
+                }
+                Picker("Frame rate", selection: videoSetting(\.videoFrameRate)) {
+                    Text("60 fps").tag(60)
+                    Text("30 fps").tag(30)
+                }
+                Toggle("HDR", isOn: videoSetting(\.videoHDR))
+            } label: {
+                Text(state.videoFormat ?? "Video")
+                    .font(.caption.bold())
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(.black.opacity(0.4), in: .capsule)
+            }
+            .accessibilityIdentifier("video-format")
         }
-        .font(.title3)
-        .padding(.horizontal, 20)
-        .padding(.top, 8)
+    }
+
+    /// A video setting changed right here; the camera takes it at once.
+    private func videoSetting<Value>(_ keyPath: WritableKeyPath<AppSettings, Value>) -> Binding<Value> {
+        Binding(
+            get: { settings[keyPath: keyPath] },
+            set: { value in
+                update { $0[keyPath: keyPath] = value }
+                camera.settingsChanged()
+            })
     }
 
     private var flashSymbol: String {
@@ -191,29 +278,123 @@ struct CameraScreen: View {
         }
     }
 
-    private var zoomButtons: some View {
-        HStack(spacing: 10) {
-            ForEach(state.presets, id: \.self) { preset in
-                let next = state.presets.first { $0 > preset + 0.01 } ?? .infinity
-                let active = state.zoom >= preset - 0.01 && state.zoom < next - 0.01
-                Button {
-                    camera.backend.zoom(to: preset, smoothly: true)
-                } label: {
-                    Text(active ? Self.zoomText(state.zoom) + "×" : Self.zoomText(preset))
-                        .font(.footnote.bold().monospacedDigit())
-                        .foregroundStyle(active ? .yellow : .white)
-                        .frame(width: active ? 44 : 34, height: active ? 44 : 34)
-                        .background(.black.opacity(0.45), in: .circle)
+    // MARK: Zoom
+
+    /// The lens buttons; dragged sideways they become a dial, like in Apple's camera.
+    private var zoomControl: some View {
+        let active = Zoom.activePreset(for: state.zoom, presets: state.presets)
+        return ZStack {
+            if dialShown {
+                ZoomDial(zoom: state.zoom, range: state.zoomRange, presets: state.presets)
+                    .transition(.opacity.combined(with: .scale(scale: 0.9, anchor: .bottom)))
+            } else {
+                HStack(spacing: 6) {
+                    ForEach(state.presets, id: \.self) { preset in
+                        let isActive = active == preset
+                        Button {
+                            camera.backend.zoom(to: preset, glide: true)
+                        } label: {
+                            Text(isActive ? Zoom.text(state.zoom) + "×" : Zoom.text(preset))
+                                .font(.system(size: 12, weight: .bold).monospacedDigit())
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.7)
+                                .foregroundStyle(isActive ? .yellow : .white)
+                                .frame(width: 38, height: 38)
+                                .background(.black.opacity(0.5), in: .circle)
+                                .scaleEffect(isActive ? 1 : 0.78)
+                        }
+                        .accessibilityLabel("Zoom \(Zoom.text(preset))")
+                        .accessibilityValue(isActive ? Zoom.text(state.zoom) + "×" : "")
+                        .accessibilityIdentifier("zoom-\(Zoom.text(preset))")
+                    }
                 }
-                .accessibilityLabel("Zoom \(Self.zoomText(preset))")
-                .accessibilityIdentifier("zoom-\(Self.zoomText(preset))")
+                .padding(4)
+                .background(.black.opacity(0.25), in: .capsule)
+                .animation(.snappy(duration: 0.25), value: active)
+                .transition(.opacity)
             }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .contentShape(.rect)
+        .highPriorityGesture(dialDrag)
+        .sensoryFeedback(.selection, trigger: active)
+        .animation(.easeOut(duration: 0.2), value: dialShown)
+        .task(id: dialTouches) {
+            // The dial goes away a moment after the finger left it.
+            guard dialShown, dialStart == nil else { return }
+            try? await Task.sleep(for: .seconds(1.2))
+            if !Task.isCancelled, dialStart == nil { dialShown = false }
         }
     }
 
-    static func zoomText(_ factor: Double) -> String {
-        let rounded = (factor * 10).rounded() / 10
-        return rounded == rounded.rounded() ? String(Int(rounded)) : String(format: "%.1f", rounded)
+    private var dialDrag: some Gesture {
+        DragGesture(minimumDistance: 10)
+            .onChanged { drag in
+                if dialStart == nil {
+                    dialStart = state.zoom
+                    dialShown = true
+                }
+                let zoom = Zoom.dialed(
+                    from: dialStart ?? state.zoom, points: -drag.translation.width, in: state.zoomRange)
+                camera.backend.zoom(to: zoom, glide: false)
+            }
+            .onEnded { _ in
+                dialStart = nil
+                dialTouches += 1
+            }
+    }
+
+    // MARK: Bottom
+
+    /// The modes, the chosen one in the middle; also changed by swiping over the picture.
+    private var modeStrip: some View {
+        let modes = CameraMode.strip
+        let chosen = Double(modes.firstIndex(of: camera.mode) ?? 0)
+        let middle = Double(modes.count - 1) / 2
+        let width = 86.0
+        return HStack(spacing: 0) {
+            ForEach(modes, id: \.self) { mode in
+                Button {
+                    camera.switchTo(mode)
+                } label: {
+                    Text(mode.title.uppercased())
+                        .font(.footnote.weight(.semibold))
+                        .foregroundStyle(mode == camera.mode ? .yellow : .white)
+                        .frame(width: width, height: 34)
+                }
+                .disabled(camera.recording)
+                .accessibilityAddTraits(mode == camera.mode ? .isSelected : [])
+                .accessibilityIdentifier("mode-\(mode.rawValue)")
+            }
+        }
+        .offset(x: (middle - chosen) * width)
+        .animation(.snappy(duration: 0.3), value: camera.mode)
+        .frame(maxWidth: .infinity)
+        .opacity(camera.recording ? 0 : 1)
+    }
+
+    private var shutterRow: some View {
+        HStack {
+            gallery()
+                .frame(width: 52, height: 52)
+                .opacity(camera.recording ? 0 : 1)
+            Spacer()
+            shutterButton
+            Spacer()
+            Button {
+                camera.backend.flip()
+            } label: {
+                Image(systemName: "arrow.triangle.2.circlepath")
+                    .font(.title3.weight(.semibold))
+                    .frame(width: 52, height: 52)
+                    .background(.white.opacity(0.15), in: .circle)
+            }
+            .disabled(!state.canFlip || camera.recording)
+            .opacity(camera.recording ? 0 : 1)
+            .accessibilityLabel("Switch camera")
+            .accessibilityIdentifier("flip-camera")
+        }
+        .padding(.horizontal, 28)
     }
 
     private var shutterButton: some View {
@@ -221,15 +402,16 @@ struct CameraScreen: View {
             camera.shutter()
         } label: {
             ZStack {
-                Circle().strokeBorder(.white, lineWidth: 4).frame(width: 74, height: 74)
+                Circle().strokeBorder(.white, lineWidth: 4).frame(width: 76, height: 76)
                 if camera.mode == .video {
                     RoundedRectangle(cornerRadius: camera.recording ? 6 : 30)
                         .fill(.red)
-                        .frame(width: camera.recording ? 30 : 60, height: camera.recording ? 30 : 60)
+                        .frame(width: camera.recording ? 30 : 62, height: camera.recording ? 30 : 62)
                 } else {
-                    Circle().fill(.white.opacity(0.9)).frame(width: 62, height: 62)
+                    Circle().fill(.white).frame(width: 64, height: 64)
                 }
             }
+            .animation(.snappy(duration: 0.25), value: camera.recording)
         }
         .disabled(!state.ready)
         .accessibilityLabel(
@@ -238,6 +420,73 @@ struct CameraScreen: View {
                 : camera.mode == .photo ? "Take a photo" : camera.recording ? "Stop recording" : "Record a video"
         )
         .accessibilityIdentifier("shutter")
+    }
+}
+
+extension CameraScreen where Gallery == EmptyView {
+    init(camera: CameraModel, settings: AppSettings, update: @escaping ((inout AppSettings) -> Void) -> Void) {
+        self.init(camera: camera, settings: settings, update: update) { EmptyView() }
+    }
+}
+
+extension CameraMode {
+    /// The order on the screen, as in Apple's camera.
+    static let strip: [CameraMode] = [.video, .photo]
+
+    var title: String {
+        switch self {
+        case .photo: "Photo"
+        case .video: "Video"
+        }
+    }
+}
+
+/// The zoom as a dial: marks in doublings, a long one with its number at every lens, the zoom
+/// now in the middle.
+struct ZoomDial: View {
+    let zoom: Double
+    let range: ClosedRange<Double>
+    let presets: [Double]
+
+    var body: some View {
+        let marks = Zoom.dialMarks(in: range, presets: presets)
+        VStack(spacing: 2) {
+            Text(Zoom.text(zoom) + "×")
+                .font(.footnote.bold().monospacedDigit())
+                .foregroundStyle(.yellow)
+            Canvas { context, size in
+                let middle = size.width / 2
+                for mark in marks {
+                    let x = middle + Zoom.dialOffset(of: mark.value, current: zoom)
+                    guard x > -20, x < size.width + 20 else { continue }
+                    var line = Path()
+                    line.move(to: CGPoint(x: x, y: mark.major ? 2 : 8))
+                    line.addLine(to: CGPoint(x: x, y: 18))
+                    context.stroke(line, with: .color(.white.opacity(mark.major ? 1 : 0.55)), lineWidth: 1)
+                    if mark.major {
+                        context.draw(
+                            Text(Zoom.text(mark.value)).font(.caption2.bold()).foregroundStyle(.white),
+                            at: CGPoint(x: x, y: 30))
+                    }
+                }
+                var pointer = Path()
+                pointer.move(to: CGPoint(x: middle, y: 0))
+                pointer.addLine(to: CGPoint(x: middle, y: 20))
+                context.stroke(pointer, with: .color(.yellow), lineWidth: 2)
+            }
+            .frame(height: 40)
+            .mask(
+                LinearGradient(
+                    stops: [
+                        .init(color: .clear, location: 0), .init(color: .black, location: 0.2),
+                        .init(color: .black, location: 0.8), .init(color: .clear, location: 1),
+                    ], startPoint: .leading, endPoint: .trailing))
+        }
+        .background(.black.opacity(0.35), in: .rect(cornerRadius: 10))
+        .padding(.horizontal, 24)
+        .accessibilityElement()
+        .accessibilityLabel("Zoom \(Zoom.text(zoom))")
+        .accessibilityIdentifier("zoom-dial")
     }
 }
 
@@ -258,14 +507,16 @@ struct ThirdsGrid: View {
     }
 }
 
-/// Puts the camera's picture on screen and turns touches into focus and zoom: tap to focus,
-/// hold to lock focus and exposure, pinch to zoom.
+/// Puts the camera's picture on screen and turns touches into focus, zoom and mode: tap to focus,
+/// hold to lock focus and exposure, pinch to zoom, swipe sideways for the next mode.
 struct CameraPreviewHost: UIViewRepresentable {
     let preview: UIView
     let tap: (CGPoint) -> Void
     let hold: (CGPoint) -> Void
     /// The scale since the pinch began, and whether it just began.
     let pinch: (Double, Bool) -> Void
+    /// A swipe sideways: `true` towards the left.
+    let swipe: (Bool) -> Void
 
     func makeUIView(context: Context) -> UIView {
         let host = UIView()
@@ -280,6 +531,11 @@ struct CameraPreviewHost: UIViewRepresentable {
         host.addGestureRecognizer(press)
         host.addGestureRecognizer(
             UIPinchGestureRecognizer(target: coordinator, action: #selector(Coordinator.pinched(_:))))
+        for direction in [UISwipeGestureRecognizer.Direction.left, .right] {
+            let swipe = UISwipeGestureRecognizer(target: coordinator, action: #selector(Coordinator.swiped(_:)))
+            swipe.direction = direction
+            host.addGestureRecognizer(swipe)
+        }
         return host
     }
 
@@ -307,6 +563,10 @@ struct CameraPreviewHost: UIViewRepresentable {
 
         @objc func held(_ gesture: UILongPressGestureRecognizer) {
             if gesture.state == .began { parent.hold(gesture.location(in: gesture.view)) }
+        }
+
+        @objc func swiped(_ gesture: UISwipeGestureRecognizer) {
+            parent.swipe(gesture.direction == .left)
         }
 
         @objc func pinched(_ gesture: UIPinchGestureRecognizer) {

@@ -113,6 +113,26 @@ import Testing
         #expect(retried.state == "waiting" && retried.attempts == 0 && retried.retryAt == 0)
     }
 
+    /// A Live Photo is one photo in the count, though it is two files.
+    @Test func aLivePhotoCountsAsOne() throws {
+        let (database, files, root) = try world()
+        defer { try? FileManager.default.removeItem(at: root) }
+        try add("live", kind: "photo", at: 10, database, files)
+        try Data(repeating: 3, count: 50).write(to: files.original("live-live.mov"))
+        try Uploader.enqueuePairedVideo(
+            database: database, files: files, assetId: "live", fileName: "live-live.mov", mimeType: "video/quicktime")
+        try database.setMeta("uploadRound", Data("0".utf8))
+        #expect(try database.uploadSummary().total == 1)
+        try database.writer.write { db in
+            try db.execute(sql: "UPDATE upload SET state = 'done' WHERE role = 'original'")
+        }
+        #expect(try database.uploadSummary().done == 0, "only once the video is there too")
+        try database.writer.write { db in try db.execute(sql: "UPDATE upload SET state = 'done'") }
+        let summary = try database.uploadSummary()
+        #expect(summary.done == 1 && summary.bytesTotal == summary.bytesSent)
+        #expect(try database.asset("live")?.isLivePhoto == true)
+    }
+
     /// A round starts when something is added to an empty queue.
     @Test func aNewRoundStartsAfterTheQueueRanEmpty() throws {
         let (database, files, root) = try world()

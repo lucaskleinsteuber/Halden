@@ -250,7 +250,12 @@ final class GridCell: UICollectionViewCell {
             state = "not backed up yet"
         }
         if asset.isVideo, let ms = asset.durationMs {
+            duration.attributedText = nil
             duration.text = Duration.milliseconds(ms).formatted(.time(pattern: .minuteSecond))
+            duration.isHidden = false
+        } else if asset.isLivePhoto, let symbol = UIImage(systemName: "livephoto") {
+            duration.attributedText = NSAttributedString(
+                attachment: NSTextAttachment(image: symbol.withTintColor(.white, renderingMode: .alwaysOriginal)))
             duration.isHidden = false
         } else {
             duration.isHidden = true

@@ -132,11 +132,14 @@
                 originalFilename: resource.originalFilename)
         }
 
-        public func save(_ file: URL, kind: PhotoItem.Kind) async throws -> String {
+        public func save(_ file: URL, kind: PhotoItem.Kind, pairedVideo: URL?) async throws -> String {
             let created = Created()
             try await PHPhotoLibrary.shared().performChanges {
                 let request = PHAssetCreationRequest.forAsset()
                 request.addResource(with: kind == .video ? .video : .photo, fileURL: file, options: nil)
+                if let pairedVideo, kind == .photo {
+                    request.addResource(with: .pairedVideo, fileURL: pairedVideo, options: nil)
+                }
                 created.identifier = request.placeholderForCreatedAsset?.localIdentifier
             }
             guard let identifier = created.identifier else { throw CocoaError(.fileWriteUnknown) }

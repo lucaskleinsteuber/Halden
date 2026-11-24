@@ -177,4 +177,67 @@ import UniformTypeIdentifiers
         #expect(try LockedCaptures.takeOver(from: session, database: database, files: files) == 0)
         #expect(try FileManager.default.contentsOfDirectory(atPath: session.path) == ["half.heic"])
     }
+
+    /// A Live Photo from the lock screen comes in with its video, sent after the photo.
+    @Test func aLivePhotoFromTheLockScreenKeepsItsVideo() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let session = root.appendingPathComponent("session")
+        try FileManager.default.createDirectory(at: session, withIntermediateDirectories: true)
+        let files = try FileLocations(
+            root: root.appendingPathComponent("app"), caches: root.appendingPathComponent("caches"))
+        let database = try HaldenDatabase()
+        let movie = root.appendingPathComponent("live.mov")
+        try await SampleMedia.video(at: movie, seed: 3, seconds: 0.5)
+        try LockedCaptures.save(
+            photo: try #require(SampleMedia.photo(seed: 3, width: 64, height: 48)), heic: false, liveVideo: movie,
+            metadata: UploadMetadata(takenAt: 7), into: session)
+        #expect(try LockedCaptures.takeOver(from: session, database: database, files: files) == 1)
+        let asset = try #require(try database.library().first)
+        #expect(asset.isLivePhoto)
+        let video = try #require(asset.pairedVideoFile)
+        #expect(FileManager.default.fileExists(atPath: files.original(video).path))
+        #expect(try database.pendingUploads().map(\.role) == ["original", "paired_video"])
+        #expect(try FileManager.default.contentsOfDirectory(atPath: session.path).isEmpty)
+    }
+}
+
+@Suite struct ZoomTests {
+    /// A lens button takes about the same time however far it goes.
+    @Test func aGlideTakesTheSameTimeForAnyDistance() {
+        #expect(abs(Zoom.glideRate(from: 1, to: 2) - Float(1 / 0.3)) < 0.001)
+        #expect(abs(Zoom.glideRate(from: 2, to: 0.5) - Float(2 / 0.3)) < 0.001)
+        #expect(Zoom.glideRate(from: 1, to: 1) == 0.25)
+        #expect(Zoom.glideRate(from: 0, to: 2) == 1)
+    }
+
+    @Test func pinchAndDialWorkInDoublingsWithinTheRange() {
+        let range = 0.5...10.0
+        #expect(Zoom.pinched(from: 1, scale: 2, in: range) == 2)
+        #expect(Zoom.pinched(from: 1, scale: 0.1, in: range) == 0.5)
+        #expect(Zoom.pinched(from: 4, scale: 5, in: range) == 10)
+        #expect(abs(Zoom.dialed(from: 1, points: Zoom.dialPointsPerDoubling, in: range) - 2) < 0.0001)
+        #expect(abs(Zoom.dialed(from: 2, points: -2 * Zoom.dialPointsPerDoubling, in: range) - 0.5) < 0.0001)
+        #expect(Zoom.dialOffset(of: 2, current: 1) == Zoom.dialPointsPerDoubling)
+        #expect(Zoom.dialOffset(of: 1, current: 1) == 0)
+    }
+
+    @Test func theDialHasALongMarkAtEveryLens() {
+        let marks = Zoom.dialMarks(in: 0.5...10, presets: [0.5, 1, 2])
+        #expect(marks.first == DialMark(value: 0.5, major: true))
+        #expect(marks.last?.value == 10)
+        #expect(marks.filter(\.major).map(\.value) == [0.5, 1, 2])
+        #expect(marks.contains { abs($0.value - 1.5) < 0.001 } && !marks.contains { abs($0.value - 2.1) < 0.001 })
+        #expect(marks.contains { abs($0.value - 2.5) < 0.001 })
+        // A lens between the steps still gets its mark.
+        #expect(Zoom.dialMarks(in: 1...10, presets: [1, 2, 3.3]).contains(DialMark(value: 3.3, major: true)))
+    }
+
+    @Test func theActiveButtonAndTheText() {
+        #expect(Zoom.activePreset(for: 1.4, presets: [0.5, 1, 2]) == 1)
+        #expect(Zoom.activePreset(for: 0.7, presets: [0.5, 1, 2]) == 0.5)
+        #expect(Zoom.activePreset(for: 6, presets: [0.5, 1, 2]) == 2)
+        #expect(Zoom.activePreset(for: 0.99999, presets: [0.5, 1, 2]) == 1)
+        #expect(Zoom.text(0.5) == "0.5" && Zoom.text(1) == "1" && Zoom.text(2.44) == "2.4" && Zoom.text(9.96) == "10")
+    }
 }

@@ -30,11 +30,61 @@ final class HaldenUITests: XCTestCase {
         XCTAssertTrue(app.descendants(matching: .any)["empty-library"].waitForExistence(timeout: 5))
         tabs.buttons["Settings"].tap()
         XCTAssertTrue(app.navigationBars["Settings"].waitForExistence(timeout: 5))
+        for page in ["upload-settings", "camera-settings", "place-settings", "photos-settings", "storage-settings"] {
+            app.buttons[page].tap()
+            XCTAssertTrue(app.navigationBars.element(boundBy: 0).buttons.firstMatch.waitForExistence(timeout: 5), page)
+            app.navigationBars.buttons.firstMatch.tap()
+            XCTAssertTrue(app.navigationBars["Settings"].waitForExistence(timeout: 5), page)
+        }
+        app.buttons["server-account"].tap()
         let signOut = app.buttons["sign-out"]
         for _ in 0..<6 where !signOut.exists { app.swipeUp() }
         XCTAssertTrue(signOut.exists)
         tabs.buttons["Camera"].tap()
         XCTAssertTrue(app.buttons["shutter"].waitForExistence(timeout: 5))
+    }
+
+    /// The lens buttons glide, dragging them gives the dial, swiping over the picture changes
+    /// the mode, and the video format can be changed right on the camera.
+    @MainActor
+    func testTheCameraZoomsAndChangesMode() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-ui-testing-signed-in"]
+        app.launch()
+        let two = app.buttons["zoom-2"]
+        XCTAssertTrue(two.waitForExistence(timeout: 10))
+        let live = app.buttons["live"]
+        XCTAssertEqual(live.label, "Live Photo on")
+        live.tap()
+        XCTAssertEqual(live.label, "Live Photo off")
+        live.tap()
+        XCTAssertEqual(live.label, "Live Photo on")
+        XCTAssertEqual(app.buttons["zoom-1"].value as? String, "1×")
+        two.tap()
+        expectation(for: NSPredicate(format: "value == '2×'"), evaluatedWith: two)
+        waitForExpectations(timeout: 5)
+
+        // Dragged sideways, the buttons become a dial; to the right zooms out.
+        let start = two.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+        start.press(forDuration: 0.05, thenDragTo: start.withOffset(CGVector(dx: 160, dy: 0)))
+        XCTAssertTrue(app.descendants(matching: .any)["zoom-dial"].exists, "the dial shows while and after dragging")
+        let dial = app.descendants(matching: .any)["zoom-dial"]
+        XCTAssertTrue(dial.waitForNonExistence(timeout: 5), "and goes away again")
+        let zoomedOut = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'zoom-' AND value != ''"))
+            .firstMatch
+        XCTAssertNotEqual(zoomedOut.value as? String, "2×", "the dial zoomed out")
+
+        let preview = app.descendants(matching: .any)["camera-preview"]
+        preview.swipeRight()
+        XCTAssertTrue(app.buttons["Record a video"].waitForExistence(timeout: 5), "swiped to video")
+        XCTAssertTrue(app.buttons["mode-video"].isSelected)
+        XCTAssertTrue(app.buttons["video-format"].waitForExistence(timeout: 5))
+        app.buttons["video-format"].tap()
+        app.buttons["1080p"].firstMatch.tap()
+        expectation(for: NSPredicate(format: "label BEGINSWITH '1080p'"), evaluatedWith: app.buttons["video-format"])
+        waitForExpectations(timeout: 5)
+        preview.swipeLeft()
+        XCTAssertTrue(app.buttons["Take a photo"].waitForExistence(timeout: 5), "swiped back to photo")
     }
 
     /// Fifty thousand photos scroll without waiting for pictures.
@@ -104,7 +154,7 @@ final class HaldenUITests: XCTestCase {
         app.buttons["timer"].tap()
         XCTAssertEqual(app.buttons["timer"].label, "Self-timer off")
 
-        app.segmentedControls["camera-mode"].buttons["Video"].tap()
+        app.buttons["mode-video"].tap()
         XCTAssertTrue(app.buttons["Record a video"].waitForExistence(timeout: 5))
         shutter.tap()
         XCTAssertTrue(app.descendants(matching: .any)["recording-time"].waitForExistence(timeout: 5))
@@ -125,10 +175,14 @@ final class HaldenUITests: XCTestCase {
         XCTAssertGreaterThanOrEqual(photos.count, 2, "both photos are on the server")
         XCTAssertGreaterThanOrEqual(videos.count, 1, "the video is on the server")
 
+        // The newest one opens from the camera.
+        tabs.buttons["Camera"].tap()
+        app.buttons["last-photo"].tap()
+        XCTAssertTrue(app.buttons["close-photo"].waitForExistence(timeout: 10), "the last photo full screen")
+        app.buttons["close-photo"].tap()
+
         tabs.buttons["Settings"].tap()
-        let uploads = app.buttons["uploads"]
-        for _ in 0..<6 where !uploads.isHittable { app.swipeUp() }
-        uploads.tap()
+        app.buttons["uploads"].tap()
         let round = app.descendants(matching: .any)
             .matching(NSPredicate(format: "label CONTAINS '3 of 3 uploaded' OR value CONTAINS '3 of 3 uploaded'"))
             .firstMatch
@@ -164,6 +218,8 @@ final class HaldenUITests: XCTestCase {
         waitForExpectations(timeout: 60)
         newest.tap()
 
+        // Photos are Live Photos by default.
+        XCTAssertTrue(app.descendants(matching: .any)["live-badge"].waitForExistence(timeout: 10), "a Live Photo")
         XCTAssertTrue(app.buttons["info"].waitForExistence(timeout: 10))
         app.buttons["info"].tap()
         XCTAssertTrue(app.buttons["correct"].waitForExistence(timeout: 5))
@@ -255,12 +311,13 @@ final class HaldenUITests: XCTestCase {
         let tabs = app.tabBars.firstMatch
         XCTAssertTrue(tabs.waitForExistence(timeout: 60), "signed in")
         tabs.buttons["Settings"].tap()
+        app.buttons["photos-settings"].tap()
         let start = app.buttons["import-photos"]
         for _ in 0..<8 where !start.isHittable { app.swipeUp() }
         start.tap()
         // Should the system ask for the photos, the answer comes with the next touch (one that
         // changes nothing on the screen).
-        app.navigationBars["Settings"].tap()
+        app.navigationBars["Apple Photos"].staticTexts.firstMatch.tap()
         let status = app.staticTexts["photos-import-status"]
         XCTAssertTrue(status.waitForExistence(timeout: 10))
         expectation(for: NSPredicate(format: "label BEGINSWITH 'Everything from before'"), evaluatedWith: status)
@@ -293,12 +350,14 @@ final class HaldenUITests: XCTestCase {
         tabs.buttons["Settings"].tap()
         let back = { app.navigationBars.buttons.firstMatch.tap() }
 
+        app.buttons["server-account"].tap()
         app.buttons["devices"].tap()
         XCTAssertTrue(app.staticTexts["this iPhone"].waitForExistence(timeout: 10), "this iPhone is listed")
         back()
         app.buttons["pair-device"].tap()
         XCTAssertTrue(app.images["pairing-qr"].waitForExistence(timeout: 10))
         XCTAssertTrue(app.staticTexts["pairing-code"].exists)
+        back()
         back()
 
         let admin = app.buttons["admin"]

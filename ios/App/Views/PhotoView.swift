@@ -83,7 +83,7 @@ struct PhotoView: View {
                 )
             }
             .sheet(isPresented: $showInfo) { InfoView(id: current) }
-            .sheet(item: $sharing) { file in ShareSheet(items: [file.url]) }
+            .sheet(item: $sharing) { file in ShareSheet(items: file.urls) }
             .alert("Can't share", isPresented: .constant(problem != nil)) {
                 Button("OK") { problem = nil }
             } message: {
@@ -97,7 +97,7 @@ struct PhotoView: View {
         Task {
             defer { preparing = false }
             do {
-                sharing = SharedFile(url: try await app.fileToShare(asset, as: kind))
+                sharing = SharedFile(urls: try await app.filesToShare(asset, as: kind))
             } catch let error as APIError where error.status == 404 {
                 problem = "There is no copy in the preferred format. Choose one in Settings › Formats."
             } catch {
@@ -107,9 +107,10 @@ struct PhotoView: View {
     }
 }
 
+/// One file to share, or a Live Photo's photo and video.
 struct SharedFile: Identifiable {
-    let url: URL
-    var id: URL { url }
+    let urls: [URL]
+    var id: [URL] { urls }
 }
 
 /// The system's share sheet.

@@ -143,6 +143,18 @@ public final class HaldenDatabase: Sendable {
             try db.drop(table: "upload")
             try db.rename(table: "upload_new", to: "upload")
         }
+        migrator.registerMigration("4: Live Photos") { db in
+            try db.alter(table: "asset") { t in
+                // A Live Photo's video: its file on this iPhone, and its hash once on the server.
+                t.add(column: "pairedVideoFile", .text)
+                t.add(column: "pairedVideoSha256", .text)
+            }
+            try db.execute(
+                sql: """
+                    UPDATE asset SET pairedVideoFile = (
+                        SELECT file FROM upload WHERE upload.assetId = asset.id AND role = 'paired_video')
+                    """)
+        }
         return migrator
     }
 }
@@ -191,8 +203,12 @@ public struct LocalAsset: Codable, Sendable, Equatable, Identifiable, FetchableR
     public var heading: Double?
     public var locationSource: String?
     public var origin: String?
+    public var pairedVideoFile: String?
+    public var pairedVideoSha256: String?
 
     public var isVideo: Bool { kind == "video" }
+    /// A photo with a short video, taken as one.
+    public var isLivePhoto: Bool { !isVideo && (pairedVideoFile != nil || pairedVideoSha256 != nil) }
     public var hasLocation: Bool { latitude != nil && longitude != nil }
 
     public init(

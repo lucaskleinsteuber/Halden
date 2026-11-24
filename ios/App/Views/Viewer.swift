@@ -1,6 +1,7 @@
 import AVFoundation
 import AVKit
 import HaldenKit
+import PhotosUI
 import SwiftUI
 import UIKit
 
@@ -80,8 +81,8 @@ struct ViewerPager: UIViewControllerRepresentable {
     }
 }
 
-/// One photo or video, full screen.
-final class PageController: UIViewController, UIScrollViewDelegate {
+/// One photo or video, full screen. A Live Photo plays while it is held.
+final class PageController: UIViewController, UIScrollViewDelegate, PHLivePhotoViewDelegate {
     let asset: LocalAsset
     let app: AppModel
     private let scroll = UIScrollView()
@@ -89,6 +90,8 @@ final class PageController: UIViewController, UIScrollViewDelegate {
     private var player: AVPlayerViewController?
     private var loading: Task<Void, Never>?
     private var hasOriginal = false
+    private var liveView: PHLivePhotoView?
+    private var liveLoading: Task<PHLivePhoto?, Never>?
 
     init(asset: LocalAsset, app: AppModel) {
         self.asset = asset
@@ -119,6 +122,7 @@ final class PageController: UIViewController, UIScrollViewDelegate {
         let doubleTap = UITapGestureRecognizer(target: self, action: #selector(zoom(_:)))
         doubleTap.numberOfTapsRequired = 2
         scroll.addGestureRecognizer(doubleTap)
+        if asset.isLivePhoto { addLive() }
         // The thumbnail at once, if it is decoded already.
         if let small = app.pipeline.cached(asset, pixels: 512) ?? app.pipeline.cached(asset, pixels: 300) {
             imageView.image = UIImage(cgImage: small.cgImage)
@@ -164,6 +168,98 @@ final class PageController: UIViewController, UIScrollViewDelegate {
         UIView.transition(with: imageView, duration: 0.2, options: .transitionCrossDissolve) {
             self.imageView.image = new
         }
+    }
+
+    // MARK: Live Photos
+
+    private func addLive() {
+        let live = PHLivePhotoView(frame: imageView.bounds)
+        live.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        live.contentMode = .scaleAspectFit
+        live.isUserInteractionEnabled = false
+        live.alpha = 0
+        live.delegate = self
+        imageView.addSubview(live)
+        liveView = live
+        let press = UILongPressGestureRecognizer(target: self, action: #selector(held(_:)))
+        press.minimumPressDuration = 0.25
+        scroll.addGestureRecognizer(press)
+
+        let badge = UILabel()
+        let symbol = NSAttributedString(
+            attachment: NSTextAttachment(
+                image: UIImage(systemName: "livephoto")!.withTintColor(.label, renderingMode: .alwaysOriginal)))
+        let text = NSMutableAttributedString(attributedString: symbol)
+        text.append(
+            NSAttributedString(string: " LIVE", attributes: [.font: UIFont.systemFont(ofSize: 12, weight: .semibold)]))
+        badge.attributedText = text
+        badge.backgroundColor = .systemBackground.withAlphaComponent(0.7)
+        badge.layer.cornerRadius = 6
+        badge.clipsToBounds = true
+        badge.textAlignment = .center
+        badge.translatesAutoresizingMaskIntoConstraints = false
+        badge.accessibilityLabel = "Live Photo, touch and hold to play"
+        badge.accessibilityIdentifier = "live-badge"
+        view.addSubview(badge)
+        NSLayoutConstraint.activate([
+            badge.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor, constant: 12),
+            badge.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 8),
+            badge.widthAnchor.constraint(equalToConstant: 62),
+            badge.heightAnchor.constraint(equalToConstant: 24),
+        ])
+    }
+
+    @objc private func held(_ gesture: UILongPressGestureRecognizer) {
+        switch gesture.state {
+        case .began:
+            Task { [weak self] in
+                guard let self, let live = await self.loadLive(), gesture.state == .began || gesture.state == .changed
+                else { return }
+                self.liveView?.livePhoto = live
+                self.liveView?.startPlayback(with: .full)
+            }
+        case .ended, .cancelled, .failed:
+            liveView?.stopPlayback()
+        default:
+            break
+        }
+    }
+
+    /// The photo and its video, on this iPhone or fetched once, put together as a Live Photo.
+    private func loadLive() async -> PHLivePhoto? {
+        if let liveLoading { return await liveLoading.value }
+        let task = Task { [asset, app, placeholder = imageView.image] () -> PHLivePhoto? in
+            guard let photo = try? await app.media.original(of: asset),
+                let video = try? await app.media.pairedVideo(of: asset)
+            else { return nil }
+            return await withCheckedContinuation { continuation in
+                let once = Once()
+                PHLivePhoto.request(
+                    withResourceFileURLs: [photo, video], placeholderImage: placeholder, targetSize: .zero,
+                    contentMode: .aspectFit
+                ) { live, info in
+                    let degraded = info[PHLivePhotoInfoIsDegradedKey] as? Bool ?? false
+                    let failed = info[PHLivePhotoInfoErrorKey] != nil || info[PHLivePhotoInfoCancelledKey] != nil
+                    guard failed || (live != nil && !degraded) else { return }
+                    if once.first() { continuation.resume(returning: failed ? nil : live) }
+                }
+            }
+        }
+        liveLoading = task
+        let live = await task.value
+        if live == nil { liveLoading = nil }
+        return live
+    }
+
+    func livePhotoView(
+        _ livePhotoView: PHLivePhotoView, willBeginPlaybackWith playbackStyle: PHLivePhotoViewPlaybackStyle
+    ) {
+        livePhotoView.alpha = 1
+    }
+
+    func livePhotoView(_ livePhotoView: PHLivePhotoView, didEndPlaybackWith playbackStyle: PHLivePhotoViewPlaybackStyle)
+    {
+        UIView.animate(withDuration: 0.2) { livePhotoView.alpha = 0 }
     }
 
     private func startVideo() {
@@ -214,6 +310,19 @@ final class PageController: UIViewController, UIScrollViewDelegate {
                 to: CGRect(
                     x: point.x - size.width / 2, y: point.y - size.height / 2, width: size.width, height: size.height),
                 animated: true)
+        }
+    }
+}
+
+/// True the first time only: for callbacks that may come more than once.
+final class Once: @unchecked Sendable {
+    private let lock = NSLock()
+    private var done = false
+
+    func first() -> Bool {
+        lock.withLock {
+            defer { done = true }
+            return !done
         }
     }
 }

@@ -10,21 +10,23 @@ import UIKit
 final class StandInCamera: CaptureBackend {
     private(set) var state = CameraState(
         ready: true, side: .back, canFlip: true, presets: [0.5, 1, 2], zoom: 1, zoomRange: 0.5...10,
-        hasFlash: true, hasTorch: true)
+        hasFlash: true, hasTorch: true, canLive: true)
     @ObservationIgnored let previewView: UIView = StandInPreview()
     @ObservationIgnored private var taken = 0
     @ObservationIgnored private var recording: (request: VideoRequest, started: Date)?
     @ObservationIgnored private var mode = CameraMode.photo
+    @ObservationIgnored private var gliding: Task<Void, Never>?
 
-    func prepare(mode: CameraMode, video: VideoOptions) {
+    func prepare(mode: CameraMode, options video: CaptureOptions) {
         self.mode = mode
     }
 
     func start() {}
     func stop() {}
 
-    func setMode(_ mode: CameraMode, video: VideoOptions) {
+    func setMode(_ mode: CameraMode, options video: CaptureOptions) {
         self.mode = mode
+        state.canLive = mode == .photo
         state.videoFormat =
             mode == .video ? "\(video.resolution == .uhd4K ? "4K" : "1080p") · \(video.frameRate) fps" : nil
     }
@@ -37,8 +39,23 @@ final class StandInCamera: CaptureBackend {
         state.hasFlash = state.side == .back
     }
 
-    func zoom(to factor: Double, smoothly: Bool) {
-        state.zoom = min(max(factor, state.zoomRange.lowerBound), state.zoomRange.upperBound)
+    /// Glides like the real camera, in doublings, so the screen can be tried in the simulator.
+    func zoom(to factor: Double, glide: Bool) {
+        let target = min(max(factor, state.zoomRange.lowerBound), state.zoomRange.upperBound)
+        gliding?.cancel()
+        guard glide else {
+            state.zoom = target
+            return
+        }
+        let start = state.zoom
+        gliding = Task { [weak self] in
+            let steps = 18
+            for step in 1...steps {
+                try? await Task.sleep(for: .seconds(Zoom.glideSeconds / Double(steps)))
+                if Task.isCancelled { return }
+                self?.state.zoom = start * pow(target / start, Double(step) / Double(steps))
+            }
+        }
     }
 
     func focus(at point: CGPoint, lock: Bool) {
@@ -58,7 +75,12 @@ final class StandInCamera: CaptureBackend {
         let seed = nextSeed()
         let data = await Task.detached { SampleMedia.photo(seed: seed) }.value
         guard let data else { return nil }
-        return TakenPhoto(data: data, heic: false, width: 1600, height: 1200)
+        var photo = TakenPhoto(data: data, heic: false, width: 1600, height: 1200)
+        if request.live {
+            let movie = FileManager.default.temporaryDirectory.appendingPathComponent("\(UUID().uuidString).mov")
+            if (try? await SampleMedia.video(at: movie, seed: seed, seconds: 1)) != nil { photo.liveVideo = movie }
+        }
+        return photo
     }
 
     func startRecording(_ request: VideoRequest) -> Bool {

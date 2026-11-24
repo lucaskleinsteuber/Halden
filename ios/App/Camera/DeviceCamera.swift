@@ -16,9 +16,11 @@ final class DeviceCamera: CaptureBackend {
     @ObservationIgnored private let core = CaptureCore()
     @ObservationIgnored private var rotation: AVCaptureDevice.RotationCoordinator?
     @ObservationIgnored private var rotationObservation: NSKeyValueObservation?
+    @ObservationIgnored private var zoomObservation: NSKeyValueObservation?
+    @ObservationIgnored private var zoomRelay: Relay<Double>?
     @ObservationIgnored private var configured = false
     @ObservationIgnored private var mode = CameraMode.photo
-    @ObservationIgnored private var video: VideoOptions?
+    @ObservationIgnored private var video: CaptureOptions?
 
     init() {
         preview.previewLayer.session = core.session
@@ -26,11 +28,12 @@ final class DeviceCamera: CaptureBackend {
         core.changed = { [weak self] state, device in
             Task { @MainActor in self?.update(state, device: device?.value) }
         }
+        zoomRelay = Relay { [weak self] zoom in self?.state.zoom = zoom }
     }
 
     static var allowed: Bool { AVCaptureDevice.authorizationStatus(for: .video) == .authorized }
 
-    func prepare(mode: CameraMode, video: VideoOptions) {
+    func prepare(mode: CameraMode, options video: CaptureOptions) {
         self.mode = mode
         self.video = video
         guard Self.allowed else { return }
@@ -54,6 +57,13 @@ final class DeviceCamera: CaptureBackend {
             default:
                 return denied()
             }
+            // Live Photos have sound, like videos.
+            if video?.live == true, AVCaptureDevice.authorizationStatus(for: .audio) == .notDetermined {
+                if await AVCaptureDevice.requestAccess(for: .audio), let video {
+                    let mode = mode
+                    core.run { $0.change(mode: mode, video: video) }
+                }
+            }
             configureOnce()
             core.run { $0.startRunning() }
         }
@@ -67,12 +77,12 @@ final class DeviceCamera: CaptureBackend {
         core.run { $0.stopRunning() }
     }
 
-    func setMode(_ mode: CameraMode, video: VideoOptions) {
+    func setMode(_ mode: CameraMode, options video: CaptureOptions) {
         self.mode = mode
         self.video = video
         Task {
-            // Sound for videos; without the microphone they are recorded silent.
-            if mode == .video, AVCaptureDevice.authorizationStatus(for: .audio) == .notDetermined {
+            // Sound for videos and Live Photos; without the microphone they are silent.
+            if mode == .video || video.live, AVCaptureDevice.authorizationStatus(for: .audio) == .notDetermined {
                 _ = await AVCaptureDevice.requestAccess(for: .audio)
             }
             core.run { $0.change(mode: mode, video: video) }
@@ -85,9 +95,10 @@ final class DeviceCamera: CaptureBackend {
         core.run { $0.configure(side: side, mode: mode, video: video) }
     }
 
-    func zoom(to factor: Double, smoothly: Bool) {
-        state.zoom = min(max(factor, state.zoomRange.lowerBound), state.zoomRange.upperBound)
-        core.run { $0.zoom(to: factor, smoothly: smoothly) }
+    /// The zoom shown follows the camera itself (see `update`), so it moves along with a glide
+    /// instead of jumping to where it is going.
+    func zoom(to factor: Double, glide: Bool) {
+        core.run { $0.zoom(to: factor, glide: glide) }
     }
 
     func focus(at point: CGPoint, lock: Bool) {
@@ -125,8 +136,12 @@ final class DeviceCamera: CaptureBackend {
     }
 
     private func update(_ new: CameraState, device: AVCaptureDevice?) {
+        var new = new
+        // The zoom comes from the camera as it changes (below); a state sent before that is older.
+        if device == nil { new.zoom = state.zoom }
         state = new
         guard let device, device !== rotation?.device else { return }
+        if let zoomRelay { zoomObservation = Self.follow(zoomOf: device, into: zoomRelay) }
         let coordinator = AVCaptureDevice.RotationCoordinator(device: device, previewLayer: preview.previewLayer)
         rotation = coordinator
         rotationObservation = coordinator.observe(
@@ -139,6 +154,17 @@ final class DeviceCamera: CaptureBackend {
                 else { return }
                 connection.videoRotationAngle = angle
             }
+        }
+    }
+
+    /// Sends the zoom as shown (0.5, 1, 2, …) whenever the camera's zoom changes: every frame of
+    /// a glide, on whichever thread the camera changes it (so not isolated to the main actor).
+    nonisolated private static func follow(zoomOf device: AVCaptureDevice, into relay: Relay<Double>)
+        -> NSKeyValueObservation
+    {
+        let multiplier = Double(device.displayVideoZoomFactorMultiplier)
+        return device.observe(\.videoZoomFactor, options: [.initial, .new]) { @Sendable device, change in
+            relay.send(Double(change.newValue ?? device.videoZoomFactor) * multiplier)
         }
     }
 
@@ -155,6 +181,33 @@ struct Carry<Value>: @unchecked Sendable {
     let value: Value
 }
 
+/// Hands values that come fast, from any thread, to the main thread: only the newest one, at
+/// most once per turn of the main thread.
+final class Relay<Value: Sendable>: @unchecked Sendable {
+    private let lock = NSLock()
+    private var latest: Value?
+    private let deliver: @MainActor (Value) -> Void
+
+    init(_ deliver: @escaping @MainActor (Value) -> Void) {
+        self.deliver = deliver
+    }
+
+    func send(_ value: Value) {
+        let waiting = lock.withLock {
+            defer { latest = value }
+            return latest != nil
+        }
+        guard !waiting else { return }
+        Task { @MainActor in
+            let value = self.lock.withLock {
+                defer { self.latest = nil }
+                return self.latest
+            }
+            if let value { self.deliver(value) }
+        }
+    }
+}
+
 /// Everything that touches AVFoundation. Only ever used on `queue` (that is what makes the
 /// `@unchecked Sendable` true).
 final class CaptureCore: NSObject, @unchecked Sendable {
@@ -165,7 +218,7 @@ final class CaptureCore: NSObject, @unchecked Sendable {
     private var input: AVCaptureDeviceInput?
     private var audioInput: AVCaptureDeviceInput?
     private var mode = CameraMode.photo
-    private var video: VideoOptions?
+    private var video: CaptureOptions?
     private var side = CameraSide.back
     private var state = CameraState()
     private var photos: [Int64: PhotoCapture] = [:]
@@ -208,7 +261,7 @@ final class CaptureCore: NSObject, @unchecked Sendable {
         return nil
     }
 
-    func configure(side: CameraSide, mode: CameraMode, video: VideoOptions?) {
+    func configure(side: CameraSide, mode: CameraMode, video: CaptureOptions?) {
         self.side = side
         self.mode = mode
         self.video = video
@@ -233,7 +286,7 @@ final class CaptureCore: NSObject, @unchecked Sendable {
         publish(device: device)
     }
 
-    func change(mode: CameraMode, video: VideoOptions) {
+    func change(mode: CameraMode, video: CaptureOptions) {
         guard let device, !movieOutput.isRecording else { return }
         self.mode = mode
         self.video = video
@@ -266,7 +319,11 @@ final class CaptureCore: NSObject, @unchecked Sendable {
         switch mode {
         case .photo:
             if session.outputs.contains(movieOutput) { session.removeOutput(movieOutput) }
-            if let audioInput {
+            // Live Photos record sound; plain photos need no microphone.
+            let live = video?.live == true
+            if live {
+                addMicrophone()
+            } else if let audioInput {
                 session.removeInput(audioInput)
                 self.audioInput = nil
             }
@@ -281,19 +338,15 @@ final class CaptureCore: NSObject, @unchecked Sendable {
                 photoOutput.maxPhotoDimensions = largest
             }
             if photoOutput.isResponsiveCaptureSupported { photoOutput.isResponsiveCaptureEnabled = true }
+            photoOutput.isLivePhotoCaptureEnabled = live && photoOutput.isLivePhotoCaptureSupported
+            if photoOutput.isLivePhotoCaptureEnabled { photoOutput.isLivePhotoAutoTrimmingEnabled = true }
             state.videoFormat = nil
         case .video:
             if session.outputs.contains(photoOutput) { session.removeOutput(photoOutput) }
             if !session.outputs.contains(movieOutput), session.canAddOutput(movieOutput) {
                 session.addOutput(movieOutput)
             }
-            if audioInput == nil, AVCaptureDevice.authorizationStatus(for: .audio) == .authorized,
-                let microphone = AVCaptureDevice.default(for: .audio),
-                let input = try? AVCaptureDeviceInput(device: microphone), session.canAddInput(input)
-            {
-                session.addInput(input)
-                audioInput = input
-            }
+            addMicrophone()
             if let video { applyVideoFormat(video, on: device) }
             if let connection = movieOutput.connection(with: .video) {
                 if movieOutput.availableVideoCodecTypes.contains(.hevc) {
@@ -306,9 +359,19 @@ final class CaptureCore: NSObject, @unchecked Sendable {
         }
     }
 
+    /// Sound, when allowed.
+    private func addMicrophone() {
+        guard audioInput == nil, AVCaptureDevice.authorizationStatus(for: .audio) == .authorized,
+            let microphone = AVCaptureDevice.default(for: .audio),
+            let input = try? AVCaptureDeviceInput(device: microphone), session.canAddInput(input)
+        else { return }
+        session.addInput(input)
+        audioInput = input
+    }
+
     /// The format closest to what was asked: the size first, then the frame rate, then HDR (10
     /// bit with HLG) or not. What was actually chosen is shown on the camera screen.
-    private func applyVideoFormat(_ options: VideoOptions, on device: AVCaptureDevice) {
+    private func applyVideoFormat(_ options: CaptureOptions, on device: AVCaptureDevice) {
         func dimensions(_ format: AVCaptureDevice.Format) -> (Int, Int) {
             let size = CMVideoFormatDescriptionGetDimensions(format.formatDescription)
             return (Int(size.width), Int(size.height))
@@ -398,27 +461,24 @@ final class CaptureCore: NSObject, @unchecked Sendable {
         described.zoom = Double(device.videoZoomFactor) * multiplier
         described.hasFlash = device.hasFlash
         described.hasTorch = device.hasTorch
+        described.canLive = mode == .photo && photoOutput.isLivePhotoCaptureSupported
         described.focusLocked = state.focusLocked
         described.videoFormat = state.videoFormat
         return described
     }
 
-    func zoom(to shown: Double, smoothly: Bool) {
+    /// Always a ramp: a glide for the lens buttons (about the same time for any distance), and
+    /// a quick one that follows a finger smoothly. The camera switches lenses on the way where
+    /// Apple's camera does.
+    func zoom(to shown: Double, glide: Bool) {
         guard let device, (try? device.lockForConfiguration()) != nil else { return }
         let multiplier = Double(device.displayVideoZoomFactorMultiplier)
-        let factor = CGFloat(
-            min(
-                max(shown / multiplier, Double(device.minAvailableVideoZoomFactor)),
-                Double(device.maxAvailableVideoZoomFactor)))
-        if smoothly {
-            device.ramp(toVideoZoomFactor: factor, withRate: 6)
-        } else {
-            device.cancelVideoZoomRamp()
-            device.videoZoomFactor = factor
-        }
+        let factor = min(
+            max(shown / multiplier, Double(device.minAvailableVideoZoomFactor)),
+            Double(device.maxAvailableVideoZoomFactor))
+        let rate = glide ? Zoom.glideRate(from: Double(device.videoZoomFactor), to: factor) : Zoom.followRate
+        device.ramp(toVideoZoomFactor: CGFloat(factor), withRate: rate)
         device.unlockForConfiguration()
-        state.zoom = Double(factor) * multiplier
-        publish(device: nil)
     }
 
     /// `point` in the camera's coordinates (0…1). Locked: focus and expose once, then keep.
@@ -461,6 +521,15 @@ final class CaptureCore: NSObject, @unchecked Sendable {
             case .off: .off
             }
         if photoOutput.supportedFlashModes.contains(flash) { settings.flashMode = flash }
+        if request.live, photoOutput.isLivePhotoCaptureEnabled {
+            settings.livePhotoMovieFileURL = FileManager.default.temporaryDirectory
+                .appendingPathComponent("\(UUID().uuidString).mov")
+            if photoOutput.availableLivePhotoVideoCodecTypes.contains(.hevc) {
+                settings.livePhotoVideoCodecType = .hevc
+            }
+            settings.livePhotoMovieMetadata = VideoMetadata.items(
+                location: request.location, takenAt: request.takenAt, timeZone: .current)
+        }
         let id = settings.uniqueID
         let capture = PhotoCapture(request: request, heic: heic) { [weak self] photo in
             self?.run { $0.photos[id] = nil }
@@ -496,6 +565,7 @@ final class PhotoCapture: NSObject, AVCapturePhotoCaptureDelegate, @unchecked Se
     let heic: Bool
     let done: @Sendable (TakenPhoto?) -> Void
     private var photo: TakenPhoto?
+    private var movie: URL?
 
     init(request: PhotoRequest, heic: Bool, done: @escaping @Sendable (TakenPhoto?) -> Void) {
         self.request = request
@@ -516,9 +586,21 @@ final class PhotoCapture: NSObject, AVCapturePhotoCaptureDelegate, @unchecked Se
     }
 
     func photoOutput(
+        _ output: AVCapturePhotoOutput, didFinishProcessingLivePhotoToMovieFileAt outputFileURL: URL,
+        duration: CMTime, photoDisplayTime: CMTime, resolvedSettings: AVCaptureResolvedPhotoSettings, error: Error?
+    ) {
+        if error == nil { movie = outputFileURL }
+    }
+
+    /// Called last, after the photo and (for a Live Photo) its video.
+    func photoOutput(
         _ output: AVCapturePhotoOutput, didFinishCaptureFor resolvedSettings: AVCaptureResolvedPhotoSettings,
         error: Error?
     ) {
+        if var photo, let movie, FileManager.default.fileExists(atPath: movie.path) {
+            photo.liveVideo = movie
+            self.photo = photo
+        }
         done(photo)
     }
 }

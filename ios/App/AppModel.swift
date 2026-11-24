@@ -328,6 +328,13 @@ final class AppModel {
             try Uploader.enqueue(
                 database: database, files: files, assetId: id, fileName: name, kind: "photo",
                 mimeType: mimeType, metadata: metadata)
+            // A Live Photo's video, sent after the photo.
+            if let movie = photo.liveVideo {
+                let videoName = "\(id)-live.mov"
+                try FileManager.default.moveItem(at: movie, to: files.original(videoName))
+                try Uploader.enqueuePairedVideo(
+                    database: database, files: files, assetId: id, fileName: videoName, mimeType: "video/quicktime")
+            }
         }
     }
 
@@ -515,6 +522,13 @@ final class AppModel {
     }
 
     /// A file to share; fetched from the server when it isn't on this iPhone.
+    /// What to share: the file, and for a Live Photo its video too (not for other formats).
+    func filesToShare(_ asset: LocalAsset, as kind: ShareKind) async throws -> [URL] {
+        let main = try await fileToShare(asset, as: kind)
+        guard asset.isLivePhoto, kind != .preferred else { return [main] }
+        return [main, try await media.pairedVideo(of: asset)]
+    }
+
     func fileToShare(_ asset: LocalAsset, as kind: ShareKind) async throws -> URL {
         let folder = FileManager.default.temporaryDirectory.appendingPathComponent("Share", isDirectory: true)
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)

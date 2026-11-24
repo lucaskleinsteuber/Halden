@@ -119,9 +119,10 @@ public actor PhotosSync {
         else { return }
         saving += 1
         defer { saving -= 1 }
+        let paired = asset.pairedVideoFile.map { files.original($0) }
         guard
             let identifier = try? await library.save(
-                files.original(name), kind: asset.isVideo ? .video : .photo)
+                files.original(name), kind: asset.isVideo ? .video : .photo, pairedVideo: paired)
         else { return }
         try? link(identifier, to: asset.id)
     }
