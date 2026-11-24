@@ -102,11 +102,13 @@ struct ManualPanel: View {
             switch value {
             case .exposureBias:
                 Slider(
-                    value: Binding {
-                        manual.exposureBias
-                    } set: {
-                        change(.exposureBias, to: ($0 * 3).rounded() / 3)
-                    },
+                    value: Binding(
+                        get: {
+                            manual.exposureBias
+                        },
+                        set: {
+                            change(.exposureBias, to: ($0 * 3).rounded() / 3)
+                        }),
                     in: max(limits.exposureBias.lowerBound, -3)...min(limits.exposureBias.upperBound, 3))
             case .iso:
                 stepped(limits.isoSteps, current: manual.iso ?? camera.backend.readings.iso) { change(.iso, to: $0) }
@@ -117,33 +119,40 @@ struct ManualPanel: View {
             case .whiteBalance:
                 VStack(spacing: 2) {
                     Slider(
-                        value: Binding {
-                            manual.whiteBalance?.kelvin ?? camera.backend.readings.kelvin ?? 5000
-                        } set: { kelvin in
-                            camera.setManual { settings in
-                                settings.whiteBalance = .init(kelvin: kelvin, tint: settings.whiteBalance?.tint ?? 0)
-                            }
-                        },
+                        value: Binding(
+                            get: {
+                                manual.whiteBalance?.kelvin ?? camera.backend.readings.kelvin ?? 5000
+                            },
+                            set: { kelvin in
+                                camera.setManual { settings in
+                                    settings.whiteBalance = .init(
+                                        kelvin: kelvin, tint: settings.whiteBalance?.tint ?? 0)
+                                }
+                            }),
                         in: ManualLimits.whiteBalanceKelvin)
                     Slider(
-                        value: Binding {
-                            manual.whiteBalance?.tint ?? 0
-                        } set: { tint in
-                            camera.setManual { settings in
-                                settings.whiteBalance = .init(
-                                    kelvin: settings.whiteBalance?.kelvin ?? camera.backend.readings.kelvin ?? 5000,
-                                    tint: tint)
-                            }
-                        },
+                        value: Binding(
+                            get: {
+                                manual.whiteBalance?.tint ?? 0
+                            },
+                            set: { tint in
+                                camera.setManual { settings in
+                                    settings.whiteBalance = .init(
+                                        kelvin: settings.whiteBalance?.kelvin ?? camera.backend.readings.kelvin ?? 5000,
+                                        tint: tint)
+                                }
+                            }),
                         in: ManualLimits.whiteBalanceTint)
                 }
             case .focus:
                 Slider(
-                    value: Binding {
-                        manual.focus ?? camera.backend.readings.focus ?? 0.5
-                    } set: {
-                        change(.focus, to: $0)
-                    },
+                    value: Binding(
+                        get: {
+                            manual.focus ?? camera.backend.readings.focus ?? 0.5
+                        },
+                        set: {
+                            change(.focus, to: $0)
+                        }),
                     in: 0...1
                 ) { editing in
                     focusing = editing
@@ -167,12 +176,14 @@ struct ManualPanel: View {
                 steps.indices.min { abs(log2(steps[$0] / value)) < abs(log2(steps[$1] / value)) }
             } ?? steps.count / 2
         return Slider(
-            value: Binding {
-                Double(index)
-            } set: { position in
-                let step = Int(position.rounded())
-                if steps.indices.contains(step) { set(steps[step]) }
-            },
+            value: Binding(
+                get: {
+                    Double(index)
+                },
+                set: { position in
+                    let step = Int(position.rounded())
+                    if steps.indices.contains(step) { set(steps[step]) }
+                }),
             in: 0...Double(max(steps.count - 1, 1)), step: 1)
     }
 
