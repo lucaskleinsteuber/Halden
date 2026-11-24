@@ -36,7 +36,8 @@ targets:
         UIApplicationSceneManifest:
           UIApplicationSupportsMultipleScenes: false
         UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
-        NSCameraUsageDescription: Halden takes your photos with the camera.
+        NSCameraUsageDescription: Halden takes your photos and videos with the camera.
+        NSMicrophoneUsageDescription: Halden records the sound of your videos.
         NSLocationWhenInUseUsageDescription: Halden notes where a photo was taken, how precisely, and which way the camera pointed.
         NSLocalNetworkUsageDescription: Halden connects to your own Halden server in your home network.
         NSAppTransportSecurity:

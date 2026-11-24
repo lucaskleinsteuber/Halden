@@ -1,3 +1,4 @@
+import AVFoundation
 import CryptoKit
 import Foundation
 import ImageIO
@@ -79,6 +80,30 @@ public enum Thumbnails {
     public static let thumbnailEdge = 512
     public static let previewEdge = 2048
 
+    /// A picture of a photo or a video (a frame from half a second in), long edge at most `edge`.
+    public static func picture(of url: URL, edge: Int, quality: Double = 0.82) async -> MadeImage? {
+        if isVideo(url) {
+            return await make(fromVideo: url, edge: edge, quality: quality)
+        }
+        return make(from: url, edge: edge, quality: quality)
+    }
+
+    /// Width and height of a photo as it is shown (turned upright by its orientation).
+    public static func shownSize(of data: Data) -> (width: Int, height: Int)? {
+        guard let source = CGImageSourceCreateWithData(data as CFData, nil),
+            let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
+            let width = properties[kCGImagePropertyPixelWidth] as? Int,
+            let height = properties[kCGImagePropertyPixelHeight] as? Int
+        else { return nil }
+        // Orientations 5 to 8 turn the picture by a quarter.
+        let orientation = properties[kCGImagePropertyOrientation] as? UInt32 ?? 1
+        return orientation >= 5 ? (height, width) : (width, height)
+    }
+
+    public static func isVideo(_ url: URL) -> Bool {
+        UTType(filenameExtension: url.pathExtension)?.conforms(to: .movie) == true
+    }
+
     /// Scales a photo (HEIC, JPEG, PNG, …) so its long edge is at most `edge`, upright, as JPEG.
     public static func make(from url: URL, edge: Int, quality: Double = 0.82) -> MadeImage? {
         guard let source = CGImageSourceCreateWithURL(url as CFURL, nil) else { return nil }
@@ -91,6 +116,24 @@ public enum Thumbnails {
         guard let image = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else {
             return nil
         }
+        return jpeg(image, quality: quality)
+    }
+
+    /// A frame of a video, upright, not the often black very first one.
+    public static func make(fromVideo url: URL, edge: Int, quality: Double = 0.82) async -> MadeImage? {
+        let asset = AVURLAsset(url: url)
+        let generator = AVAssetImageGenerator(asset: asset)
+        generator.appliesPreferredTrackTransform = true
+        generator.maximumSize = CGSize(width: edge, height: edge)
+        generator.requestedTimeToleranceBefore = .zero
+        generator.requestedTimeToleranceAfter = CMTime(seconds: 0.5, preferredTimescale: 600)
+        let seconds = (try? await asset.load(.duration))?.seconds ?? 0
+        let moment = CMTime(seconds: seconds.isFinite ? min(0.5, seconds / 2) : 0, preferredTimescale: 600)
+        guard let (image, _) = try? await generator.image(at: moment) else { return nil }
+        return jpeg(image, quality: quality)
+    }
+
+    static func jpeg(_ image: CGImage, quality: Double) -> MadeImage? {
         let output = NSMutableData()
         guard
             let destination = CGImageDestinationCreateWithData(

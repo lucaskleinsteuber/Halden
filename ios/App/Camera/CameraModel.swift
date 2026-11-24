@@ -1,198 +1,199 @@
-import AVFoundation
 import CoreLocation
+import Foundation
 import HaldenKit
-import ImageIO
 import Observation
-import UIKit
 
-/// The back main camera, photos only, in the best quality Apple's processing gives. While the
-/// camera is open, location runs, so every photo knows where it was taken, how precisely, and
-/// which way the camera pointed.
+/// The camera screen's logic: photo and video, self-timer, flash and torch, and what each photo
+/// or video knows about itself (time, place, direction). The camera itself is a
+/// `CaptureBackend`; this model works the same with the real one and the stand-in.
 @MainActor
 @Observable
-final class CameraModel: NSObject {
-    private(set) var available = false
-    private(set) var running = false
-    private(set) var lastProblem: String?
-    let session = AVCaptureSession()
-    private let output = AVCapturePhotoOutput()
-    private let queue = DispatchQueue(label: "camera")
-    private let location = LocationTracker()
-    private var configured = false
-    private var pending: [Int64: PhotoCapture] = [:]
-    /// Gets each photo: its data, whether it is HEIC (else JPEG), and what is known about it.
-    var keep: ((Data, Bool, UploadMetadata) -> Void)?
+final class CameraModel {
+    let backend: any CaptureBackend
+    private(set) var mode = CameraMode.photo
+    /// Self-timer in seconds; 0 is off.
+    var timer = 0
+    /// Seconds left on the self-timer while it runs.
+    private(set) var countdown: Int?
+    private(set) var recordingSince: Date?
+    private(set) var torch = false
+    private(set) var problem: String?
+    /// Goes up with every photo taken, for the flash on the screen.
+    private(set) var shots = 0
 
-    func start() {
-        location.start()
+    @ObservationIgnored let location = LocationTracker()
+    @ObservationIgnored var settings: () -> AppSettings = { AppSettings() }
+    @ObservationIgnored var keepPhoto: ((TakenPhoto, UploadMetadata) -> Void)?
+    @ObservationIgnored var keepVideo: ((URL, UploadMetadata) -> Void)?
+    @ObservationIgnored private var countdownTask: Task<Void, Never>?
+    @ObservationIgnored private var video: (request: VideoRequest, place: ClientLocation?)?
+    @ObservationIgnored private var applied: VideoOptions?
+
+    init(backend: any CaptureBackend) {
+        self.backend = backend
+    }
+
+    /// The stand-in camera in the simulator and when the UI tests ask for it; else the real one.
+    static func make(standIn: Bool) -> CameraModel {
+        #if targetEnvironment(simulator)
+            return CameraModel(backend: StandInCamera())
+        #else
+            return CameraModel(backend: standIn ? StandInCamera() : DeviceCamera())
+        #endif
+    }
+
+    var recording: Bool { recordingSince != nil }
+
+    /// At app start, so the picture is there at once when the camera opens.
+    func prepare() {
+        let options = VideoOptions(settings())
+        applied = options
+        backend.prepare(mode: mode, video: options)
+    }
+
+    func appear() {
+        location.start(accuracyWanted: settings().locationAccuracyLimit)
+        // Video settings changed meanwhile.
+        let options = VideoOptions(settings())
+        if mode == .video, options != applied {
+            applied = options
+            backend.setMode(mode, video: options)
+        }
+        backend.start()
+    }
+
+    func disappear() {
+        cancelCountdown()
+        if recording { stopRecording() }
+        setTorch(false)
+        location.stop()
+        backend.stop()
+    }
+
+    func switchTo(_ mode: CameraMode) {
+        guard mode != self.mode, !recording else { return }
+        cancelCountdown()
+        setTorch(false)
+        self.mode = mode
+        let options = VideoOptions(settings())
+        applied = options
+        backend.setMode(mode, video: options)
+    }
+
+    func setTorch(_ on: Bool) {
+        guard torch != on else { return }
+        torch = on
+        backend.setTorch(on)
+    }
+
+    /// The big button: a photo (after the self-timer), or start and stop a video.
+    func shutter() {
+        if countdown != nil { return cancelCountdown() }
+        if recording { return stopRecording() }
+        let action: () -> Void =
+            mode == .photo ? { [weak self] in self?.takePhoto() } : { [weak self] in self?.startRecording() }
+        guard timer > 0 else { return action() }
+        countdown = timer
+        countdownTask = Task { [weak self] in
+            for left in stride(from: self?.timer ?? 0, to: 0, by: -1) {
+                self?.countdown = left
+                try? await Task.sleep(for: .seconds(1))
+                if Task.isCancelled { return }
+            }
+            self?.countdown = nil
+            action()
+        }
+    }
+
+    private func cancelCountdown() {
+        countdownTask?.cancel()
+        countdownTask = nil
+        countdown = nil
+    }
+
+    private func place(at moment: Date) -> ClientLocation? {
+        CapturePlace.location(location.reading, heading: location.compass, at: moment, settings: settings())
+    }
+
+    private func takePhoto() {
+        let now = Date()
+        let settings = settings()
+        let place = place(at: now)
+        shots += 1
+        let request = PhotoRequest(
+            format: settings.photoFormat, flash: settings.flash, location: place,
+            trueNorth: location.compass?.trueNorth ?? false, takenAt: now)
         Task {
-            guard await AVCaptureDevice.requestAccess(for: .video) else {
-                lastProblem = "Halden may not use the camera. Allow it in Settings › Halden."
+            guard let photo = await backend.takePhoto(request) else {
+                problem = "The photo could not be taken."
                 return
             }
-            configure()
-            let handle = SessionHandle(session: session)
-            queue.async { handle.session.startRunning() }
-            running = true
+            problem = nil
+            var metadata = Self.metadata(at: now, place: place)
+            metadata.width = photo.width
+            metadata.height = photo.height
+            keepPhoto?(photo, metadata)
         }
     }
 
-    func stop() {
-        location.stop()
-        let handle = SessionHandle(session: session)
-        queue.async { handle.session.stopRunning() }
-        running = false
-    }
-
-    private func configure() {
-        guard !configured else { return }
-        configured = true
-        guard let camera = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .back),
-            let input = try? AVCaptureDeviceInput(device: camera)
-        else {
-            available = false
+    private func startRecording() {
+        let now = Date()
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("\(UUID().uuidString).mov")
+        let request = VideoRequest(url: url, location: place(at: now), takenAt: now, timeZone: .current)
+        guard backend.startRecording(request) else {
+            problem = "The video could not be started."
             return
         }
-        session.beginConfiguration()
-        session.sessionPreset = .photo
-        if session.canAddInput(input) { session.addInput(input) }
-        if session.canAddOutput(output) { session.addOutput(output) }
-        output.maxPhotoQualityPrioritization = .quality
-        if let largest = camera.activeFormat.supportedMaxPhotoDimensions.max(by: {
-            $0.width * $0.height < $1.width * $1.height
-        }) {
-            output.maxPhotoDimensions = largest
+        problem = nil
+        video = (request, request.location)
+        recordingSince = now
+    }
+
+    private func stopRecording() {
+        guard let (request, place) = video else { return }
+        video = nil
+        recordingSince = nil
+        Task {
+            guard let url = await backend.stopRecording() else {
+                problem = "The video could not be saved."
+                return
+            }
+            var metadata = Self.metadata(at: request.takenAt, place: place)
+            if let facts = try? await VideoFacts.read(url) {
+                metadata.width = facts.width
+                metadata.height = facts.height
+                metadata.durationMs = facts.durationMs
+            }
+            keepVideo?(url, metadata)
         }
-        session.commitConfiguration()
-        available = true
     }
 
-    /// Takes a photo. The shutter never waits: the photo is handed over when the camera is done.
-    func capture() {
-        guard available else { return }
-        let settings =
-            output.availablePhotoCodecTypes.contains(.hevc)
-            ? AVCapturePhotoSettings(format: [AVVideoCodecKey: AVVideoCodecType.hevc])
-            : AVCapturePhotoSettings()
-        settings.photoQualityPrioritization = .quality
-        settings.maxPhotoDimensions = output.maxPhotoDimensions
-        let heic = settings.format?[AVVideoCodecKey] as? AVVideoCodecType == .hevc
-        let id = settings.uniqueID
-        let capture = PhotoCapture(
-            location: location.current, heading: location.heading, takenAt: Date(), heic: heic
-        ) { [weak self] data, metadata in
-            self?.pending[id] = nil
-            self?.keep?(data, heic, metadata)
-        }
-        pending[settings.uniqueID] = capture
-        output.capturePhoto(with: settings, delegate: capture)
-    }
-}
-
-/// One photo on its way out of the camera.
-final class PhotoCapture: NSObject, AVCapturePhotoCaptureDelegate, @unchecked Sendable {
-    let location: CLLocation?
-    let heading: Heading?
-    let takenAt: Date
-    let heic: Bool
-    let done: @MainActor (Data, UploadMetadata) -> Void
-
-    init(
-        location: CLLocation?, heading: Heading?, takenAt: Date, heic: Bool,
-        done: @escaping @MainActor (Data, UploadMetadata) -> Void
-    ) {
-        self.location = location
-        self.heading = heading
-        self.takenAt = takenAt
-        self.heic = heic
-        self.done = done
-    }
-
-    func photoOutput(_ output: AVCapturePhotoOutput, didFinishProcessingPhoto photo: AVCapturePhoto, error: Error?) {
-        guard error == nil,
-            let data = photo.fileDataRepresentation(with: GPSWriter(location: location, heading: heading))
-        else { return }
-        let dimensions = photo.resolvedSettings.photoDimensions
+    static func metadata(at moment: Date, place: ClientLocation?) -> UploadMetadata {
         let zone = TimeZone.current
-        var metadata = UploadMetadata(
-            takenAt: Int64(takenAt.timeIntervalSince1970 * 1000),
-            timeZoneOffsetMinutes: zone.secondsFromGMT(for: takenAt) / 60,
-            timeZone: zone.identifier,
-            width: Int(dimensions.width), height: Int(dimensions.height))
-        if let location, location.horizontalAccuracy >= 0 {
-            metadata.location = ClientLocation(
-                latitude: location.coordinate.latitude, longitude: location.coordinate.longitude,
-                altitude: location.verticalAccuracy >= 0 ? location.altitude : nil,
-                horizontalAccuracy: location.horizontalAccuracy,
-                verticalAccuracy: location.verticalAccuracy >= 0 ? location.verticalAccuracy : nil,
-                heading: heading?.degrees,
-                headingAccuracy: heading?.accuracy)
-        }
-        let finished = metadata
-        Task { @MainActor in done(data, finished) }
+        return UploadMetadata(
+            takenAt: Int64((moment.timeIntervalSince1970 * 1000).rounded()),
+            timeZoneOffsetMinutes: zone.secondsFromGMT(for: moment) / 60, timeZone: zone.identifier,
+            location: place)
     }
 }
 
-/// Writes the place (with its accuracy) and direction into the photo's own metadata, like
-/// Apple's camera does, so the file carries them wherever it goes.
-final class GPSWriter: NSObject, AVCapturePhotoFileDataRepresentationCustomizer {
-    let location: CLLocation?
-    let heading: Heading?
-
-    init(location: CLLocation?, heading: Heading?) {
-        self.location = location
-        self.heading = heading
-    }
-
-    func replacementMetadata(for photo: AVCapturePhoto) -> [String: Any]? {
-        guard let location, location.horizontalAccuracy >= 0 else { return nil }
-        var metadata = photo.metadata
-        let coordinate = location.coordinate
-        var gps: [String: Any] = [
-            kCGImagePropertyGPSLatitude as String: abs(coordinate.latitude),
-            kCGImagePropertyGPSLatitudeRef as String: coordinate.latitude >= 0 ? "N" : "S",
-            kCGImagePropertyGPSLongitude as String: abs(coordinate.longitude),
-            kCGImagePropertyGPSLongitudeRef as String: coordinate.longitude >= 0 ? "E" : "W",
-            kCGImagePropertyGPSHPositioningError as String: location.horizontalAccuracy,
-            kCGImagePropertyGPSTimeStamp as String: ISO8601DateFormatter().string(from: location.timestamp),
-        ]
-        if location.verticalAccuracy >= 0 {
-            gps[kCGImagePropertyGPSAltitude as String] = abs(location.altitude)
-            gps[kCGImagePropertyGPSAltitudeRef as String] = location.altitude >= 0 ? 0 : 1
-        }
-        if let heading {
-            gps[kCGImagePropertyGPSImgDirection as String] = heading.degrees
-            gps[kCGImagePropertyGPSImgDirectionRef as String] = heading.isTrueNorth ? "T" : "M"
-        }
-        metadata[kCGImagePropertyGPSDictionary as String] = gps
-        return metadata
-    }
-}
-
-/// Location and compass while the camera is open. A position that is too old or too imprecise
-/// is not used: better no place than a wrong one.
+/// Place and compass while the camera is open.
 @MainActor
 final class LocationTracker: NSObject, CLLocationManagerDelegate {
     private let manager = CLLocationManager()
-    private(set) var latest: CLLocation?
-    private(set) var heading: Heading?
+    private(set) var reading: PlaceReading?
+    private(set) var compass: CompassReading?
 
     override init() {
         super.init()
         manager.delegate = self
-        manager.desiredAccuracy = kCLLocationAccuracyBest
         manager.headingFilter = 1
     }
 
-    var current: CLLocation? {
-        guard let latest, -latest.timestamp.timeIntervalSinceNow < 30, latest.horizontalAccuracy >= 0,
-            latest.horizontalAccuracy <= 500
-        else { return nil }
-        return latest
-    }
-
-    func start() {
-        manager.requestWhenInUseAuthorization()
+    func start(accuracyWanted: Double) {
+        // The best the phone can do when a few metres matter; a little less precise saves power.
+        manager.desiredAccuracy = accuracyWanted <= 20 ? kCLLocationAccuracyBest : kCLLocationAccuracyNearestTenMeters
+        if manager.authorizationStatus == .notDetermined { manager.requestWhenInUseAuthorization() }
         manager.startUpdatingLocation()
         if CLLocationManager.headingAvailable() { manager.startUpdatingHeading() }
     }
@@ -203,35 +204,23 @@ final class LocationTracker: NSObject, CLLocationManagerDelegate {
     }
 
     nonisolated func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
-        let last = locations.last
-        MainActor.assumeIsolated { latest = last }
+        guard let last = locations.last else { return }
+        let reading = PlaceReading(
+            latitude: last.coordinate.latitude, longitude: last.coordinate.longitude, altitude: last.altitude,
+            horizontalAccuracy: last.horizontalAccuracy, verticalAccuracy: last.verticalAccuracy,
+            measuredAt: last.timestamp)
+        MainActor.assumeIsolated { self.reading = reading }
     }
 
-    nonisolated func locationManager(_ manager: CLLocationManager, didUpdateHeading newHeading: CLHeading) {
-        let reading = Heading(newHeading)
-        MainActor.assumeIsolated { heading = reading }
+    nonisolated func locationManager(_ manager: CLLocationManager, didUpdateHeading heading: CLHeading) {
+        let reading: CompassReading? =
+            heading.headingAccuracy < 0
+            ? nil
+            : CompassReading(
+                degrees: heading.trueHeading >= 0 ? heading.trueHeading : heading.magneticHeading,
+                accuracy: heading.headingAccuracy, trueNorth: heading.trueHeading >= 0)
+        MainActor.assumeIsolated { compass = reading }
     }
 
     nonisolated func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {}
-}
-
-/// `AVCaptureSession` is meant to be started and stopped off the main thread (Apple says so), but
-/// isn't marked `Sendable`; this carries it there.
-struct SessionHandle: @unchecked Sendable {
-    let session: AVCaptureSession
-}
-
-/// Which way the camera points: true north when known, else magnetic north. `nil` while the
-/// compass is unsure.
-struct Heading: Sendable {
-    let degrees: Double
-    let accuracy: Double
-    let isTrueNorth: Bool
-
-    init?(_ heading: CLHeading) {
-        guard heading.headingAccuracy >= 0 else { return nil }
-        isTrueNorth = heading.trueHeading >= 0
-        degrees = isTrueNorth ? heading.trueHeading : heading.magneticHeading
-        accuracy = heading.headingAccuracy
-    }
 }

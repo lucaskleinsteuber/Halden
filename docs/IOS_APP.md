@@ -21,8 +21,23 @@ the design comes after that. What works today is described below.
   with a password shows the fingerprint first, to compare with `halden status`; nothing secret
   is sent before. The device token goes to the Keychain (this device only).
 - **Trust**: every connection trusts only the certificate whose SHA-256 was pinned (TLS 1.3).
-- **Taking a photo**: HEIC in the best quality, written to the app's folder before anything else,
-  with place, accuracy and direction (also in the file's own metadata). The shutter never waits.
+- **The camera**: photo (HEIC in the best quality, or JPEG) and video (HEVC, 4K at 60 fps by
+  default, HDR and 1080p/30 in the settings, with sound when the microphone is allowed). Ultra
+  wide, main, 2× and tele as one virtual camera, so zooming switches lenses where Apple's camera
+  does; zoom buttons and pinching; the front camera. Tap to focus, hold to lock focus and
+  exposure, flash (auto/on/off) or the light for videos, self-timer (3 or 10 s), grid lines.
+  Photos and videos come out upright however the phone is held. The camera is set up when the
+  app starts, all on a queue of its own, so its picture is there at once and the screen never
+  waits for it.
+- **Time, place and direction**: every photo and video knows when it was taken (with the time
+  zone), where (with the accuracy) and which way the camera pointed, sent to the server and
+  written into the file itself (EXIF/GPS for photos, QuickTime metadata for videos, as Apple's
+  camera does). A place older than a minute is left out; one less precise than the limit (50 m)
+  is kept and shown as imprecise, or left out, as set.
+- **Taking a photo or video**: written to the app's folder before anything else (away from the
+  main thread), then into the library and the upload queue. The shutter never waits.
+- **Simulator and UI tests**: the simulator has no camera; there, and in the UI tests, a
+  stand-in camera behaves like the real one and delivers made-up photos and short videos.
 - **Uploads**: a queue in the database, oldest first, in pieces of 8 MiB. After the app was
   closed or the connection broke, it asks the server where it stands and goes on from there.
   Once the original is checked on the server, the phone sends its own thumbnail (512 px) and

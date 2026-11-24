@@ -30,7 +30,7 @@ public actor ThumbnailLoader {
             } else if asset.thumbnailSha256 != nil, client != nil {
                 fromServer.append(asset)
             } else if let name = asset.localFile,
-                let made = Thumbnails.make(from: files.original(name), edge: Thumbnails.thumbnailEdge)
+                let made = await Thumbnails.picture(of: files.original(name), edge: Thumbnails.thumbnailEdge)
             {
                 let url = files.thumbnail(sha256: asset.thumbnailSha256 ?? made.sha256)
                 if (try? made.data.write(to: url, options: .atomic)) != nil {

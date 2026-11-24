@@ -61,6 +61,68 @@ final class HaldenUITests: XCTestCase {
         XCTAssertNotEqual(deeper.identifier, newestId, "scrolled far into the library")
     }
 
+    /// The camera from the shutter to the server: a photo, one with the self-timer and a video
+    /// from the stand-in camera all show up in the library with a check mark.
+    @MainActor
+    func testPhotosAndAVideoFromTheCameraReachTheServer() throws {
+        let environment = ProcessInfo.processInfo.environment
+        guard let server = environment["HALDEN_TEST_SERVER"], let password = environment["HALDEN_TEST_PASSWORD"]
+        else {
+            throw XCTSkip("no server: run ios/ui-tests.sh")
+        }
+        allowLocation()
+        let app = XCUIApplication()
+        app.launchArguments = ["-ui-testing", "-ui-testing-sign-in"]
+        app.launchEnvironment = ["HALDEN_TEST_SERVER": server, "HALDEN_TEST_PASSWORD": password]
+        app.launch()
+        let tabs = app.tabBars.firstMatch
+        XCTAssertTrue(tabs.waitForExistence(timeout: 30), "signed in")
+        tabs.buttons["Camera"].tap()
+        let shutter = app.buttons["shutter"]
+        XCTAssertTrue(shutter.waitForExistence(timeout: 10))
+        shutter.tap()
+
+        app.buttons["timer"].tap()
+        XCTAssertEqual(app.buttons["timer"].label, "Self-timer 3 seconds")
+        shutter.tap()
+        XCTAssertTrue(app.staticTexts["countdown"].waitForExistence(timeout: 2), "the self-timer counts down")
+        XCTAssertTrue(app.staticTexts["countdown"].waitForNonExistence(timeout: 6))
+        app.buttons["timer"].tap()
+        app.buttons["timer"].tap()
+        XCTAssertEqual(app.buttons["timer"].label, "Self-timer off")
+
+        app.segmentedControls["camera-mode"].buttons["Video"].tap()
+        XCTAssertTrue(app.buttons["Record a video"].waitForExistence(timeout: 5))
+        shutter.tap()
+        XCTAssertTrue(app.descendants(matching: .any)["recording-time"].waitForExistence(timeout: 5))
+        Thread.sleep(forTimeInterval: 1.5)
+        shutter.tap()
+        XCTAssertTrue(app.buttons["Record a video"].waitForExistence(timeout: 5), "recording stopped")
+
+        tabs.buttons["Photos"].tap()
+        let grid = app.collectionViews["library-grid"]
+        XCTAssertTrue(grid.waitForExistence(timeout: 10))
+        let photos = grid.cells.matching(NSPredicate(format: "label == 'Photo, backed up'"))
+        let videos = grid.cells.matching(NSPredicate(format: "label == 'Video, backed up'"))
+        let deadline = Date().addingTimeInterval(90)
+        while (photos.count < 2 || videos.count < 1) && Date() < deadline {
+            Thread.sleep(forTimeInterval: 1)
+        }
+        XCTAssertEqual(photos.count, 2, "both photos are on the server")
+        XCTAssertEqual(videos.count, 1, "the video is on the server")
+    }
+
+    /// Answers the question for the place, should the simulator ask.
+    private func allowLocation() {
+        addUIInterruptionMonitor(withDescription: "Location") { alert in
+            for label in ["Allow While Using App", "Allow Once", "Allow"] where alert.buttons[label].exists {
+                alert.buttons[label].tap()
+                return true
+            }
+            return false
+        }
+    }
+
     /// Signing in with a password against a real server: look it up, compare the fingerprint,
     /// sign in, and the app is connected.
     @MainActor

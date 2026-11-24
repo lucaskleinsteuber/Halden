@@ -8,6 +8,14 @@ There are no version numbers yet; entries are grouped by date until the first re
 
 ### Added
 
+- iPhone camera: photos and videos (HEVC, 4K at 60 fps by default, HDR optional, with sound);
+  ultra wide, main, 2× and tele lenses with zoom buttons and pinching, and the front camera; tap
+  to focus, hold to lock focus and exposure, flash or light, self-timer, grid lines; upright
+  however the phone is held; ready the moment its screen opens. Videos carry time, place,
+  accuracy and direction in their own metadata like photos do, and get their thumbnail and
+  preview from the phone. A place less precise than the limit is kept and marked or left out,
+  as set. In the simulator and the UI tests a stand-in camera delivers made-up photos and videos,
+  so a UI test follows a photo, a self-timer photo and a video from the shutter to the server.
 - iPhone app foundations for the full app: the grid is now a collection view that stays smooth
   with 50,000 photos (pictures decoded and scaled off the main thread, kept in memory, fetched
   in bulk and ahead of scrolling); changes made on the phone (trash, restore, delete for good,

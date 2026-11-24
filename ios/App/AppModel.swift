@@ -28,6 +28,8 @@ final class AppModel {
     let settingsStore: any SettingsStore
     let actions: Actions
     let pipeline: ImagePipeline
+    /// Made at app start, so the camera is ready the moment its screen opens.
+    let camera: CameraModel
     private var client: APIClient?
     private var observation: AnyDatabaseCancellable?
     private var uploadObservation: AnyDatabaseCancellable?
@@ -47,7 +49,7 @@ final class AppModel {
 
     init(
         database: HaldenDatabase, files: FileLocations, tokens: any TokenStore,
-        settings: any SettingsStore = DefaultsSettingsStore()
+        settings: any SettingsStore = DefaultsSettingsStore(), standInCamera: Bool = false
     ) {
         self.database = database
         self.files = files
@@ -56,6 +58,11 @@ final class AppModel {
         self.settings = settings.load()
         self.actions = Actions(database: database)
         self.pipeline = ImagePipeline(loader: ThumbnailLoader(files: files, client: nil))
+        self.camera = CameraModel.make(standIn: standInCamera)
+        camera.settings = { [weak self] in self?.settings ?? AppSettings() }
+        camera.keepPhoto = { [weak self] photo, metadata in self?.keep(photo: photo, metadata: metadata) }
+        camera.keepVideo = { [weak self] url, metadata in self?.keep(video: url, metadata: metadata) }
+        camera.prepare()
         observe()
         restore()
     }
@@ -80,7 +87,22 @@ final class AppModel {
                 try! UITestWorld.fill(database, files: files, with: count)
             }
             let model = AppModel(
-                database: database, files: files, tokens: MemoryTokenStore(), settings: MemorySettingsStore())
+                database: database, files: files, tokens: MemoryTokenStore(), settings: MemorySettingsStore(),
+                standInCamera: true)
+            // Signed in to the real server the UI tests started (`ios/ui-tests.sh`).
+            let environment = ProcessInfo.processInfo.environment
+            if arguments.contains("-ui-testing-sign-in"), let server = environment["HALDEN_TEST_SERVER"],
+                let password = environment["HALDEN_TEST_PASSWORD"], let colon = server.lastIndex(of: ":"),
+                let port = Int(server[server.index(after: colon)...])
+            {
+                let address = String(server[..<colon])
+                Task {
+                    guard let info = try? await model.inspect(address: address, port: port) else { return }
+                    await model.login(
+                        address: address, port: port, fingerprint: info.fingerprint, username: "lucas",
+                        password: password)
+                }
+            }
             if arguments.contains("-ui-testing-signed-in") {
                 model.connection = ServerConnection(
                     serverId: "00000000-0000-0000-0000-000000000000", name: "Test server",
@@ -204,22 +226,45 @@ final class AppModel {
         backup = nil
     }
 
-    // MARK: Taking photos
+    // MARK: Taking photos and videos
 
-    /// A photo straight from the camera: written to disk first, then into the library and the
-    /// upload queue. The shutter never waits for the network.
-    func keep(photo data: Data, fileExtension: String, mimeType: String, metadata: UploadMetadata) {
+    /// A photo straight from the camera: written to disk first (away from the main thread), then
+    /// into the library and the upload queue. The shutter never waits for the disk or the network.
+    func keep(photo: TakenPhoto, metadata: UploadMetadata) {
         let id = UUID().uuidString.lowercased()
-        let name = "\(id).\(fileExtension)"
-        do {
-            try data.write(
+        let name = "\(id).\(photo.heic ? "heic" : "jpg")"
+        let mimeType = photo.heic ? "image/heic" : "image/jpeg"
+        store(what: "photo") { [database, files] in
+            try photo.data.write(
                 to: files.original(name), options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
             try Uploader.enqueue(
                 database: database, files: files, assetId: id, fileName: name, kind: "photo",
                 mimeType: mimeType, metadata: metadata)
-            work()
-        } catch {
-            problem = "The photo could not be saved: \(error.localizedDescription)"
+        }
+    }
+
+    /// A video the camera finished: moved next to the photos, then like a photo.
+    func keep(video url: URL, metadata: UploadMetadata) {
+        let id = UUID().uuidString.lowercased()
+        let name = "\(id).mov"
+        store(what: "video") { [database, files] in
+            try FileManager.default.moveItem(at: url, to: files.original(name))
+            try? (files.original(name) as NSURL).setResourceValue(
+                URLFileProtection.completeUntilFirstUserAuthentication, forKey: .fileProtectionKey)
+            try Uploader.enqueue(
+                database: database, files: files, assetId: id, fileName: name, kind: "video",
+                mimeType: "video/quicktime", metadata: metadata)
+        }
+    }
+
+    private func store(what: String, _ work: @escaping @Sendable () throws -> Void) {
+        Task.detached(priority: .userInitiated) { [weak self] in
+            do {
+                try work()
+                await self?.work()
+            } catch {
+                await MainActor.run { self?.problem = "The \(what) could not be saved: \(error.localizedDescription)" }
+            }
         }
     }
 

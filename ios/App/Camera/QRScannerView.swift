@@ -44,14 +44,14 @@ final class ScannerController: UIViewController, AVCaptureMetadataOutputObjectsD
         preview.frame = view.bounds
         preview.videoGravity = .resizeAspectFill
         view.layer.addSublayer(preview)
-        let handle = SessionHandle(session: session)
-        DispatchQueue.global(qos: .userInitiated).async { handle.session.startRunning() }
+        let handle = Carry(value: session)
+        DispatchQueue.global(qos: .userInitiated).async { handle.value.startRunning() }
     }
 
     override func viewWillDisappear(_ animated: Bool) {
         super.viewWillDisappear(animated)
-        let handle = SessionHandle(session: session)
-        DispatchQueue.global(qos: .userInitiated).async { handle.session.stopRunning() }
+        let handle = Carry(value: session)
+        DispatchQueue.global(qos: .userInitiated).async { handle.value.stopRunning() }
     }
 
     nonisolated func metadataOutput(

@@ -26,11 +26,13 @@
 		<true/>
 	</dict>
 	<key>NSCameraUsageDescription</key>
-	<string>Halden takes your photos with the camera.</string>
+	<string>Halden takes your photos and videos with the camera.</string>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>Halden connects to your own Halden server in your home network.</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>Halden notes where a photo was taken, how precisely, and which way the camera pointed.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Halden records the sound of your videos.</string>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>

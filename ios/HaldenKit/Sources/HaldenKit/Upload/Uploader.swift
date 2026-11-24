@@ -19,10 +19,11 @@ public actor Uploader {
         self.pieceSize = pieceSize
     }
 
-    /// Takes a photo (already written to `files.originals`) into the library and the queue.
+    /// Takes a photo or video (already written to `files.originals`) into the library and the
+    /// queue. `origin` says where it came from (`camera` for Halden's own).
     public static func enqueue(
         database: HaldenDatabase, files: FileLocations, assetId: String, fileName: String,
-        kind: String, mimeType: String, metadata: UploadMetadata
+        kind: String, mimeType: String, metadata: UploadMetadata, origin: String? = "camera"
     ) throws {
         let size = try FileManager.default.attributesOfItem(atPath: files.original(fileName).path)[.size] as? Int64 ?? 0
         let now = Int64(Date().timeIntervalSince1970 * 1000)
@@ -31,6 +32,16 @@ public actor Uploader {
             timeZoneOffsetMinutes: metadata.timeZoneOffsetMinutes, width: metadata.width,
             height: metadata.height, localFile: fileName, mimeType: mimeType)
         asset.backedUp = false
+        asset.durationMs = metadata.durationMs
+        asset.origin = origin
+        if let place = metadata.location {
+            asset.latitude = place.latitude
+            asset.longitude = place.longitude
+            asset.altitude = place.altitude
+            asset.locationAccuracy = place.horizontalAccuracy
+            asset.heading = place.heading
+            asset.locationSource = "client"
+        }
         let item = UploadItem(
             assetId: asset.id, file: fileName, mimeType: mimeType, size: size, sha256: nil,
             metadata: metadata, uploadId: nil, sent: 0, state: "waiting", attempts: 0,
@@ -198,10 +209,10 @@ public actor Uploader {
         var item = start
         var thumbnailSha = asset?.file("thumbnail")?.sha256
         var previewSha = asset?.file("preview")?.sha256
-        if item.mimeType.hasPrefix("image/") {
+        if item.mimeType.hasPrefix("image/") || item.mimeType.hasPrefix("video/") {
             for (role, edge) in [("thumbnail", Thumbnails.thumbnailEdge), ("preview", Thumbnails.previewEdge)] {
                 if (role == "thumbnail" ? thumbnailSha : previewSha) != nil { continue }
-                guard let made = Thumbnails.make(from: url, edge: edge) else { continue }
+                guard let made = await Thumbnails.picture(of: url, edge: edge) else { continue }
                 _ = try await client.put(
                     file: made.data, role: role, asset: item.assetId, mimeType: "image/jpeg",
                     sha256: made.sha256, width: made.width, height: made.height)
