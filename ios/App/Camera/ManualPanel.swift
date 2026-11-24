@@ -102,7 +102,7 @@ struct ManualPanel: View {
             switch value {
             case .exposureBias:
                 Slider(
-                    value: binding {
+                    value: Binding {
                         manual.exposureBias
                     } set: {
                         change(.exposureBias, to: ($0 * 3).rounded() / 3)
@@ -117,7 +117,7 @@ struct ManualPanel: View {
             case .whiteBalance:
                 VStack(spacing: 2) {
                     Slider(
-                        value: binding {
+                        value: Binding {
                             manual.whiteBalance?.kelvin ?? camera.backend.readings.kelvin ?? 5000
                         } set: { kelvin in
                             camera.setManual { settings in
@@ -126,7 +126,7 @@ struct ManualPanel: View {
                         },
                         in: ManualLimits.whiteBalanceKelvin)
                     Slider(
-                        value: binding {
+                        value: Binding {
                             manual.whiteBalance?.tint ?? 0
                         } set: { tint in
                             camera.setManual { settings in
@@ -139,7 +139,7 @@ struct ManualPanel: View {
                 }
             case .focus:
                 Slider(
-                    value: binding {
+                    value: Binding {
                         manual.focus ?? camera.backend.readings.focus ?? 0.5
                     } set: {
                         change(.focus, to: $0)
@@ -167,21 +167,13 @@ struct ManualPanel: View {
                 steps.indices.min { abs(log2(steps[$0] / value)) < abs(log2(steps[$1] / value)) }
             } ?? steps.count / 2
         return Slider(
-            value: binding {
+            value: Binding {
                 Double(index)
             } set: { position in
                 let step = Int(position.rounded())
                 if steps.indices.contains(step) { set(steps[step]) }
             },
             in: 0...Double(max(steps.count - 1, 1)), step: 1)
-    }
-
-    private func binding(
-        get: @escaping @MainActor @Sendable () -> Double, set: @escaping @MainActor @Sendable (Double) -> Void
-    )
-        -> Binding<Double>
-    {
-        Binding(get: get, set: set)
     }
 
     private func change(_ value: Value, to number: Double?) {
