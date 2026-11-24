@@ -23,6 +23,9 @@ Type=simple
 User=halden
 Group=halden
 ExecStart=/usr/local/bin/halden --config /etc/halden/config.toml serve
+# Two malloc arenas instead of one per core: under load 33 MB instead of 140 MB, just as fast
+# (measured with 100,000 photos, see docs/TESTING.md).
+Environment=MALLOC_ARENA_MAX=2
 # The server notices a changed config file by itself; this only makes it look right away.
 ExecReload=/bin/kill -HUP $MAINPID
 Restart=on-failure

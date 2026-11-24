@@ -189,8 +189,16 @@ impl Box_ {
         (id, result)
     }
 
-    /// `halden doctor --files`: every file intact, nothing missing, nothing unknown.
-    fn assert_files_in_order(&self) {
+    /// `halden doctor --files`: every file intact, nothing missing, nothing unknown; and the file
+    /// journal has nothing left to do.
+    async fn assert_files_in_order(&self) {
+        let db = halden::db::Db::open(&self.config.db_path()).await.unwrap();
+        let open: i64 = sqlx::query_scalar("SELECT count(*) FROM file_journal")
+            .fetch_one(db.read())
+            .await
+            .unwrap();
+        db.close().await;
+        assert_eq!(open, 0, "the file journal still has work");
         let output = Command::new(env!("CARGO_BIN_EXE_halden"))
             .arg("--config")
             .arg(&self.config_path)
@@ -285,7 +293,7 @@ async fn an_upload_survives_a_crash_at_every_step_of_finishing() {
         let files = library_files(&setup.config.storage.library_dir);
         assert_eq!(files.len(), 1, "{point}: exactly one copy: {files:?}");
         assert_eq!(std::fs::read(&files[0]).unwrap(), data, "{point}");
-        setup.assert_files_in_order();
+        setup.assert_files_in_order().await;
     }
 }
 
@@ -343,7 +351,7 @@ async fn a_conversion_placed_but_not_recorded_is_made_again_without_leftovers() 
         2,
         "original and one copy, no leftover: {files:?}"
     );
-    setup.assert_files_in_order();
+    setup.assert_files_in_order().await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -412,5 +420,5 @@ async fn a_photo_deleted_for_good_leaves_nothing_behind_after_a_crash() {
         detail["deletedAt"].is_i64() || detail["error"] == "not_found",
         "{detail}"
     );
-    setup.assert_files_in_order();
+    setup.assert_files_in_order().await;
 }

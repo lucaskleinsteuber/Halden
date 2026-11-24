@@ -22,9 +22,11 @@ RUN apt-get update \
  && mkdir -p /config /data /library \
  && chown halden:halden /config /data /library
 COPY packaging/docker/entrypoint.sh /usr/local/bin/halden-entrypoint
-# Updates come with a new image; the server and the apps know that from this.
+# Updates come with a new image; the server and the apps know that from this. Two malloc arenas
+# keep memory under load at a quarter, just as fast (see docs/TESTING.md).
 ENV HALDEN_IN_DOCKER=1 \
-    HALDEN_CONFIG=/config/config.toml
+    HALDEN_CONFIG=/config/config.toml \
+    MALLOC_ARENA_MAX=2
 VOLUME ["/config", "/data", "/library"]
 EXPOSE 47130/tcp 5353/udp
 HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 CMD ["halden", "health"]

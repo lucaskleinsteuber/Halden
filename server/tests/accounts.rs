@@ -552,3 +552,189 @@ async fn server_info_and_setup_still_work_without_accounts() {
     assert_eq!(info["passwordLogin"], true);
     server.shutdown().await.unwrap();
 }
+
+async fn device_id(api: &Api, token: &str) -> String {
+    api.get("/api/v1/me", token).await.body["device"]["id"]
+        .as_str()
+        .unwrap()
+        .to_string()
+}
+
+async fn last_seen(db: &halden::db::Db, device: &str) -> i64 {
+    sqlx::query_scalar("SELECT last_seen_at FROM devices WHERE id = ?")
+        .bind(device)
+        .fetch_one(db.read())
+        .await
+        .unwrap()
+}
+
+async fn set_last_seen(db: &halden::db::Db, device: &str, at: i64) {
+    sqlx::query("UPDATE devices SET last_seen_at = ? WHERE id = ?")
+        .bind(at)
+        .bind(device)
+        .execute(db.write())
+        .await
+        .unwrap();
+}
+
+/// A device unused for longer than `auth.device_inactive_days` (365) is signed out at its next
+/// request. "Last seen" is written at most once a minute, unless the address changed.
+#[tokio::test]
+async fn long_unused_devices_are_signed_out_and_last_seen_is_noted_sparingly() {
+    const DAY: i64 = 24 * 60 * 60 * 1000;
+    let api = Api::start().await;
+    api.add_user("lucas", LUCAS_PASSWORD, Role::Owner).await;
+    let old = api.token("lucas", LUCAS_PASSWORD, iphone()).await;
+    let recent = api.token("lucas", LUCAS_PASSWORD, mac()).await;
+    let (old_id, recent_id) = (device_id(&api, &old).await, device_id(&api, &recent).await);
+    let db = api.pool().await;
+    let now = halden::db::now_ms();
+    set_last_seen(&db, &old_id, now - 366 * DAY).await;
+    set_last_seen(&db, &recent_id, now - 364 * DAY).await;
+
+    let gone = api.get("/api/v1/me", &old).await;
+    assert_eq!(gone.status, 401);
+    assert!(gone.body["message"].as_str().unwrap().contains("long time"));
+    assert_eq!(api.get("/api/v1/me", &recent).await.status, 200);
+    let revoked: Option<i64> = sqlx::query_scalar("SELECT revoked_at FROM devices WHERE id = ?")
+        .bind(&old_id)
+        .fetch_one(db.read())
+        .await
+        .unwrap();
+    assert!(revoked.is_some(), "signed out for good, not only refused");
+
+    // Seen half a minute ago from the same address: not written again.
+    let half_a_minute_ago = halden::db::now_ms() - 30_000;
+    set_last_seen(&db, &recent_id, half_a_minute_ago).await;
+    api.get("/api/v1/me", &recent).await;
+    assert_eq!(last_seen(&db, &recent_id).await, half_a_minute_ago);
+    // Two minutes ago: written.
+    let before = halden::db::now_ms();
+    set_last_seen(&db, &recent_id, before - 120_000).await;
+    api.get("/api/v1/me", &recent).await;
+    assert!(last_seen(&db, &recent_id).await >= before);
+    db.close().await;
+    api.stop().await;
+}
+
+#[tokio::test]
+async fn device_names_and_installation_ids_are_checked_at_sign_in() {
+    let api = Api::start().await;
+    api.add_user("lucas", LUCAS_PASSWORD, Role::Owner).await;
+    for bad in [
+        json!({ "name": "", "platform": "ios", "installationId": "install-ok-1" }),
+        json!({ "name": "x".repeat(10_000), "platform": "ios", "installationId": "install-ok-1" }),
+        json!({ "name": "iPhone", "platform": "ios", "installationId": "short" }),
+        json!({ "name": "iPhone", "platform": "ios", "installationId": "with space 1" }),
+    ] {
+        let reply = api.login("lucas", LUCAS_PASSWORD, bad.clone()).await;
+        assert_eq!(
+            (reply.status, reply.error()),
+            (422, "validation_failed"),
+            "{bad}"
+        );
+    }
+    api.stop().await;
+}
+
+/// Owners hear about new devices of every account; members only about their own.
+#[tokio::test]
+async fn new_devices_are_counted_for_the_right_people() {
+    let api = Api::start().await;
+    api.add_user("lucas", LUCAS_PASSWORD, Role::Owner).await;
+    api.add_user("anna", ANNA_PASSWORD, Role::Member).await;
+    let owner = api.token("lucas", LUCAS_PASSWORD, iphone()).await;
+    api.token("lucas", LUCAS_PASSWORD, mac()).await;
+    let anna = api
+        .token(
+            "anna",
+            ANNA_PASSWORD,
+            device("Anna's iPhone", "install-anna-1"),
+        )
+        .await;
+    api.token(
+        "anna",
+        ANNA_PASSWORD,
+        device("Anna's iPad", "install-anna-2"),
+    )
+    .await;
+    let count = |reply: common::Reply| reply.body["unconfirmedDevices"].as_i64().unwrap();
+    assert_eq!(count(api.get("/api/v1/me", &anna).await), 1, "her iPad");
+    assert_eq!(
+        count(api.get("/api/v1/me", &owner).await),
+        2,
+        "his Mac and her iPad"
+    );
+    api.stop().await;
+}
+
+/// Anyone may make a pairing code for themselves; for someone else only an owner, with the
+/// password, and the security log says who did it. A code is valid for five minutes.
+#[tokio::test]
+async fn pairing_codes_for_oneself_and_for_others() {
+    let api = Api::start().await;
+    let lucas = api.add_user("lucas", LUCAS_PASSWORD, Role::Owner).await;
+    let anna = api.add_user("anna", ANNA_PASSWORD, Role::Member).await;
+    let owner = api.token("lucas", LUCAS_PASSWORD, iphone()).await;
+    let member = api
+        .token(
+            "anna",
+            ANNA_PASSWORD,
+            device("Anna's iPhone", "install-anna-1"),
+        )
+        .await;
+
+    let before = halden::db::now_ms();
+    let own = api
+        .post(
+            "/api/v1/pairing-codes",
+            Some(&member),
+            json!({ "userId": anna.id }),
+        )
+        .await;
+    assert_eq!(
+        own.status, 201,
+        "naming oneself needs no password: {}",
+        own.body
+    );
+    let expires = own.body["expiresAt"].as_i64().unwrap();
+    assert!(
+        (before + 295_000..=halden::db::now_ms() + 300_000).contains(&expires),
+        "valid for five minutes: {}",
+        expires - before
+    );
+    let other = api
+        .post(
+            "/api/v1/pairing-codes",
+            Some(&member),
+            json!({ "userId": lucas.id }),
+        )
+        .await;
+    assert_eq!(other.status, 403);
+
+    let for_anna = api
+        .post(
+            "/api/v1/pairing-codes",
+            Some(&owner),
+            json!({ "userId": anna.id, "currentPassword": LUCAS_PASSWORD }),
+        )
+        .await;
+    assert_eq!(for_anna.status, 201, "{}", for_anna.body);
+    assert_eq!(for_anna.body["userId"], anna.id.as_str());
+    let log = api.get("/api/v1/security-log", &member).await;
+    let entries = log.body["entries"].as_array().unwrap();
+    let made: Vec<&Value> = entries
+        .iter()
+        .filter(|entry| entry["event"] == "pairing_code_created")
+        .collect();
+    assert_eq!(made.len(), 2, "{entries:?}");
+    assert!(
+        made.iter().any(|entry| entry["detail"] == "by lucas"),
+        "{made:?}"
+    );
+    assert!(
+        made.iter().any(|entry| entry["detail"].is_null()),
+        "{made:?}"
+    );
+    api.stop().await;
+}

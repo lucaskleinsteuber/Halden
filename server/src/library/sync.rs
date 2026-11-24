@@ -76,15 +76,6 @@ pub async fn changes(
     })
 }
 
-/// The newest number of an account: a device that has it is up to date.
-pub async fn latest(db: &Db, user_id: &str) -> Result<i64, sqlx::Error> {
-    let (latest,): (Option<i64>,) = sqlx::query_as("SELECT max(seq) FROM assets WHERE user_id = ?")
-        .bind(user_id)
-        .fetch_one(db.read())
-        .await?;
-    Ok(latest.unwrap_or(0))
-}
-
 /// Removes tombstones older than `days` and raises the floor below which devices must start
 /// over. Returns how many went.
 pub async fn purge_tombstones(db: &Db, days: u32, now: i64) -> Result<u64, sqlx::Error> {

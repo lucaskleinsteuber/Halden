@@ -180,6 +180,11 @@ for _ in $(seq 1 180); do
 done
 [ "$version" = 0.0.2 ] || fail "still $version after the update"
 token=$(login 2)
+# The updater notes "installed" once it has seen the new version answer (it asks every 500 ms).
+for _ in $(seq 1 30); do
+  call "$api/admin/update" | jq -e '.state == "installed" and .installed == "0.0.2"' >/dev/null && break
+  sleep 1
+done
 call "$api/admin/update" | jq -e '.state == "installed" and .installed == "0.0.2"' >/dev/null \
   || fail "status after the update: $(call "$api/admin/update")"
 call "$api/sync" | jq -e '.assets | length == 3' >/dev/null || fail "photos lost in the update"

@@ -6,8 +6,8 @@ name: Server (intensive)
 # - system: install, run, update and roll back the real server under systemd's hardening
 # - disks: disks that fill up, turn read-only, or fail in the middle of a copy (loop devices)
 # - long: every test with ten times the random cases
-# - memory: the load test with the system allocator (with and without MALLOC_ARENA_MAX=2) and
-#   with mimalloc, and a 15-minute soak
+# - memory: the load test as shipped (system allocator, MALLOC_ARENA_MAX=2), without the arena
+#   limit, and with mimalloc, and a 15-minute soak as shipped
 # - fuzz: two minutes per parser of mutated input
 # - audit: known vulnerabilities in the dependencies
 
@@ -111,32 +111,33 @@ jobs:
           cp target/release/halden /tmp/halden-mimalloc
           cargo build --release --locked
           cp target/release/halden /tmp/halden-system
-      - name: Load test with the system allocator (the default)
-        env:
-          HALDEN_BINARY: /tmp/halden-system
-          ROUNDS: "10"
-        run: cargo run --release --locked --example loadtest /tmp/system.md
-      - name: Load test with the system allocator and MALLOC_ARENA_MAX=2
+      - name: Load test as shipped (system allocator, MALLOC_ARENA_MAX=2 like the service)
         env:
           HALDEN_BINARY: /tmp/halden-system
           MALLOC_ARENA_MAX: "2"
           ROUNDS: "10"
         run: cargo run --release --locked --example loadtest /tmp/system-arenas.md
+      - name: Load test without the arena limit
+        env:
+          HALDEN_BINARY: /tmp/halden-system
+          ROUNDS: "10"
+        run: cargo run --release --locked --example loadtest /tmp/system.md
       - name: Load test with mimalloc
         env:
           HALDEN_BINARY: /tmp/halden-mimalloc
           ROUNDS: "10"
         run: cargo run --release --locked --example loadtest /tmp/mimalloc.md
-      - name: 15-minute soak
+      - name: 15-minute soak as shipped
         env:
           HALDEN_BINARY: /tmp/halden-system
           HALDEN_SERVER_LOG: /tmp/soak-server.log
+          MALLOC_ARENA_MAX: "2"
           SOAK_MINUTES: "15"
         run: cargo run --release --locked --example loadtest /tmp/soak.md
       - name: Summary
         if: always()
         run: |
-          for file in /tmp/system.md /tmp/system-arenas.md /tmp/mimalloc.md /tmp/soak.md; do
+          for file in /tmp/system-arenas.md /tmp/system.md /tmp/mimalloc.md /tmp/soak.md; do
             [ -f "$file" ] && { echo "## $(basename "$file" .md)"; cat "$file"; echo; } >> "$GITHUB_STEP_SUMMARY"
           done
           if [ -f /tmp/soak-server.log ]; then

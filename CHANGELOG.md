@@ -14,12 +14,21 @@ There are no version numbers yet; entries are grouped by date until the first re
   restore and delete-for-good from three devices at once), for the life of an upload (announced
   again, replaced, given up, finished early, expired, partial files left by a crash), and a
   4.3 GB file sent whole with offsets and ranges past 4 GiB (nightly, or `HALDEN_BIG_FILE=1`).
+- Tests for what mutation testing (`cargo mutants`) showed no test would notice: devices signed
+  out after a year unused, "last seen" written at most once a minute, device names and
+  installation ids at sign-in, who hears about new devices, who may make pairing codes for
+  whom and for how long they hold, the network rule at the door, the rate limiter staying small
+  under thousands of addresses and remembering failures for a day, the longest allowed
+  password, the trash and tombstone deadlines to the day, and the file journal finishing its
+  work.
 
 ### Changed
 
 - Server: the system allocator on Linux too. Measured on Linux with 100,000 photos: 26 MB at
   rest and 114–120 MB under load, against 54 MB and 184–226 MB with mimalloc. mimalloc stays
   available as `--features mimalloc` to compare.
+- Server on Linux: the systemd service and the Docker image set `MALLOC_ARENA_MAX=2`. Under load
+  the server then needs 33 MB instead of 140–147 MB, at the same speed.
 
 ### Fixed
 
@@ -38,6 +47,8 @@ There are no version numbers yet; entries are grouped by date until the first re
   as it would have when announced later; the iPhone app understands that answer at every step
   of an upload.
 - Tests: the HEIC tests accept `heif-convert` where `heif-dec` is missing (Ubuntu 24.04).
+- Tests: the system test checked the update status before the updater had written
+  "installed" (it notes that once it has seen the new version answer).
 - Tests: servers started as their own process are stopped like systemd does (SIGTERM first), so
   coverage builds count what they ran; the nightly "long" job runs a debug build again (the
   failpoint and updater tests need it).

@@ -158,47 +158,94 @@ async fn photos_go_to_the_trash_before_they_are_gone() {
 
 #[tokio::test]
 async fn the_trash_empties_itself_and_old_tombstones_go() {
+    const DAY: i64 = 24 * 60 * 60 * 1000;
     let api = Api::start().await;
     let token = owner(&api).await;
-    let id = Uuid::new_v4().to_string();
-    let kept = Uuid::new_v4().to_string();
-    api.upload(&token, &id, &random_bytes(100), "image/heic", json!({}))
-        .await;
-    api.upload(&token, &kept, &random_bytes(101), "image/heic", json!({}))
-        .await;
-    api.post("/api/v1/assets/trash", Some(&token), ids(&[&id, &kept]))
-        .await;
-
+    let [old, kept, gone, young]: [String; 4] = std::array::from_fn(|_| Uuid::new_v4().to_string());
+    for (n, id) in [&old, &kept, &gone, &young].into_iter().enumerate() {
+        api.upload(&token, id, &random_bytes(100 + n), "image/heic", json!({}))
+            .await;
+    }
+    api.post(
+        "/api/v1/assets/trash",
+        Some(&token),
+        ids(&[&old, &kept, &gone, &young]),
+    )
+    .await;
     let db = Db::open(&api.config.db_path()).await.unwrap();
-    sqlx::query("UPDATE assets SET trashed_at = 1 WHERE id = ?")
-        .bind(&id)
-        .execute(db.write())
-        .await
-        .unwrap();
+    let set = |column: &'static str, id: &str, at: i64| {
+        let (db, id) = (db.clone(), id.to_string());
+        async move {
+            let sql = match column {
+                "trashed_at" => "UPDATE assets SET trashed_at = ? WHERE id = ?",
+                _ => "UPDATE assets SET deleted_at = ? WHERE id = ?",
+            };
+            sqlx::query(sql)
+                .bind(at)
+                .bind(id)
+                .execute(db.write())
+                .await
+                .unwrap();
+        }
+    };
+
+    // 30 days in the trash (`library.trash_days`): 31 days ago goes, 29 days ago stays.
+    let now = halden::db::now_ms();
+    set("trashed_at", &old, now - 31 * DAY).await;
+    set("trashed_at", &kept, now - 29 * DAY).await;
     server::tidy(&db, &api.config).await;
-    let expired = api.get(&format!("/api/v1/assets/{id}"), &token).await;
+    let expired = api.get(&format!("/api/v1/assets/{old}"), &token).await;
     assert!(
         expired.body["deletedAt"].is_i64(),
-        "30 days in the trash: deleted"
+        "31 days in the trash: deleted"
     );
     let recent = api.get(&format!("/api/v1/assets/{kept}"), &token).await;
-    assert!(recent.body["deletedAt"].is_null(), "still in the trash");
+    assert!(
+        recent.body["deletedAt"].is_null(),
+        "29 days: still in the trash"
+    );
 
-    sqlx::query("UPDATE assets SET deleted_at = 1 WHERE id = ?")
-        .bind(&id)
-        .execute(db.write())
+    // Tombstones stay 90 days (`library.tombstone_days`).
+    api.post("/api/v1/assets/delete", Some(&token), ids(&[&gone, &young]))
+        .await;
+    set("deleted_at", &gone, now - 91 * DAY).await;
+    set("deleted_at", &young, now - 89 * DAY).await;
+    set("deleted_at", &old, now - 89 * DAY).await;
+    let gone_seq = api
+        .get(&format!("/api/v1/assets/{gone}"), &token)
         .await
+        .body["seq"]
+        .as_i64()
         .unwrap();
     server::tidy(&db, &api.config).await;
     db.close().await;
     assert_eq!(
-        api.get(&format!("/api/v1/assets/{id}"), &token)
+        api.get(&format!("/api/v1/assets/{gone}"), &token)
             .await
             .status,
-        404
+        404,
+        "91 days: the tombstone is gone"
     );
-    let behind = api.get("/api/v1/sync?since=1", &token).await;
+    assert_eq!(
+        api.get(&format!("/api/v1/assets/{young}"), &token)
+            .await
+            .status,
+        200
+    );
+
+    // A device that saw the removed tombstone goes on; one from before must start over; a
+    // device starting from zero just syncs.
+    let caught_up = api
+        .get(&format!("/api/v1/sync?since={gone_seq}"), &token)
+        .await;
+    assert_eq!(caught_up.body["resetRequired"], false, "{}", caught_up.body);
+    let behind = api
+        .get(&format!("/api/v1/sync?since={}", gone_seq - 1), &token)
+        .await;
     assert_eq!(behind.body["resetRequired"], true);
+    let fresh = api.get("/api/v1/sync?since=0", &token).await;
+    assert_eq!(fresh.body["resetRequired"], false);
+    assert_eq!(fresh.body["assets"].as_array().unwrap().len(), 3);
     api.stop().await;
 }
 

@@ -161,6 +161,19 @@ impl HomeNetworkAcceptor {
     pub fn new(policy: NetworkPolicy) -> Self {
         Self { policy }
     }
+
+    /// Whether a connection from `peer` may go on to TLS.
+    fn admit(&self, peer: IpAddr) -> io::Result<()> {
+        if self.policy.allows(peer) {
+            Ok(())
+        } else {
+            tracing::debug!(%peer, "refused a connection from outside the home network");
+            Err(io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                "connection from outside the home network",
+            ))
+        }
+    }
 }
 
 impl<S> Accept<TcpStream, S> for HomeNetworkAcceptor {
@@ -169,19 +182,11 @@ impl<S> Accept<TcpStream, S> for HomeNetworkAcceptor {
     type Future = std::future::Ready<io::Result<(TcpStream, S)>>;
 
     fn accept(&self, stream: TcpStream, service: S) -> Self::Future {
-        let result = match stream.peer_addr() {
-            Ok(peer) if self.policy.allows(peer.ip()) => {
-                stream.set_nodelay(true).map(|()| (stream, service))
-            }
-            Ok(peer) => {
-                tracing::debug!(peer = %peer.ip(), "refused a connection from outside the home network");
-                Err(io::Error::new(
-                    io::ErrorKind::PermissionDenied,
-                    "connection from outside the home network",
-                ))
-            }
-            Err(error) => Err(error),
-        };
+        let result = stream
+            .peer_addr()
+            .and_then(|peer| self.admit(peer.ip()))
+            .and_then(|()| stream.set_nodelay(true))
+            .map(|()| (stream, service));
         std::future::ready(result)
     }
 }
@@ -206,6 +211,44 @@ mod tests {
 
     fn ip(text: &str) -> IpAddr {
         text.parse().unwrap()
+    }
+
+    #[test]
+    fn the_door_refuses_outsiders_before_tls() {
+        let acceptor =
+            |config: NetworkConfig| HomeNetworkAcceptor::new(NetworkPolicy::from_config(&config));
+        let home = acceptor(NetworkConfig::default());
+        assert!(home.admit(ip("192.168.1.20")).is_ok());
+        assert!(home.admit(ip("100.101.102.103")).is_ok(), "Tailscale");
+        let refused = home.admit(ip("203.0.113.9")).unwrap_err();
+        assert_eq!(refused.kind(), io::ErrorKind::PermissionDenied);
+        let office = acceptor(NetworkConfig {
+            allowed_networks: vec!["203.0.113.0/24".parse().unwrap()],
+            ..NetworkConfig::default()
+        });
+        assert!(office.admit(ip("203.0.113.9")).is_ok());
+        assert!(office.admit(ip("198.51.100.1")).is_err());
+        let public = acceptor(NetworkConfig {
+            allow_public: true,
+            ..NetworkConfig::default()
+        });
+        assert!(public.admit(ip("198.51.100.1")).is_ok());
+    }
+
+    #[test]
+    fn networks_are_written_back_as_they_are_read() {
+        let net: Cidr = "203.0.113.0/24".parse().unwrap();
+        assert_eq!(String::from(net), "203.0.113.0/24");
+        let single: Cidr = "2001:db8::1".parse().unwrap();
+        assert_eq!(String::from(single), "2001:db8::1/128");
+    }
+
+    #[test]
+    fn local_addresses_are_for_others_to_reach() {
+        for address in local_addresses() {
+            assert!(!address.is_loopback(), "{address}");
+            assert!(is_home_network(address), "{address}");
+        }
     }
 
     #[test]

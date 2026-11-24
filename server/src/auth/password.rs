@@ -110,6 +110,10 @@ mod tests {
         assert!(check_new("short", "lucas").is_err());
         assert!(check_new("Lucas123", "lucas123").is_err());
         assert!(check_new(&"x".repeat(MAX_BYTES + 1), "lucas").is_err());
+        assert!(
+            check_new(&"x".repeat(MAX_BYTES), "lucas").is_ok(),
+            "the limit itself is fine"
+        );
         assert!(check_new("correct horse", "lucas").is_ok());
         // Characters count, not bytes: eight umlauts are eight characters.
         assert!(check_new("ääääääää", "lucas").is_ok());
@@ -128,5 +132,19 @@ mod tests {
         assert!(!verify("correct horsf".into(), Some(first)).await);
         assert!(!verify("correct horse".into(), None).await);
         assert!(!verify("anything".into(), Some("not a hash".into())).await);
+    }
+
+    /// The longest allowed password works; the stand-in hash for unknown users is a real hash
+    /// with the same cost, so checking it takes as long as checking a real one.
+    #[tokio::test]
+    async fn the_longest_password_works_and_the_stand_in_costs_the_same() {
+        let longest = "y".repeat(MAX_BYTES);
+        let stored = hash(longest.clone()).await.unwrap();
+        assert!(verify(longest, Some(stored.clone())).await);
+        assert!(!verify("y".repeat(MAX_BYTES + 1), Some(stored.clone())).await);
+        let params = format!("m={MEMORY_KIB},t={PASSES},p={LANES}");
+        assert!(stored.contains(&params), "{stored}");
+        let stand_in = argon2::PasswordHash::new(stand_in_hash()).expect("a valid hash");
+        assert!(stand_in.to_string().contains(&params), "{stand_in}");
     }
 }

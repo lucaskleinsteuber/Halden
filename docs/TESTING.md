@@ -29,7 +29,7 @@ runs the fast checks; the slow and root-only ones run every night (and by hand) 
 | system | on a fresh Ubuntu: `get-halden.sh` installs from signed stand-in releases (a wrongly signed one is refused), the hardened systemd service runs, real HEIC photos and HEVC videos get thumbnails and copies inside the sandbox, a mirror under `/mnt` gets checked copies, an update from the app installs 0.0.2, a broken 0.0.3 is rolled back, every file is checked, a backup is restored (`packaging/tests/system-test.sh`) |
 | disks | loop devices: the library disk fills up mid-upload, turns read-only, the system disk fills up, the mirror disk starts failing in the middle of a copy (device-mapper) (`server/tests/disks.rs`, `HALDEN_ROOT_TESTS=1`) |
 | long | every test with ten times the random cases (`HALDEN_TEST_SCALE=10`), and a 4.3 GB file sent whole, with offsets and ranges past 4 GiB |
-| memory | the load test with the system allocator (with and without `MALLOC_ARENA_MAX=2`) and with mimalloc, and a 15-minute soak that watches memory, open files and speed |
+| memory | the load test as shipped (system allocator, `MALLOC_ARENA_MAX=2`), without the arena limit and with mimalloc, and a 15-minute soak as shipped that watches memory, open files and speed |
 | fuzz | two minutes of mutated input per parser (`server/fuzz`) |
 | audit | `cargo audit` |
 
@@ -38,6 +38,10 @@ runs the fast checks; the slow and root-only ones run every night (and by hand) 
 - **Allocator:** the system allocator, everywhere. Under the same load with 100,000 photos on
   Linux (CI, 23.11.2026) it used 26 MB at rest and 114–120 MB under load, mimalloc 54 MB and
   184–226 MB; on macOS the picture was the same.
+- **Malloc arenas on Linux:** glibc keeps one arena per core, and each keeps freed memory.
+  With `MALLOC_ARENA_MAX=2` the server used 33 MB under load instead of 140–147 MB, at the same
+  speed (CI, 24.11.2026). The systemd service and the Docker image set it; when running
+  `halden serve` by hand on Linux, set it yourself.
 
 ## By hand
 

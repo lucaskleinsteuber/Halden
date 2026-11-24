@@ -294,14 +294,15 @@ async fn a_broken_connection_continues_where_it_stopped() {
         .await;
     assert!(broken.is_err() || broken.unwrap().status() != 200);
 
-    // The server kept what arrived; the phone asks where to go on.
+    // The server kept what arrived; the phone asks where to go on. (On a busy machine the server
+    // may still be writing the last bytes that arrived; until then it reports less.)
     let mut offset = 0;
-    for _ in 0..50 {
+    for _ in 0..500 {
         let status = api
             .get(&format!("/api/v1/uploads/{upload_id}"), &token)
             .await;
         offset = status.body["offset"].as_u64().unwrap() as usize;
-        if offset > 0 && status.status == 200 {
+        if offset == MIB + MIB / 2 && status.status == 200 {
             break;
         }
         tokio::time::sleep(std::time::Duration::from_millis(20)).await;

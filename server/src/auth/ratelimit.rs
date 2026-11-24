@@ -164,6 +164,74 @@ pub fn wait_after(count: u32) -> Option<Duration> {
 mod tests {
     use super::*;
 
+    /// Thousands of addresses (a scan) can't make the limiter grow without end: once it is full,
+    /// addresses whose minute is over are dropped, and those still counting are kept.
+    #[test]
+    fn many_addresses_dont_fill_memory() {
+        let limiter = RateLimiter::new();
+        let start = Instant::now();
+        for i in 0..MAX_ENTRIES as u32 {
+            limiter
+                .attempt_from(IpAddr::from((0x0a00_0000 + i).to_be_bytes()), start)
+                .unwrap();
+        }
+        let soon = start + Duration::from_secs(30);
+        limiter
+            .attempt_from("192.168.1.1".parse().unwrap(), soon)
+            .unwrap();
+        assert_eq!(
+            limiter.state().ips.len(),
+            MAX_ENTRIES + 1,
+            "all still counting"
+        );
+        let later = start + IP_WINDOW + Duration::from_secs(1);
+        limiter
+            .attempt_from("192.168.1.2".parse().unwrap(), later)
+            .unwrap();
+        assert_eq!(limiter.state().ips.len(), 2, "only the two recent ones");
+    }
+
+    /// The same for usernames: when full, only names with a recent failure or a running wait stay.
+    #[test]
+    fn many_usernames_dont_fill_memory() {
+        let limiter = RateLimiter::new();
+        let start = Instant::now();
+        for i in 0..MAX_ENTRIES {
+            limiter.user_failed(&format!("user{i}"), start);
+        }
+        // Locked once, long ago: its wait is over, so it can go.
+        for _ in 0..FREE_FAILURES + 1 {
+            limiter.user_failed("long ago", start);
+        }
+        let recent = start + FORGET_AFTER - Duration::from_secs(60 * 60);
+        limiter.user_failed("recent", recent);
+        let now = start + FORGET_AFTER + Duration::from_secs(60);
+        limiter.user_failed("new", now);
+        let state = limiter.state();
+        let mut left: Vec<&String> = state.users.keys().collect();
+        left.sort();
+        assert_eq!(left, ["new", "recent"]);
+    }
+
+    /// Failures are remembered for a day: five wrong passwords in the morning and one more in the
+    /// afternoon still mean a wait.
+    #[test]
+    fn failures_are_remembered_for_a_day() {
+        let limiter = RateLimiter::new();
+        let morning = Instant::now();
+        for _ in 0..FREE_FAILURES {
+            limiter.user_failed("lucas", morning);
+        }
+        let afternoon = morning + Duration::from_secs(5 * 60 * 60);
+        assert!(limiter.check_user("lucas", afternoon).is_ok());
+        limiter.user_failed("lucas", afternoon);
+        assert!(limiter.check_user("lucas", afternoon).is_err());
+        // A day after the last one, a fresh start.
+        let tomorrow = afternoon + FORGET_AFTER;
+        limiter.user_failed("lucas", tomorrow);
+        assert!(limiter.check_user("lucas", tomorrow).is_ok());
+    }
+
     #[test]
     fn waits_double_up_to_fifteen_minutes() {
         assert_eq!(wait_after(1), None);
