@@ -406,10 +406,36 @@ async fn announcements_are_checked() {
         let reply = api.post("/api/v1/uploads", Some(&token), bad).await;
         assert_eq!(reply.error(), "validation_failed", "{key}");
     }
-    let mut far = base.clone();
-    far["metadata"] = json!({ "location": { "latitude": 123.0, "longitude": 0.0 } });
-    let reply = api.post("/api/v1/uploads", Some(&token), far).await;
-    assert_eq!(reply.error(), "validation_failed");
+    let place = |extra: Value| {
+        let mut location = json!({ "latitude": 50.0, "longitude": 9.0 });
+        for (key, value) in extra.as_object().unwrap() {
+            location[key] = value.clone();
+        }
+        json!({ "location": location })
+    };
+    for (metadata, valid) in [
+        (place(json!({ "latitude": 123.0 })), false),
+        (place(json!({ "longitude": -181.0 })), false),
+        (place(json!({ "longitude": 180.0 })), true),
+        (place(json!({ "heading": 361.0 })), false),
+        (place(json!({ "heading": 360.0 })), true),
+        (place(json!({ "horizontalAccuracy": -1.0 })), false),
+        (place(json!({ "horizontalAccuracy": 0.0 })), true),
+        (json!({ "timeZone": "x".repeat(65) }), false),
+        (json!({ "timeZone": "x".repeat(64) }), true),
+        (json!({ "originalFilename": "x".repeat(256) }), false),
+        (json!({ "originalFilename": "x".repeat(255) }), true),
+    ] {
+        let mut announced = base.clone();
+        announced["assetId"] = json!(Uuid::new_v4().to_string());
+        announced["metadata"] = metadata.clone();
+        let reply = api.post("/api/v1/uploads", Some(&token), announced).await;
+        if valid {
+            assert_eq!(reply.status, 201, "{metadata}: {}", reply.body);
+        } else {
+            assert_eq!(reply.error(), "validation_failed", "{metadata}");
+        }
+    }
 
     // A Live Photo's video can't come before its photo.
     let mut early = base.clone();
@@ -782,6 +808,15 @@ async fn without_phone_metadata_the_file_tells_time_and_place() {
         std::fs::read(library_file(&api, "lucas/2026/11/2026-11-23_15-22-10.jpg")).unwrap(),
         photo
     );
+    // What the file said is kept as it was, next to any later corrections.
+    let id = asset["id"].as_str().unwrap();
+    let detail = api.get(&format!("/api/v1/assets/{id}"), &token).await;
+    let exif = &detail.body["exif"];
+    assert!(exif.is_object(), "{}", detail.body);
+    assert!(
+        exif["dateTimeOriginal"].as_str().unwrap().contains("2026"),
+        "{exif}"
+    );
     api.stop().await;
 }
 
@@ -973,6 +1008,31 @@ async fn forgotten_uploads_and_stray_files_are_thrown_away() {
         .await
         .unwrap();
     db.close().await;
+    // Finished uploads are remembered for 30 days (for a phone that asks late), then forgotten.
+    let mut finished = Vec::new();
+    for age_days in [31_i64, 29] {
+        let data = random_bytes(1000 + age_days as usize);
+        let created = announce(
+            &api,
+            &token,
+            &Uuid::new_v4().to_string(),
+            &data,
+            "image/heic",
+            json!({}),
+        )
+        .await;
+        let id = created.body["uploadId"].as_str().unwrap().to_string();
+        send(&api, &token, &id, 0, data).await;
+        let db = api.pool().await;
+        sqlx::query("UPDATE uploads SET updated_at = ? WHERE id = ?")
+            .bind(halden::db::now_ms() - age_days * 24 * 60 * 60 * 1000)
+            .bind(&id)
+            .execute(db.write())
+            .await
+            .unwrap();
+        db.close().await;
+        finished.push(format!("/api/v1/uploads/{id}"));
+    }
     let stray = api
         .config
         .incoming_dir()
@@ -1005,6 +1065,20 @@ async fn forgotten_uploads_and_stray_files_are_thrown_away() {
             .await
             .status,
         200
+    );
+    let mut forgotten = false;
+    for _ in 0..100 {
+        if api.get(&finished[0], &token).await.status == 404 {
+            forgotten = true;
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    assert!(forgotten, "a finished upload from 31 days ago is forgotten");
+    let recent = api.get(&finished[1], &token).await;
+    assert_eq!(
+        (recent.status, &recent.body["state"]),
+        (200, &json!("completed"))
     );
     api.stop().await;
 }
@@ -1111,5 +1185,89 @@ async fn a_file_over_four_gib_goes_through_whole() {
         );
         assert_eq!(part.bytes().await.unwrap(), bytes(start, end - start + 1));
     }
+    api.stop().await;
+}
+
+/// A phone that sends more than it announced: the server keeps exactly the announced bytes.
+#[tokio::test]
+async fn extra_bytes_after_the_end_are_ignored() {
+    let api = Api::start().await;
+    api.add_user("lucas", LUCAS_PASSWORD, Role::Owner).await;
+    let token = api.token("lucas", LUCAS_PASSWORD, iphone()).await;
+    let data = random_bytes(300_000);
+    let asset = Uuid::new_v4().to_string();
+    let before = halden::db::now_ms();
+    let created = announce(&api, &token, &asset, &data, "image/heic", json!({})).await;
+    // Unfinished uploads are kept for `storage.upload_expiry_days` (7) after the last progress.
+    let expires = created.body["expiresAt"].as_i64().unwrap();
+    let week = 7 * 24 * 60 * 60 * 1000;
+    assert!((before + week..=halden::db::now_ms() + week).contains(&expires));
+    let upload = created.body["uploadId"].as_str().unwrap();
+    let mut longer = data.clone();
+    longer.extend_from_slice(&random_bytes(70_000));
+    let done = send(&api, &token, upload, 0, longer).await;
+    assert_eq!(done.body["state"], "completed", "{}", done.body);
+    assert_eq!(done.body["asset"]["files"][0]["size"], data.len());
+    let stored = find_original(&api.config.storage.library_dir.join("lucas"));
+    assert_eq!(std::fs::read(stored).unwrap(), data);
+    api.stop().await;
+}
+
+/// A Live Photo: the video comes after its photo and lies next to it under the same name, so
+/// the pair stays together in any file browser.
+#[tokio::test]
+async fn a_live_photo_video_lies_next_to_its_photo() {
+    let api = Api::start().await;
+    api.add_user("lucas", LUCAS_PASSWORD, Role::Owner).await;
+    let token = api.token("lucas", LUCAS_PASSWORD, iphone()).await;
+    let asset = Uuid::new_v4().to_string();
+    let photo = upload(
+        &api,
+        &token,
+        &asset,
+        &random_bytes(4000),
+        berlin_afternoon(),
+    )
+    .await;
+    assert_eq!(photo["files"].as_array().unwrap().len(), 1);
+
+    let video = random_bytes(9000);
+    let created = api
+        .post(
+            "/api/v1/uploads",
+            Some(&token),
+            json!({ "assetId": asset, "role": "paired_video", "size": video.len(),
+                "sha256": sha_hex(&video), "mimeType": "video/quicktime" }),
+        )
+        .await;
+    assert_eq!(created.status, 201, "{}", created.body);
+    let done = send(
+        &api,
+        &token,
+        created.body["uploadId"].as_str().unwrap(),
+        0,
+        video.clone(),
+    )
+    .await;
+    assert_eq!(done.body["state"], "completed", "{}", done.body);
+    let roles: Vec<&str> = done.body["asset"]["files"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|file| file["role"].as_str().unwrap())
+        .collect();
+    assert!(
+        roles.contains(&"original") && roles.contains(&"paired_video"),
+        "{roles:?}"
+    );
+    assert_eq!(
+        done.body["asset"]["kind"], "photo",
+        "still a photo, with a video"
+    );
+    assert_eq!(
+        std::fs::read(library_file(&api, "lucas/2026/11/2026-11-23_15-22-10.mov")).unwrap(),
+        video
+    );
+    assert!(library_file(&api, "lucas/2026/11/2026-11-23_15-22-10.heic").exists());
     api.stop().await;
 }

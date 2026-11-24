@@ -76,14 +76,6 @@ impl MediaType {
         MEDIA_TYPES.iter().find(|t| t.mime == mime).copied()
     }
 
-    pub fn from_extension(extension: &str) -> Option<Self> {
-        let extension = extension.to_ascii_lowercase();
-        MEDIA_TYPES
-            .iter()
-            .find(|t| t.extension == extension)
-            .copied()
-    }
-
     /// The types thumbnails and previews may have.
     pub fn is_derived_image(&self) -> bool {
         matches!(

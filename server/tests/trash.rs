@@ -71,6 +71,13 @@ async fn photos_go_to_the_trash_before_they_are_gone() {
         .post("/api/v1/assets/restore", Some(&token), ids(&[&id]))
         .await;
     assert_eq!(restored.body["changed"], 1);
+    let not_in_trash = api
+        .post("/api/v1/assets/restore", Some(&token), ids(&[&id]))
+        .await;
+    assert_eq!(
+        not_in_trash.body["changed"], 0,
+        "restoring twice changes nothing"
+    );
     let refused = api
         .post("/api/v1/assets/delete", Some(&token), ids(&[&id]))
         .await;

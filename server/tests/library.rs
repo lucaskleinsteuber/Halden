@@ -66,6 +66,10 @@ async fn sync_comes_in_pages_and_only_brings_changes() {
         }
     }
     assert_eq!(seen, 5);
+    // Exactly one full page left: nothing more to ask for.
+    let exact = api.get("/api/v1/sync?since=0&limit=5", &token).await;
+    assert_eq!(exact.body["assets"].as_array().unwrap().len(), 5);
+    assert_eq!(exact.body["hasMore"], false);
 
     // Nothing new: an empty page. Then one correction brings exactly that asset.
     let empty = api

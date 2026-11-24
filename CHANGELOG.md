@@ -19,8 +19,10 @@ There are no version numbers yet; entries are grouped by date until the first re
   installation ids at sign-in, who hears about new devices, who may make pairing codes for
   whom and for how long they hold, the network rule at the door, the rate limiter staying small
   under thousands of addresses and remembering failures for a day, the longest allowed
-  password, the trash and tombstone deadlines to the day, and the file journal finishing its
-  work.
+  password, the trash and tombstone deadlines to the day, the file journal finishing its
+  work, a Live Photo's video next to its photo, the limits of the metadata a phone sends, bytes
+  sent past the announced end, finished uploads forgotten after 30 days, and the EXIF data kept
+  for the detail view.
 
 ### Changed
 
