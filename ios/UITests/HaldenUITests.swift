@@ -26,7 +26,7 @@ final class HaldenUITests: XCTestCase {
         let tabs = app.tabBars.firstMatch
         XCTAssertTrue(tabs.waitForExistence(timeout: 10))
         tabs.buttons["Photos"].tap()
-        XCTAssertTrue(app.navigationBars["Photos"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.navigationBars["Library"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.descendants(matching: .any)["empty-library"].waitForExistence(timeout: 5))
         tabs.buttons["Settings"].tap()
         XCTAssertTrue(app.navigationBars["Settings"].waitForExistence(timeout: 5))
@@ -263,6 +263,74 @@ final class HaldenUITests: XCTestCase {
         let changed = app.descendants(matching: .any)
             .matching(NSPredicate(format: "label CONTAINS '8× slower' OR value CONTAINS '8× slower'")).firstMatch
         XCTAssertTrue(changed.waitForExistence(timeout: 10), "the slow part is kept")
+    }
+
+    /// Photos chosen in the library go into a new album; in the album one is taken out, the
+    /// album is renamed and deleted (its photos stay).
+    @MainActor
+    func testAlbums() throws {
+        let environment = ProcessInfo.processInfo.environment
+        guard let server = environment["HALDEN_TEST_SERVER"], let password = environment["HALDEN_TEST_PASSWORD"]
+        else {
+            throw XCTSkip("no server: run ios/ui-tests.sh")
+        }
+        allowLocation()
+        let app = XCUIApplication()
+        app.launchArguments = ["-ui-testing", "-ui-testing-sign-in"]
+        app.launchEnvironment = ["HALDEN_TEST_SERVER": server, "HALDEN_TEST_PASSWORD": password]
+        app.launch()
+        let tabs = app.tabBars.firstMatch
+        XCTAssertTrue(tabs.waitForExistence(timeout: 60), "signed in")
+        tabs.buttons["Camera"].tap()
+        XCTAssertTrue(app.buttons["shutter"].waitForExistence(timeout: 10))
+        app.buttons["shutter"].tap()
+        Thread.sleep(forTimeInterval: 1)
+        app.buttons["shutter"].tap()
+
+        tabs.buttons["Photos"].tap()
+        let grid = app.collectionViews["library-grid"]
+        XCTAssertTrue(grid.cells.element(boundBy: 1).waitForExistence(timeout: 30))
+        app.buttons["select"].tap()
+        grid.cells.element(boundBy: 0).tap()
+        grid.cells.element(boundBy: 1).tap()
+        app.buttons["add-to-album"].tap()
+        app.buttons["picker-new-album"].tap()
+        let name = app.alerts.firstMatch.textFields.firstMatch
+        XCTAssertTrue(name.waitForExistence(timeout: 5))
+        name.typeText("Harbour walk")
+        app.alerts.firstMatch.buttons["Make"].firstMatch.tap()
+
+        XCTAssertTrue(app.navigationBars["Add 2 to album"].waitForNonExistence(timeout: 5), "the sheet closed")
+        let albums = app.segmentedControls["photos-section"].buttons["Albums"]
+        expectation(for: NSPredicate(format: "isEnabled == true"), evaluatedWith: albums)
+        waitForExpectations(timeout: 5)
+        albums.tap()
+        let card = app.buttons["album-Harbour walk"]
+        XCTAssertTrue(card.waitForExistence(timeout: 10), "the new album")
+        card.tap()
+        let inAlbum = app.collectionViews["library-grid"]
+        XCTAssertTrue(inAlbum.cells.element(boundBy: 1).waitForExistence(timeout: 10), "with both photos")
+        app.buttons["select-in-album"].tap()
+        inAlbum.cells.element(boundBy: 0).tap()
+        app.buttons["take-out"].tap()
+        XCTAssertTrue(inAlbum.cells.element(boundBy: 1).waitForNonExistence(timeout: 10), "one taken out")
+        XCTAssertEqual(inAlbum.cells.count, 1)
+
+        app.buttons["album-menu"].tap()
+        app.buttons["rename-album"].tap()
+        let rename = app.alerts.firstMatch.textFields.firstMatch
+        XCTAssertTrue(rename.waitForExistence(timeout: 5))
+        // The old name is in the field: away with it.
+        rename.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: 20) + "Harbour 2026")
+        app.alerts.firstMatch.buttons["Rename"].firstMatch.tap()
+        XCTAssertTrue(app.navigationBars["Harbour 2026"].waitForExistence(timeout: 5))
+
+        app.buttons["album-menu"].tap()
+        app.buttons["delete-album"].tap()
+        app.buttons["confirm-delete-album"].firstMatch.tap()
+        XCTAssertTrue(app.buttons["album-Harbour 2026"].waitForNonExistence(timeout: 10), "the album is gone")
+        app.segmentedControls["photos-section"].buttons["Library"].tap()
+        XCTAssertTrue(grid.cells.element(boundBy: 1).waitForExistence(timeout: 10), "its photos stay")
     }
 
     /// A correction shows at once and reaches the server, which keeps it next to the original.

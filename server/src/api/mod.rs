@@ -1,6 +1,7 @@
 //! The HTTP API the apps talk to. All routes live under `/api/v1`; see `docs/PROTOCOL.md`.
 
 mod admin;
+mod albums;
 mod assets;
 mod auth;
 mod devices;
@@ -217,6 +218,17 @@ pub fn router(state: AppState) -> Router {
             get(library::suggestion),
         )
         .route("/api/v1/sync", get(library::changes))
+        .route("/api/v1/albums", get(albums::list).post(albums::create))
+        .route(
+            "/api/v1/albums/{id}",
+            get(albums::get)
+                .patch(albums::change)
+                .delete(albums::delete),
+        )
+        .route(
+            "/api/v1/albums/{id}/assets",
+            post(albums::add).delete(albums::remove),
+        )
         .route("/api/v1/admin/status", get(manage::status))
         .route(
             "/api/v1/admin/config",

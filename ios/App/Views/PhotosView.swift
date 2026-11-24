@@ -8,6 +8,14 @@ struct PhotosView: View {
         case withoutPlace
         case uploads
         case trash
+        case album(String)
+        case photoInAlbum(String, album: String)
+    }
+
+    /// What the Photos tab shows.
+    enum Section: String, CaseIterable {
+        case library = "Library"
+        case albums = "Albums"
     }
 
     @Environment(AppModel.self) private var app
@@ -16,94 +24,33 @@ struct PhotosView: View {
     @State private var selection: Set<String>?
     @State private var confirmDelete = false
     @State private var note: String?
+    @State private var section = Section.library
+    @State private var addingToAlbum: ChosenPhotos?
 
     var body: some View {
         NavigationStack(path: $path) {
-            LibraryGrid(
-                assets: app.library, version: app.libraryVersion, uploads: app.uploads, pipeline: app.pipeline,
-                selection: selection
-            ) { id in
-                if var chosen = selection {
-                    if chosen.contains(id) { chosen.remove(id) } else { chosen.insert(id) }
-                    selection = chosen
+            Group {
+                if section == .albums {
+                    AlbumsView { id in path.append(.album(id)) }
                 } else {
-                    path.append(.photo(id))
+                    library
                 }
             }
-            .ignoresSafeArea(edges: .bottom)
-            .overlay {
-                if app.library.isEmpty {
-                    ContentUnavailableView(
-                        "No photos yet", systemImage: "photo",
-                        description: Text("Photos you take with Halden show up here.")
-                    )
-                    .accessibilityIdentifier("empty-library")
-                }
-            }
-            .refreshable { app.refresh() }
-            .navigationTitle("Photos")
-            .toolbar(selection == nil ? .automatic : .hidden, for: .tabBar)
+            .navigationTitle(section.rawValue)
+            .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .primaryAction) {
-                    Button(selection == nil ? "Select" : "Done") {
-                        selection = selection == nil ? [] : nil
+                ToolbarItem(placement: .principal) {
+                    Picker("Show", selection: $section) {
+                        ForEach(Section.allCases, id: \.self) { Text($0.rawValue).tag($0) }
                     }
-                    .accessibilityIdentifier("select")
-                }
-                ToolbarItem(placement: .primaryAction) {
-                    Menu {
-                        Button("Without place", systemImage: "mappin.slash") { path.append(.withoutPlace) }
-                            .accessibilityIdentifier("without-place")
-                        Button("Trash", systemImage: "trash") { path.append(.trash) }
-                            .accessibilityIdentifier("trash")
-                        Button("Uploads", systemImage: "arrow.up.circle") { path.append(.uploads) }
-                    } label: {
-                        Image(systemName: "ellipsis.circle")
-                    }
-                    .accessibilityLabel("More")
-                    .accessibilityIdentifier("photos-menu")
-                }
-                if let selection {
-                    ToolbarItem(placement: .bottomBar) {
-                        Button("Remove from iPhone") {
-                            let removed = app.removeFromPhone(Array(selection))
-                            note =
-                                removed == selection.count
-                                ? "Removed from this iPhone; still on the server."
-                                : "\(removed) of \(selection.count) removed. The others aren't safely on the server yet."
-                            self.selection = []
-                        }
-                        .disabled(app.removableFromPhone(Array(selection)) == 0)
-                    }
-                    ToolbarSpacer(.flexible, placement: .bottomBar)
-                    ToolbarItem(placement: .bottomBar) {
-                        Text("\(selection.count) chosen").font(.footnote)
-                    }
-                    ToolbarSpacer(.flexible, placement: .bottomBar)
-                    ToolbarItem(placement: .bottomBar) {
-                        Button("Delete", role: .destructive) { confirmDelete = true }
-                            .disabled(selection.isEmpty)
-                            .accessibilityIdentifier("delete-chosen")
-                    }
+                    .pickerStyle(.segmented)
+                    .frame(width: 220)
+                    .disabled(selection != nil)
+                    .accessibilityIdentifier("photos-section")
                 }
             }
-            .confirmationDialog(
-                "Delete \(selection?.count ?? 0) everywhere?", isPresented: $confirmDelete, titleVisibility: .visible
-            ) {
-                Button("Delete everywhere", role: .destructive) {
-                    app.moveToTrash(Array(selection ?? []))
-                    selection = nil
-                }
-                .accessibilityIdentifier("confirm-delete")
-            } message: {
-                Text(
-                    "They go to the trash on the server and on all devices, and can be restored for \(app.trashDays) days."
-                )
-            }
-            .alert("Done", isPresented: .constant(note != nil)) {
-                Button("OK") { note = nil }
-            } message: {
-                Text(note ?? "")
+            .sheet(item: $addingToAlbum, onDismiss: { selection = nil }) { chosen in
+                AlbumPicker(assetIds: chosen.ids)
             }
             .navigationDestination(for: Route.self) { route in
                 switch route {
@@ -111,8 +58,113 @@ struct PhotosView: View {
                 case .withoutPlace: WithoutPlaceView()
                 case .uploads: UploadsView()
                 case .trash: TrashView()
+                case .album(let id):
+                    AlbumView(id: id) { photo, _ in path.append(.photoInAlbum(photo, album: id)) }
+                case .photoInAlbum(let photo, let album):
+                    PhotoView(start: photo, assets: app.photos(inAlbum: album))
                 }
             }
         }
     }
+
+    private var library: some View {
+        LibraryGrid(
+            assets: app.library, version: app.libraryVersion, uploads: app.uploads, pipeline: app.pipeline,
+            selection: selection
+        ) { id in
+            if var chosen = selection {
+                if chosen.contains(id) { chosen.remove(id) } else { chosen.insert(id) }
+                selection = chosen
+            } else {
+                path.append(.photo(id))
+            }
+        }
+        .ignoresSafeArea(edges: .bottom)
+        .overlay {
+            if app.library.isEmpty {
+                ContentUnavailableView(
+                    "No photos yet", systemImage: "photo",
+                    description: Text("Photos you take with Halden show up here.")
+                )
+                .accessibilityIdentifier("empty-library")
+            }
+        }
+        .refreshable { app.refresh() }
+        .toolbar(selection == nil ? .automatic : .hidden, for: .tabBar)
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                Button(selection == nil ? "Select" : "Done") {
+                    selection = selection == nil ? [] : nil
+                }
+                .accessibilityIdentifier("select")
+            }
+            ToolbarItem(placement: .primaryAction) {
+                Menu {
+                    Button("Without place", systemImage: "mappin.slash") { path.append(.withoutPlace) }
+                        .accessibilityIdentifier("without-place")
+                    Button("Trash", systemImage: "trash") { path.append(.trash) }
+                        .accessibilityIdentifier("trash")
+                    Button("Uploads", systemImage: "arrow.up.circle") { path.append(.uploads) }
+                } label: {
+                    Image(systemName: "ellipsis.circle")
+                }
+                .accessibilityLabel("More")
+                .accessibilityIdentifier("photos-menu")
+            }
+            if let selection {
+                ToolbarItem(placement: .bottomBar) {
+                    Button("Remove from iPhone") {
+                        let removed = app.removeFromPhone(Array(selection))
+                        note =
+                            removed == selection.count
+                            ? "Removed from this iPhone; still on the server."
+                            : "\(removed) of \(selection.count) removed. The others aren't safely on the server yet."
+                        self.selection = []
+                    }
+                    .disabled(app.removableFromPhone(Array(selection)) == 0)
+                }
+                ToolbarSpacer(.flexible, placement: .bottomBar)
+                ToolbarItem(placement: .bottomBar) {
+                    Button {
+                        addingToAlbum = ChosenPhotos(ids: Array(selection))
+                    } label: {
+                        Image(systemName: "rectangle.stack.badge.plus")
+                    }
+                    .disabled(selection.isEmpty)
+                    .accessibilityLabel("Add \(selection.count) to album")
+                    .accessibilityIdentifier("add-to-album")
+                }
+                ToolbarSpacer(.flexible, placement: .bottomBar)
+                ToolbarItem(placement: .bottomBar) {
+                    Button("Delete", role: .destructive) { confirmDelete = true }
+                        .disabled(selection.isEmpty)
+                        .accessibilityIdentifier("delete-chosen")
+                }
+            }
+        }
+        .confirmationDialog(
+            "Delete \(selection?.count ?? 0) everywhere?", isPresented: $confirmDelete, titleVisibility: .visible
+        ) {
+            Button("Delete everywhere", role: .destructive) {
+                app.moveToTrash(Array(selection ?? []))
+                selection = nil
+            }
+            .accessibilityIdentifier("confirm-delete")
+        } message: {
+            Text(
+                "They go to the trash on the server and on all devices, and can be restored for \(app.trashDays) days."
+            )
+        }
+        .alert("Done", isPresented: .constant(note != nil)) {
+            Button("OK") { note = nil }
+        } message: {
+            Text(note ?? "")
+        }
+    }
+}
+
+/// Photos chosen for something that opens a sheet.
+struct ChosenPhotos: Identifiable {
+    let ids: [String]
+    var id: String { ids.joined(separator: ",") }
 }

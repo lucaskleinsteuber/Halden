@@ -443,6 +443,76 @@ struct EndToEndTests {
         #expect(try other.asset(id)?.playback == nil)
     }
 
+    /// Albums made here, also without a connection and with a photo still uploading: they reach
+    /// the server once it can be reached (the photo once it is there) and every other phone.
+    @Test func albumsReachTheServerAndOtherPhones() async throws {
+        let server = try RealServer()
+        let info = try await server.ready()
+        let (connection, token) = try await Connector.login(
+            address: "127.0.0.1", port: server.port, fingerprint: info.fingerprint,
+            username: "lucas", password: RealServer.password, device: device)
+        let client = APIClient(
+            base: APIClient.base(address: "127.0.0.1", port: server.port)!, trust: .pinned(connection.fingerprint),
+            token: token)
+        let nowhere = APIClient(
+            base: APIClient.base(address: "127.0.0.1", port: 1)!, trust: .pinned(connection.fingerprint),
+            token: token, timeout: 2)
+        let database = try HaldenDatabase()
+        try database.save(
+            server: StoredServer(serverId: connection.serverId, connection: connection, syncSince: 0, backup: nil))
+        let root = server.folder.appendingPathComponent("phone")
+        let files = try FileLocations(root: root, caches: root.appendingPathComponent("caches"))
+        var ids: [String] = []
+        for n in 0..<3 {
+            let id = UUID().uuidString.lowercased()
+            try noiseJPEG(at: files.original("a\(n).jpg"), seed: UInt32(n + 7) &* 2_654_435_761)
+            try Uploader.enqueue(
+                database: database, files: files, assetId: id, fileName: "a\(n).jpg", kind: "photo",
+                mimeType: "image/jpeg", metadata: UploadMetadata(takenAt: 1_795_443_730_000 + Int64(n)))
+            ids.append(id)
+        }
+        let uploader = Uploader(database: database, files: files, client: client)
+        let third = ids[2]
+        try await database.writer.write { db in
+            try db.execute(sql: "UPDATE upload SET retryAt = ? WHERE assetId = ?", arguments: [Int64.max, third])
+        }
+        #expect(await uploader.drain() == 2)
+
+        let actions = Actions(database: database)
+        let rome = try actions.createAlbum(named: "Rome", with: [ids[0], ids[2]])
+        let empty = try actions.createAlbum(named: "Later")
+        try actions.renameAlbum(rome, to: "Rome 2026")
+        try actions.addToAlbum(rome, [ids[1]])
+        try actions.deleteAlbum(empty)
+        #expect(try database.albums().map(\.album.name) == ["Rome 2026"], "shows at once")
+        #expect(try database.photos(inAlbum: rome).count == 3)
+        #expect(await actions.send(with: nowhere) == .later)
+
+        #expect(await actions.send(with: client) == .done)
+        let onServer = try #require(try await client.albums().first)
+        #expect(onServer.name == "Rome 2026" && Set(onServer.assetIds) == Set([ids[0], ids[1]]))
+        #expect(try await client.albums().count == 1, "the empty one was deleted")
+        #expect(try actions.pending().count == 1, "the third photo's part waits for its upload")
+
+        try await database.writer.write { db in try db.execute(sql: "UPDATE upload SET retryAt = 0") }
+        #expect(await uploader.drain() == 1)
+        #expect(await actions.send(with: client) == .done)
+        #expect(try actions.pending().isEmpty)
+        #expect(try await client.albums().first?.assetIds.count == 3)
+
+        // Another phone gets it with the sync; removing a photo there reaches this one.
+        let other = try HaldenDatabase()
+        try other.save(
+            server: StoredServer(serverId: connection.serverId, connection: connection, syncSince: 0, backup: nil))
+        try await Syncer(database: other, client: client).run()
+        #expect(try other.albums().map(\.album.name) == ["Rome 2026"])
+        #expect(try other.albums().first?.count == 3)
+        try Actions(database: other).removeFromAlbum(rome, [ids[0]])
+        #expect(await Actions(database: other).send(with: client) == .done)
+        try await Syncer(database: database, client: client).run()
+        #expect(try database.photos(inAlbum: rome).count == 2)
+    }
+
     /// Two phones send the same photo; the second finishes while the first is halfway. When the
     /// first one's last piece arrives, the server says "duplicate", and the first phone's photo
     /// becomes the one that is already there.

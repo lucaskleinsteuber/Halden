@@ -500,6 +500,31 @@ RAW files get no copy.
 all existing photos or videos are converted in the background at the lowest priority. Switching
 back to `original` removes the copies.
 
+## Albums
+
+An account's own collections of photos. An album only points at photos; a photo can be in many.
+Photos in the trash stay in their albums (devices don't show them) and are back when restored;
+deleted for good, they leave every album.
+
+```json
+{ "id": "…", "name": "Rome", "coverAssetId": "…" | null, "sortOrder": 0,
+  "assetIds": ["…newest added first…"], "createdAt": …, "updatedAt": …, "seq": 1043,
+  "deletedAt": null }
+```
+
+- `GET /albums`: `{"albums": [...]}`, by `sortOrder`, then name.
+- `POST /albums` `{"id": "<uuid, optional>", "name": "Rome", "assetIds": [...]}`: `201` with the
+  album; `200` with the one already there when the id was used before by the same account (a
+  device that didn't hear the answer), `409` when another account has it. Names are trimmed,
+  1 to 200 characters (`422`).
+- `GET /albums/{id}`, `PATCH /albums/{id}` `{"name", "coverAssetId" (null: the newest photo),
+  "sortOrder"}`, `DELETE /albums/{id}` (`204`, also again; the photos stay).
+- `POST /albums/{id}/assets` and `DELETE /albums/{id}/assets` `{"assetIds": [...]}` (at most
+  5000): put photos in or take them out; photos of other accounts, unknown or deleted ones are
+  skipped. Answers with the album.
+
+Other accounts' albums answer `404`.
+
 ## Sync
 
 ### `GET /sync?since=0&limit=1000`
@@ -507,8 +532,12 @@ back to `original` removes the copies.
 Everything that changed in the own account after `since`, oldest change first:
 
 ```json
-{ "assets": [ {…asset…} ], "nextSince": 1042, "hasMore": false, "resetRequired": false }
+{ "assets": [ {…asset…} ], "albums": [ {…album…} ], "nextSince": 1042, "hasMore": false,
+  "resetRequired": false }
 ```
+
+Albums share the counter with assets: a page holds the `limit` lowest numbers of both, and a
+deleted album comes once more with `deletedAt` set.
 
 Every change to an asset (new, corrected, new thumbnail, trashed, restored, deleted) gives it the
 next number from one counter (`seq`). A device stores `nextSince` and asks with it next time; while

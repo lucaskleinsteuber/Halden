@@ -168,6 +168,7 @@ pub async fn purge(
             .bind(id)
             .execute(&mut *tx)
             .await?;
+        crate::library::albums::forget_asset(&mut tx, id).await?;
         assets::touch(&mut tx, id).await?;
         tx.commit().await?;
         purged += 1;

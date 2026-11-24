@@ -129,6 +129,8 @@ public struct Asset: Codable, Sendable, Equatable {
 /// `GET /sync?since=N`.
 public struct SyncPage: Codable, Sendable {
     public var assets: [Asset]
+    /// Albums changed in the same range (older servers send none).
+    public var albums: [Album]?
     public var nextSince: Int64
     public var hasMore: Bool
     public var resetRequired: Bool?

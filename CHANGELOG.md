@@ -8,6 +8,11 @@ There are no version numbers yet; entries are grouped by date until the first re
 
 ### Added
 
+- Albums: on the server (`/albums`, in the sync with the assets) and on the iPhone, with names,
+  covers, order, adding and taking out photos, also offline; photos in the trash stay in their
+  albums, deleted for good they leave them.
+- iPhone trip albums: trips found in the photos (days far from home), named after the town and
+  the months, kept as an album with one tap.
 - iPhone manual camera settings: ISO, shutter speed, white balance (kelvin and tint), focus and
   exposure compensation, each automatic or set within what the camera can do, with the current
   value always shown and a bigger picture while focusing; back to automatic when the camera

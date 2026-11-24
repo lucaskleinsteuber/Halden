@@ -224,6 +224,11 @@ mod upgrade_tests {
             // 8
             "UPDATE assets SET capture_mode = 'slowmo', \
                  playback_json = '{\"slowFromMs\":1,\"slowToMs\":2,\"rate\":0.25}' WHERE id = 'a1'",
+            // 9
+            "INSERT INTO albums (id, user_id, name, created_at, updated_at, seq) \
+             VALUES ('al1', 'u1', 'Rome', 1, 1, 2); \
+             UPDATE counters SET value = 2 WHERE name = 'asset_seq'; \
+             INSERT INTO album_assets (album_id, asset_id, added_at) VALUES ('al1', 'a1', 1)",
         ];
         for statement in &statements[..level.min(statements.len())] {
             sqlx::raw_sql(*statement)
@@ -264,7 +269,11 @@ mod upgrade_tests {
                 assert_eq!(page.assets.len(), 1, "level {level}");
                 // New photos get the next number.
                 let mut tx = db.begin().await.unwrap();
-                assert_eq!(crate::library::assets::next_seq(&mut tx).await.unwrap(), 2);
+                let next = if level >= 9 { 3 } else { 2 };
+                assert_eq!(
+                    crate::library::assets::next_seq(&mut tx).await.unwrap(),
+                    next
+                );
                 tx.rollback().await.unwrap();
             }
             if level >= 4 {

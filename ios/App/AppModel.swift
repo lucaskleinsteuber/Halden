@@ -23,6 +23,10 @@ final class AppModel {
     private(set) var library: [LocalAsset] = []
     /// Goes up whenever `library` changes, so views can tell cheaply.
     private(set) var libraryVersion = 0
+    /// The albums, in their order, with their cover and size.
+    private(set) var albums: [AlbumSummary] = []
+    /// Trips found in the photos, to keep as albums.
+    private(set) var trips: [TripSuggestion] = []
     private(set) var settings: AppSettings
     /// Uploads not finished yet, by asset id: how much of the file the server has (0…1).
     private(set) var uploads: [String: Double] = [:]
@@ -73,7 +77,10 @@ final class AppModel {
     private let uploadActivity = UploadActivity()
     private var observation: AnyDatabaseCancellable?
     private var uploadObservation: AnyDatabaseCancellable?
+    private var albumObservation: AnyDatabaseCancellable?
     private var working: Task<Void, Never>?
+    @ObservationIgnored private let tripFinder: TripFinder
+    private var findingTrips: Task<Void, Never>?
 
     /// The installation's own id: lets an owner block exactly this app installation.
     static var installationId: String {
@@ -98,6 +105,7 @@ final class AppModel {
         self.settingsStore = settings
         self.settings = settings.load()
         self.actions = Actions(database: database)
+        self.tripFinder = TripFinder(database: database)
         self.pipeline = ImagePipeline(loader: ThumbnailLoader(files: files, client: nil))
         self.media = MediaFiles(files: files, client: nil)
         self.photos = PhotosSync(library: SystemPhotoLibrary(), database: database, files: files)
@@ -214,7 +222,15 @@ final class AppModel {
                 MainActor.assumeIsolated {
                     self?.library = assets
                     self?.libraryVersion += 1
+                    self?.findTrips()
                 }
+            }
+        albumObservation =
+            ValueObservation
+            .tracking { db in try HaldenDatabase.albums(db) }
+            .start(in: database.writer, scheduling: .async(onQueue: .main)) { _ in
+            } onChange: { [weak self] albums in
+                MainActor.assumeIsolated { self?.albums = albums }
             }
         uploadObservation =
             ValueObservation
@@ -449,6 +465,62 @@ final class AppModel {
             refresh()
         } catch {
             problem = "The correction could not be saved: \(error.localizedDescription)"
+        }
+    }
+
+    // MARK: Albums
+
+    func photos(inAlbum id: String) -> [LocalAsset] {
+        (try? database.photos(inAlbum: id)) ?? []
+    }
+
+    /// Changes an album here at once; it reaches the server when it can.
+    private func albumChange(_ what: String, _ change: () throws -> Void) {
+        do {
+            try change()
+            refresh()
+        } catch {
+            problem = "The album could not be \(what): \(error.localizedDescription)"
+        }
+    }
+
+    @discardableResult
+    func createAlbum(named name: String, with assetIds: [String] = []) -> String? {
+        var id: String?
+        albumChange("made") { id = try actions.createAlbum(named: name, with: assetIds) }
+        return id
+    }
+
+    func renameAlbum(_ id: String, to name: String) { albumChange("renamed") { try actions.renameAlbum(id, to: name) } }
+    func deleteAlbum(_ id: String) { albumChange("deleted") { try actions.deleteAlbum(id) } }
+    func addToAlbum(_ id: String, _ assetIds: [String]) {
+        albumChange("changed") { try actions.addToAlbum(id, assetIds) }
+    }
+    func setCover(of id: String, to assetId: String?) {
+        albumChange("changed") { try actions.setCover(of: id, to: assetId) }
+    }
+
+    func removeFromAlbum(_ id: String, _ assetIds: [String]) {
+        albumChange("changed") { try actions.removeFromAlbum(id, assetIds) }
+    }
+
+    /// A trip becomes an album.
+    func keep(_ trip: TripSuggestion) {
+        createAlbum(named: trip.title, with: trip.trip.assetIds)
+        trips.removeAll { $0.id == trip.id }
+        Task { await tripFinder.kept(trip.id) }
+    }
+
+    /// Looks for trips again a moment after the library changed (not for every photo coming in).
+    private func findTrips() {
+        findingTrips?.cancel()
+        let rules = Trips.Rules(kilometres: settings.tripKilometres)
+        findingTrips = Task { [weak self, tripFinder] in
+            try? await Task.sleep(for: .seconds(2))
+            guard !Task.isCancelled else { return }
+            let found = await tripFinder.suggestions(rules: rules)
+            guard !Task.isCancelled else { return }
+            self?.trips = found
         }
     }
 

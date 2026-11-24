@@ -24,6 +24,7 @@ public actor Syncer {
                 // Too long away: start from the beginning, keeping photos taken here.
                 try await database.writer.write { db in
                     try db.execute(sql: "DELETE FROM asset WHERE localFile IS NULL")
+                    try db.execute(sql: "DELETE FROM album")
                 }
                 server.syncSince = 0
                 try database.save(server: server)
@@ -36,6 +37,10 @@ public actor Syncer {
                 let waiting = try Actions.waitingAssetIds(db)
                 for asset in page.assets where !waiting.contains(asset.id.lowercased()) {
                     try Self.merge(asset, into: db)
+                }
+                let waitingAlbums = try Actions.waitingAlbumIds(db)
+                for album in page.albums ?? [] {
+                    try Self.merge(album, into: db, waiting: waitingAlbums)
                 }
                 try db.execute(sql: "UPDATE server SET syncSince = ?", arguments: [next])
             }

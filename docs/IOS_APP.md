@@ -85,6 +85,16 @@ the design comes after that. What works today is described below.
   main thread), then into the library and the upload queue. The shutter never waits.
 - **Simulator and UI tests**: the simulator has no camera; there, and in the UI tests, a
   stand-in camera behaves like the real one and delivers made-up photos and short videos.
+- **Albums** (Photos › Albums): made, renamed, sorted, given a cover and deleted (the photos
+  stay); photos go in from the library ("Add to album" for the chosen ones or one full screen)
+  and come out in the album. All of it shows at once and reaches the server when it can (an
+  album change waits for photos still uploading), and every device gets it with the sync.
+  Photos in the trash aren't shown in albums and are back when restored.
+- **Trips** (`Trips`, `TripFinder`): home is where most days have photos; a run of days with
+  photos farther away (50 km, in Settings › Place; a day or two without photos still belongs to
+  it, at least six photos) is a trip, named after the town where most of them were taken (from
+  Apple Maps, asked once per place) and the months: "Rome, May 2026". Found on the iPhone, never
+  sent anywhere; "Keep" makes it an album.
 - **Uploads**: a queue in the database, oldest first, in pieces of 8 MiB. After the app was
   closed or the connection broke, it asks the server where it stands and goes on from there.
   Once the original is checked on the server, the phone sends its own thumbnail (512 px) and

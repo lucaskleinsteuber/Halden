@@ -117,7 +117,7 @@ pub(crate) struct AssetRow {
     location_source: Option<String>,
     created_at: i64,
     updated_at: i64,
-    seq: i64,
+    pub seq: i64,
     trashed_at: Option<i64>,
     deleted_at: Option<i64>,
     title: Option<String>,

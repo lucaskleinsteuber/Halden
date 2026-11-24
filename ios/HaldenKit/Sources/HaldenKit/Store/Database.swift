@@ -163,6 +163,23 @@ public final class HaldenDatabase: Sendable {
                 t.add(column: "playback", .jsonText)
             }
         }
+        migrator.registerMigration("6: albums") { db in
+            try db.create(table: "album") { t in
+                t.primaryKey("id", .text)
+                t.column("name", .text).notNull()
+                t.column("coverAssetId", .text)
+                t.column("sortOrder", .integer).notNull().defaults(to: 0)
+                t.column("createdAt", .integer).notNull()
+            }
+            try db.create(table: "albumAsset") { t in
+                t.column("albumId", .text).notNull().references("album", onDelete: .cascade)
+                // Not a reference: the photo may come with a later page of the sync.
+                t.column("assetId", .text).notNull()
+                t.column("addedAt", .integer).notNull()
+                t.primaryKey(["albumId", "assetId"])
+            }
+            try db.create(index: "albumAsset_by_asset", on: "albumAsset", columns: ["assetId"])
+        }
         return migrator
     }
 }
@@ -334,6 +351,7 @@ extension HaldenDatabase {
             // Changes meant for the old server don't apply to the next one.
             try db.execute(sql: "DELETE FROM action")
             try db.execute(sql: "DELETE FROM photosLink WHERE assetId NOT IN (SELECT id FROM asset)")
+            try db.execute(sql: "DELETE FROM album")
         }
     }
 

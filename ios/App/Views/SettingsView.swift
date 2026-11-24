@@ -300,6 +300,13 @@ struct PlaceSettings: View {
                 } label: {
                     Explained("Imprecise places", "Kept and marked as imprecise, or not saved at all.")
                 }
+                Picker(selection: app.setting(\.tripKilometres)) {
+                    ForEach([25.0, 50, 100, 200], id: \.self) { kilometres in
+                        Text("\(Int(kilometres)) km").tag(kilometres)
+                    }
+                } label: {
+                    Explained("Trips", "Days with photos farther from home than this are suggested as trip albums.")
+                }
             } footer: {
                 Text(
                     "Every photo keeps how precisely its place was known, its height and which way the camera looked. A place older than a minute is never used."

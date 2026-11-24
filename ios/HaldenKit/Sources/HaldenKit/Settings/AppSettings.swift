@@ -52,6 +52,8 @@ public struct AppSettings: Codable, Sendable, Equatable {
     public var keepManualSettings = false
     /// The manual values kept, when they are.
     public var keptManual: ManualSettings?
+    /// Photos farther from home than this make a trip.
+    public var tripKilometres = 50.0
 
     // Place
     public var locationAccuracyLimit = 50.0
@@ -70,7 +72,7 @@ public struct AppSettings: Codable, Sendable, Equatable {
     enum CodingKeys: String, CodingKey {
         case uploadOverCellular, videosOnlyOnWiFi, onlyOnHomeNetwork, keepLocalCopies, photoFormat
         case videoResolution, videoFrameRate, videoHDR, flash, showGrid, livePhotos, slowMotionRate
-        case timeLapseInterval, keepManualSettings, keptManual, locationAccuracyLimit
+        case timeLapseInterval, keepManualSettings, keptManual, tripKilometres, locationAccuracyLimit
         case inaccurateLocation, importFromPhotos, saveToPhotos, syncDeletionsWithPhotos
     }
 
@@ -96,6 +98,7 @@ public struct AppSettings: Codable, Sendable, Equatable {
         read(.timeLapseInterval, into: &settings.timeLapseInterval)
         read(.keepManualSettings, into: &settings.keepManualSettings)
         read(.keptManual, into: &settings.keptManual)
+        read(.tripKilometres, into: &settings.tripKilometres)
         read(.locationAccuracyLimit, into: &settings.locationAccuracyLimit)
         read(.inaccurateLocation, into: &settings.inaccurateLocation)
         read(.importFromPhotos, into: &settings.importFromPhotos)

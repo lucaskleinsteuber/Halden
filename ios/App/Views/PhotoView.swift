@@ -14,6 +14,7 @@ struct PhotoView: View {
     @State private var problem: String?
     @State private var confirmDelete = false
     @State private var editingSlowMotion = false
+    @State private var addingToAlbum: ChosenPhotos?
     @Environment(\.dismiss) private var dismiss
 
     init(start: String, assets: [LocalAsset]) {
@@ -40,6 +41,11 @@ struct PhotoView: View {
                         if asset?.isSlowMotion == true {
                             Button("As played, slowed down") { share(.asPlayed) }
                         }
+                        Divider()
+                        Button("Add to album…", systemImage: "rectangle.stack.badge.plus") {
+                            addingToAlbum = ChosenPhotos(ids: [current])
+                        }
+                        .accessibilityIdentifier("photo-add-to-album")
                     } label: {
                         if preparing { ProgressView() } else { Image(systemName: "square.and.arrow.up") }
                     }
@@ -99,6 +105,7 @@ struct PhotoView: View {
                 )
             }
             .sheet(isPresented: $showInfo) { InfoView(id: current) }
+            .sheet(item: $addingToAlbum) { chosen in AlbumPicker(assetIds: chosen.ids) }
             .sheet(isPresented: $editingSlowMotion) {
                 if let asset { SlowMotionEditor(asset: asset) }
             }

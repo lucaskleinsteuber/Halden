@@ -157,7 +157,7 @@ pub async fn detail(
 }
 
 /// Tells "field missing" (`None`) apart from "field is null" (`Some(None)`).
-fn present<'de, D, T>(deserializer: D) -> Result<Option<Option<T>>, D::Error>
+pub(super) fn present<'de, D, T>(deserializer: D) -> Result<Option<Option<T>>, D::Error>
 where
     D: Deserializer<'de>,
     T: Deserialize<'de>,

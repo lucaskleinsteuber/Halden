@@ -7,7 +7,7 @@ import GRDB
 /// sent again after a broken connection does nothing wrong.
 public struct Actions: Sendable {
     public enum Kind: String, Sendable {
-        case trash, restore, delete, correct, locate
+        case trash, restore, delete, correct, locate, album
     }
 
     /// How sending went.
@@ -110,12 +110,12 @@ public struct Actions: Sendable {
         asset.locationSource = location.map { $0.estimated ? "estimated" : "manual" }
     }
 
-    private func record(
-        _ kind: Kind, _ ids: [String], payload: Data? = nil,
+    func record(
+        _ kind: Kind, _ ids: [String], payload: Data? = nil, allowEmpty: Bool = false,
         apply: @Sendable (Database, [String], Int64) throws -> Void
     ) throws {
         let ids = ids.map { $0.lowercased() }
-        guard !ids.isEmpty else { return }
+        guard !ids.isEmpty || allowEmpty else { return }
         let now = Self.now()
         try database.writer.write { db in
             try apply(db, ids, now)
@@ -159,8 +159,10 @@ public struct Actions: Sendable {
             if !waiting.isEmpty {
                 held.formUnion(waiting)
                 let ready = action.assetIds.filter { !waiting.contains($0) }
-                // One asset's correction can't be split; several photos' changes can.
-                guard !ready.isEmpty, Kind(rawValue: action.kind) != .correct else { continue }
+                // One asset's correction can't be split; several photos' changes can. An album
+                // change goes with the photos that are there (even none: the album is made).
+                let album = Kind(rawValue: action.kind) == .album
+                guard album || (!ready.isEmpty && Kind(rawValue: action.kind) != .correct) else { continue }
                 action.assetIds = ready
             }
             do {
@@ -206,6 +208,8 @@ public struct Actions: Sendable {
             guard let payload = action.payload else { return }
             let location = try JSONDecoder().decode(CorrectedLocation.self, from: payload)
             _ = try await client.setLocation(action.assetIds, location)
+        case .album:
+            try await performAlbum(action, client: client)
         case nil:
             break
         }
@@ -238,6 +242,20 @@ public struct Actions: Sendable {
     private func giveUp(_ action: PendingAction, error: Error, client: APIClient) async {
         guard let id = action.id else { return }
         _ = try? await database.writer.write { db in try PendingAction.deleteOne(db, key: id) }
+        // An album change: the album as the server has it (or none).
+        if Kind(rawValue: action.kind) == .album, let payload = action.payload,
+            let edit = try? JSONDecoder().decode(AlbumEdit.self, from: payload)
+        {
+            let album: Album? = try? await client.get("albums/\(edit.albumId)")
+            _ = try? await database.writer.write { db in
+                if let album {
+                    try Syncer.merge(album, into: db, waiting: try Self.waitingAlbumIds(db))
+                } else {
+                    _ = try LocalAlbum.deleteOne(db, key: edit.albumId)
+                }
+            }
+            return
+        }
         var fresh: [Asset] = []
         for assetId in action.assetIds {
             if let asset = try? await client.asset(assetId) { fresh.append(asset) }
