@@ -2,13 +2,16 @@ import HaldenKit
 import SwiftUI
 import UIKit
 
-/// The camera screen. No design yet: the system's controls, everything there and working.
-struct CameraView: View {
-    @Environment(AppModel.self) private var app
+/// The camera screen, in the app and on the Lock Screen. No design yet: the system's controls,
+/// everything there and working.
+struct CameraScreen: View {
+    let camera: CameraModel
+    let settings: AppSettings
+    /// Changes a setting (flash, grid) and keeps it.
+    let update: ((inout AppSettings) -> Void) -> Void
     @State private var focusPoint: CGPoint?
     @State private var flash = false
 
-    private var camera: CameraModel { app.camera }
     private var state: CameraState { camera.backend.state }
 
     var body: some View {
@@ -33,7 +36,7 @@ struct CameraView: View {
                 .ignoresSafeArea()
                 // In the same place as the picture, so a tap and its square line up.
                 .overlay {
-                    if app.settings.showGrid { ThirdsGrid().allowsHitTesting(false) }
+                    if settings.showGrid { ThirdsGrid().allowsHitTesting(false) }
                     if let focusPoint {
                         Rectangle()
                             .strokeBorder(.yellow, lineWidth: 1.5)
@@ -117,17 +120,17 @@ struct CameraView: View {
             if camera.mode == .photo {
                 Button {
                     let next: AppSettings.Flash =
-                        switch app.settings.flash {
+                        switch settings.flash {
                         case .auto: .on
                         case .on: .off
                         case .off: .auto
                         }
-                    app.update { $0.flash = next }
+                    update { $0.flash = next }
                 } label: {
                     Image(systemName: flashSymbol)
                 }
                 .disabled(!state.hasFlash)
-                .accessibilityLabel("Flash \(app.settings.flash.rawValue)")
+                .accessibilityLabel("Flash \(settings.flash.rawValue)")
                 .accessibilityIdentifier("flash")
             } else {
                 Button {
@@ -147,11 +150,11 @@ struct CameraView: View {
             .accessibilityLabel(camera.timer == 0 ? "Self-timer off" : "Self-timer \(camera.timer) seconds")
             .accessibilityIdentifier("timer")
             Button {
-                app.update { $0.showGrid.toggle() }
+                update { $0.showGrid.toggle() }
             } label: {
-                Image(systemName: app.settings.showGrid ? "grid.circle.fill" : "grid.circle")
+                Image(systemName: settings.showGrid ? "grid.circle.fill" : "grid.circle")
             }
-            .accessibilityLabel(app.settings.showGrid ? "Hide grid" : "Show grid")
+            .accessibilityLabel(settings.showGrid ? "Hide grid" : "Show grid")
             .accessibilityIdentifier("grid")
             Spacer()
             if state.focusLocked {
@@ -181,7 +184,7 @@ struct CameraView: View {
     }
 
     private var flashSymbol: String {
-        switch app.settings.flash {
+        switch settings.flash {
         case .auto: "bolt.badge.automatic"
         case .on: "bolt.fill"
         case .off: "bolt.slash"

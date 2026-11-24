@@ -30,7 +30,9 @@ final class HaldenUITests: XCTestCase {
         XCTAssertTrue(app.descendants(matching: .any)["empty-library"].waitForExistence(timeout: 5))
         tabs.buttons["Settings"].tap()
         XCTAssertTrue(app.navigationBars["Settings"].waitForExistence(timeout: 5))
-        XCTAssertTrue(app.buttons["sign-out"].exists)
+        let signOut = app.buttons["sign-out"]
+        for _ in 0..<6 where !signOut.exists { app.swipeUp() }
+        XCTAssertTrue(signOut.exists)
         tabs.buttons["Camera"].tap()
         XCTAssertTrue(app.buttons["shutter"].waitForExistence(timeout: 5))
     }
@@ -110,16 +112,27 @@ final class HaldenUITests: XCTestCase {
         }
         XCTAssertEqual(photos.count, 2, "both photos are on the server")
         XCTAssertEqual(videos.count, 1, "the video is on the server")
+
+        tabs.buttons["Settings"].tap()
+        app.buttons["uploads"].tap()
+        let round = app.descendants(matching: .any)
+            .matching(NSPredicate(format: "label CONTAINS '3 of 3 uploaded' OR value CONTAINS '3 of 3 uploaded'"))
+            .firstMatch
+        XCTAssertTrue(round.waitForExistence(timeout: 10), "the uploads screen counts the round")
+        XCTAssertTrue(app.staticTexts["Everything is on the server"].exists)
     }
 
     /// Answers the question for the place, should the simulator ask.
     private func allowLocation() {
         addUIInterruptionMonitor(withDescription: "Location") { alert in
-            for label in ["Allow While Using App", "Allow Once", "Allow"] where alert.buttons[label].exists {
-                alert.buttons[label].tap()
-                return true
+            // Called on the main thread.
+            MainActor.assumeIsolated {
+                for label in ["Allow While Using App", "Allow Once", "Allow"] where alert.buttons[label].exists {
+                    alert.buttons[label].tap()
+                    return true
+                }
+                return false
             }
-            return false
         }
     }
 

@@ -47,6 +47,14 @@ public actor Uploader {
             metadata: metadata, uploadId: nil, sent: 0, state: "waiting", attempts: 0,
             lastError: nil, retryAt: 0, createdAt: now)
         try database.writer.write { db in
+            // A new round of uploads starts when nothing was waiting: "1 of 1", not "41 of 41".
+            if try UploadItem.filter(sql: "state <> 'done' AND state <> 'failed'").fetchCount(db) == 0 {
+                try db.execute(
+                    sql: """
+                        INSERT INTO meta (key, value) VALUES ('uploadRound', ?)
+                        ON CONFLICT (key) DO UPDATE SET value = excluded.value
+                        """, arguments: [Data(String(now).utf8)])
+            }
             try asset.insert(db)
             try item.insert(db)
         }
@@ -55,13 +63,16 @@ public actor Uploader {
     /// Works through every due upload. Returns how many finished; stops early when the server
     /// can't be reached (the next call continues).
     @discardableResult
-    public func drain() async -> Int {
+    /// `skipping`: uploads the system is sending in the background right now.
+    public func drain(permit: UploadPermit = .all, skipping: Set<String> = []) async -> Int {
         var finished = 0
-        while let item = nextDue() {
+        while let item = nextDue(permit: permit, skipping: skipping) {
             do {
                 try await process(item)
                 finished += 1
             } catch {
+                // Stopped on purpose (the app went to the background): not a failed try.
+                if Task.isCancelled { break }
                 failed(item, error)
                 if case APIError.unreachable = error { break }
                 if (error as? APIError)?.signedOut == true { break }
@@ -71,11 +82,19 @@ public actor Uploader {
         return finished
     }
 
-    private func nextDue() -> UploadItem? {
+    /// The oldest upload that is due and may go now (videos may have to wait for Wi-Fi).
+    func nextDue(permit: UploadPermit, skipping: Set<String> = []) -> UploadItem? {
+        guard permit.any else { return nil }
         let now = Int64(Date().timeIntervalSince1970 * 1000)
+        let skipped = String(decoding: (try? JSONEncoder().encode(Array(skipping))) ?? Data("[]".utf8), as: UTF8.self)
         return try? database.writer.read { db in
             try UploadItem
                 .filter(sql: "state <> 'done' AND state <> 'failed' AND retryAt <= ?", arguments: [now])
+                .filter(sql: "assetId NOT IN (SELECT value FROM json_each(?))", arguments: [skipped])
+                .filter(
+                    sql: "(mimeType LIKE 'video/%' AND ?) OR (mimeType NOT LIKE 'video/%' AND ?)",
+                    arguments: [permit.videos, permit.photos]
+                )
                 .order(sql: "createdAt")
                 .fetchOne(db)
         }
@@ -104,54 +123,12 @@ public actor Uploader {
     func process(_ start: UploadItem) async throws {
         var item = start
         let url = files.original(item.file)
-        if item.sha256 == nil {
-            item.sha256 = try Hashing.sha256(of: url)
-            try save(item)
-        }
         if item.state == "thumbnails" {
             try await sendThumbnails(item, url: url, asset: nil)
             return
         }
-        item.state = "sending"
-        try save(item)
-
-        if let id = item.uploadId {
-            do {
-                let state = try await client.uploadState(id)
-                if state.state == "completed" {
-                    try await finished(item, url: url, asset: state.asset)
-                    return
-                }
-                if state.state == "duplicate" {
-                    try duplicate(item, existing: state.existingAssetId)
-                    return
-                }
-                item.sent = state.offset ?? 0
-            } catch let error as APIError where [404, 410].contains(error.status ?? 0) {
-                // The server forgot the upload (expired, or it failed): announce it again.
-                item.uploadId = nil
-                item.sent = 0
-            }
-            try save(item)
-        }
-        if item.uploadId == nil {
-            let state = try await client.announce(
-                UploadRequest(
-                    assetId: item.assetId, role: "original", size: item.size,
-                    sha256: item.sha256 ?? "", mimeType: item.mimeType, metadata: item.metadata))
-            switch state.state {
-            case "completed":
-                try await finished(item, url: url, asset: state.asset)
-                return
-            case "duplicate":
-                try duplicate(item, existing: state.existingAssetId)
-                return
-            default:
-                item.uploadId = state.uploadId
-                item.sent = state.offset ?? 0
-                try save(item)
-            }
-        }
+        guard let ready = try await ready(item) else { return }
+        item = ready
         guard let id = item.uploadId else { throw APIError.unexpected("no upload id") }
 
         let handle = try FileHandle(forReadingFrom: url)
@@ -188,20 +165,80 @@ public actor Uploader {
         try await finished(item, url: url, asset: state.asset)
     }
 
+    /// Gets an upload ready for its bytes: hashed, announced, and where the server stands. `nil`
+    /// when nothing is left to send (the server has it already, or it is a duplicate; both are
+    /// dealt with here).
+    func ready(_ start: UploadItem) async throws -> UploadItem? {
+        var item = start
+        let url = files.original(item.file)
+        if item.sha256 == nil {
+            item.sha256 = try Hashing.sha256(of: url)
+            try save(item)
+        }
+        if item.state == "thumbnails" { return nil }
+        item.state = "sending"
+        try save(item)
+
+        if let id = item.uploadId {
+            do {
+                let state = try await client.uploadState(id)
+                if state.state == "completed" {
+                    try await finished(item, url: url, asset: state.asset)
+                    return nil
+                }
+                if state.state == "duplicate" {
+                    try duplicate(item, existing: state.existingAssetId)
+                    return nil
+                }
+                item.sent = state.offset ?? 0
+            } catch let error as APIError where [404, 410].contains(error.status ?? 0) {
+                // The server forgot the upload (expired, or it failed): announce it again.
+                item.uploadId = nil
+                item.sent = 0
+            }
+            try save(item)
+        }
+        if item.uploadId == nil {
+            let state = try await client.announce(
+                UploadRequest(
+                    assetId: item.assetId, role: "original", size: item.size,
+                    sha256: item.sha256 ?? "", mimeType: item.mimeType, metadata: item.metadata))
+            switch state.state {
+            case "completed":
+                try await finished(item, url: url, asset: state.asset)
+                return nil
+            case "duplicate":
+                try duplicate(item, existing: state.existingAssetId)
+                return nil
+            default:
+                item.uploadId = state.uploadId
+                item.sent = state.offset ?? 0
+                try save(item)
+            }
+        }
+        return item
+    }
+
     /// The original is on the server, checked by its hash.
     private func finished(_ start: UploadItem, url: URL, asset: Asset?) async throws {
-        var changed = start
-        changed.state = "thumbnails"
-        changed.lastError = nil
-        let item = changed
-        let seq = asset?.seq
-        try await database.writer.write { db in
-            try item.update(db)
+        let item = try Self.onServer(start, seq: asset?.seq, database: database)
+        try await sendThumbnails(item, url: url, asset: asset)
+    }
+
+    /// Notes that the server has the original (checked by its hash); the thumbnails come next.
+    @discardableResult
+    static func onServer(_ start: UploadItem, seq: Int64?, database: HaldenDatabase) throws -> UploadItem {
+        var item = start
+        item.state = "thumbnails"
+        item.lastError = nil
+        let done = item
+        try database.writer.write { db in
+            try done.update(db)
             try db.execute(
                 sql: "UPDATE asset SET backedUp = 1, originalSha256 = ?, seq = coalesce(?, seq) WHERE id = ?",
-                arguments: [item.sha256, seq, item.assetId])
+                arguments: [done.sha256, seq, done.assetId])
         }
-        try await sendThumbnails(item, url: url, asset: asset)
+        return item
     }
 
     /// Makes and sends the thumbnail and preview, unless the server has them already.
@@ -233,8 +270,12 @@ public actor Uploader {
         }
     }
 
-    /// The same photo is on the server already under another id: this one is that one.
     private func duplicate(_ item: UploadItem, existing: String?) throws {
+        try Self.duplicate(item, existing: existing, database: database)
+    }
+
+    /// The same photo is on the server already under another id: this one is that one.
+    static func duplicate(_ item: UploadItem, existing: String?, database: HaldenDatabase) throws {
         try database.writer.write { db in
             try db.execute(sql: "DELETE FROM upload WHERE assetId = ?", arguments: [item.assetId])
             guard let existing = existing?.lowercased(), existing != item.assetId else {

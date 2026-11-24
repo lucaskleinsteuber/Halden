@@ -143,3 +143,38 @@ import UniformTypeIdentifiers
         #expect(SampleMedia.photo(seed: 1, width: 64, height: 48) == one)
     }
 }
+
+@Suite struct LockedCaptureTests {
+    /// What the lock-screen camera took comes into the library once, with what it knew.
+    @Test func capturesFromTheLockScreenAreTakenOverOnce() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let session = root.appendingPathComponent("session")
+        try FileManager.default.createDirectory(at: session, withIntermediateDirectories: true)
+        let files = try FileLocations(
+            root: root.appendingPathComponent("app"), caches: root.appendingPathComponent("caches"))
+        let database = try HaldenDatabase()
+
+        let photo = try #require(SampleMedia.photo(seed: 9, width: 64, height: 48))
+        try LockedCaptures.save(
+            photo: photo, heic: false,
+            metadata: UploadMetadata(
+                takenAt: 7, location: ClientLocation(latitude: 1, longitude: 2), width: 64, height: 48),
+            into: session)
+        let video = root.appendingPathComponent("v.mov")
+        try await SampleMedia.video(at: video, seed: 9, seconds: 0.5)
+        try LockedCaptures.save(video: video, metadata: UploadMetadata(takenAt: 8, durationMs: 500), into: session)
+        // Not finished when the extension was stopped: no description.
+        try Data("half".utf8).write(to: session.appendingPathComponent("half.heic"))
+
+        #expect(try LockedCaptures.takeOver(from: session, database: database, files: files) == 2)
+        let library = try database.library()
+        #expect(library.map(\.kind) == ["video", "photo"])
+        #expect(library.last?.latitude == 1 && library.last?.width == 64)
+        #expect(library.first?.durationMs == 500)
+        #expect(try database.pendingUploads().count == 2)
+        #expect(library.allSatisfy { FileManager.default.fileExists(atPath: files.original($0.localFile ?? "-").path) })
+        #expect(try LockedCaptures.takeOver(from: session, database: database, files: files) == 0)
+        #expect(try FileManager.default.contentsOfDirectory(atPath: session.path) == ["half.heic"])
+    }
+}

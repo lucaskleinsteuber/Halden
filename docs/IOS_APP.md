@@ -9,7 +9,10 @@ the design comes after that. What works today is described below.
 | Folder | What |
 |---|---|
 | `ios/HaldenKit` | Swift package with everything that isn't a screen: the API client with the pinned certificate, pairing, the local database (GRDB), uploads that survive restarts, sync, thumbnails. Builds for iOS and macOS, so its tests run on the Mac, and the Mac app can use it later. |
-| `ios/App` | The app: screens, camera, QR scanner. |
+| `ios/App` | The app: screens, camera, QR scanner. `App/Camera` is shared with the lock-screen camera. |
+| `ios/Shared` | What the app and its extensions share: the Live Activity's data and the camera intent. |
+| `ios/Widgets` | Widget extension: the Live Activity for uploads and the camera control. |
+| `ios/LockedCamera` | The camera on a locked iPhone (LockedCameraCapture extension). |
 | `ios/UITests` | The screens in the simulator. |
 | `ios/project.yml` | Describes the Xcode project; `ios/generate.sh` (XcodeGen) makes `Halden.xcodeproj` from it. Both are committed. |
 
@@ -41,7 +44,31 @@ the design comes after that. What works today is described below.
 - **Uploads**: a queue in the database, oldest first, in pieces of 8 MiB. After the app was
   closed or the connection broke, it asks the server where it stands and goes on from there.
   Once the original is checked on the server, the phone sends its own thumbnail (512 px) and
-  preview (2048 px).
+  preview (2048 px), for videos made from a frame.
+- **Network rules** (Settings › Uploads): over cellular yes or no, videos only on Wi-Fi (also
+  waiting on another phone's hotspot and in Low Data Mode), only on the home Wi-Fi (the server
+  answers at its home address, not over Tailscale; no permission for Wi-Fi names needed).
+  Photos behind a waiting video still go.
+- **In the background**: when Halden leaves the screen, the rest of every upload that may go is
+  handed to a background `URLSession`, one request from the current offset to the end (from the
+  file itself, or from a copy of its rest). The system sends it while Halden is suspended or
+  closed, keeps the network rules, checks the pinned certificate through the app, and wakes the
+  app when it is done; the thumbnails follow when Halden next runs. A `BGProcessingTask` gives
+  more time for hashing and uploading.
+- **Uploads screen** (Settings › Uploads › Waiting): every upload not finished yet with its
+  progress and error, "Try again", why uploads wait right now, and "12 of 40" for the current
+  round.
+- **Live Activity**: "12 of 40 uploaded" on the Lock Screen and in the Dynamic Island, for
+  rounds of five or more (or 50 MB), and whenever uploads still wait when Halden leaves the
+  screen; it ends a minute after the last one.
+- **Copies on this iPhone**: kept by default. With "Keep copies on this iPhone" off, an
+  original leaves the phone once the server has it (checked by its hash) and its thumbnail and
+  preview are here.
+- **Lock Screen and Control Center**: a control ("Halden Camera") for Control Center, the Lock
+  Screen and the Action button opens Halden's camera, also on a locked iPhone. There it runs as
+  an extension that may only keep what it takes in a folder the system gives it; Halden takes it
+  over and uploads it the next time it runs. Whether a free developer account may sign the
+  extensions is tried on the iPhone.
 - **The grid**: everything the phone took and everything synced from the server
   (`GET /sync`, only what changed), newest first. A `UICollectionView` rather than a SwiftUI
   grid, so 50,000 photos scroll without a hitch: cells are reused, only changed cells are

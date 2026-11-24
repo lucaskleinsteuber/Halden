@@ -24,8 +24,11 @@ targets:
     platform: iOS
     sources:
       - path: App
+      - path: Shared
     dependencies:
       - package: HaldenKit
+      - target: HaldenWidgets
+      - target: HaldenLockedCamera
     info:
       path: App/Info.plist
       properties:
@@ -42,6 +45,9 @@ targets:
         NSLocalNetworkUsageDescription: Halden connects to your own Halden server in your home network.
         NSAppTransportSecurity:
           NSAllowsLocalNetworking: true
+        UIBackgroundModes: [processing]
+        NSSupportsLiveActivities: true
+        BGTaskSchedulerPermittedIdentifiers: [com.lucas.halden.ios.upload]
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.lucas.halden.ios
@@ -49,6 +55,58 @@ targets:
         TARGETED_DEVICE_FAMILY: "1"
         CODE_SIGN_STYLE: Automatic
         GENERATE_INFOPLIST_FILE: NO
+  # Live Activity for uploads and the camera control (Control Center, Lock Screen, Action button).
+  HaldenWidgets:
+    type: app-extension
+    platform: iOS
+    sources:
+      - path: Widgets
+      - path: Shared
+    info:
+      path: Widgets/Info.plist
+      properties:
+        CFBundleDisplayName: Halden
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.widgetkit-extension
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.lucas.halden.ios.widgets
+        PRODUCT_NAME: HaldenWidgets
+        TARGETED_DEVICE_FAMILY: "1"
+        CODE_SIGN_STYLE: Automatic
+        GENERATE_INFOPLIST_FILE: NO
+        SKIP_INSTALL: YES
+  # The camera on a locked iPhone: keeps what it takes for the app to take over.
+  HaldenLockedCamera:
+    type: extensionkit-extension
+    platform: iOS
+    sources:
+      - path: LockedCamera
+      - path: Shared
+      - path: App/Camera
+    dependencies:
+      - package: HaldenKit
+    info:
+      path: LockedCamera/Info.plist
+      properties:
+        CFBundleDisplayName: Halden
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        EXAppExtensionAttributes:
+          EXExtensionPointIdentifier: com.apple.securecapture
+        NSCameraUsageDescription: Halden takes your photos and videos with the camera.
+        NSMicrophoneUsageDescription: Halden records the sound of your videos.
+        NSLocationWhenInUseUsageDescription: Halden notes where a photo was taken, how precisely, and which way the camera pointed.
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.lucas.halden.ios.lockedcamera
+        PRODUCT_NAME: HaldenLockedCamera
+        TARGETED_DEVICE_FAMILY: "1"
+        CODE_SIGN_STYLE: Automatic
+        GENERATE_INFOPLIST_FILE: NO
+        SKIP_INSTALL: YES
   HaldenUITests:
     type: bundle.ui-testing
     platform: iOS

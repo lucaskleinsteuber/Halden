@@ -8,6 +8,14 @@ There are no version numbers yet; entries are grouped by date until the first re
 
 ### Added
 
+- iPhone uploads: the network rules (over cellular or not, videos only on Wi-Fi, only on the
+  home Wi-Fi); uploads go on in the background, handed to the system as one request for the
+  rest of each file, also while Halden is closed; a screen with every waiting upload, its
+  progress, error and "Try again"; "12 of 40 uploaded" as a Live Activity on the Lock Screen and
+  in the Dynamic Island; copies on the iPhone removed once safely on the server, when so set.
+- iPhone camera on the Lock Screen and in Control Center: a "Halden Camera" control opens the
+  camera, also on a locked iPhone; what is taken there is taken over by the app the next time
+  it runs.
 - iPhone camera: photos and videos (HEVC, 4K at 60 fps by default, HDR optional, with sound);
   ultra wide, main, 2× and tele lenses with zoom buttons and pinching, and the front camera; tap
   to focus, hold to lock focus and exposure, flash or light, self-timer, grid lines; upright

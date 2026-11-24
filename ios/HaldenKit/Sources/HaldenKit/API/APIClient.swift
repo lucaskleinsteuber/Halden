@@ -197,6 +197,15 @@ public final class APIClient: Sendable {
         return try decode(UploadState.self, from: data)
     }
 
+    /// The request for the rest of an upload from `offset`, for a session that sends it from a
+    /// file (in the background).
+    func restRequest(upload id: String, offset: Int64) -> URLRequest {
+        var request = request("PATCH", "uploads/\(id)")
+        request.setValue(String(offset), forHTTPHeaderField: "Upload-Offset")
+        request.setValue("application/offset+octet-stream", forHTTPHeaderField: "Content-Type")
+        return request
+    }
+
     public func complete(upload id: String) async throws -> UploadState {
         try await call("POST", "uploads/\(id)/complete", json: Empty())
     }

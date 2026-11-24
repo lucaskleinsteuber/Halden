@@ -4,6 +4,12 @@ import SwiftUI
 struct SettingsView: View {
     @Environment(AppModel.self) private var app
     @State private var confirmSignOut = false
+    @State private var copies: (count: Int, bytes: Int64)?
+
+    /// A binding to one setting; changing it saves it.
+    private func setting<Value>(_ keyPath: WritableKeyPath<AppSettings, Value>) -> Binding<Value> {
+        Binding(get: { app.settings[keyPath: keyPath] }, set: { value in app.update { $0[keyPath: keyPath] = value } })
+    }
 
     var body: some View {
         NavigationStack {
@@ -30,9 +36,74 @@ struct SettingsView: View {
                         .accessibilityIdentifier("only-one-copy")
                     }
                 }
-                Section("Uploads") {
-                    LabeledContent("Waiting", value: String(app.uploads.count))
+                Section {
+                    NavigationLink {
+                        UploadsView()
+                    } label: {
+                        LabeledContent("Waiting", value: String(app.uploads.count))
+                    }
+                    .accessibilityIdentifier("uploads")
+                    Toggle("Upload over cellular", isOn: setting(\.uploadOverCellular))
+                    Toggle("Videos only on Wi-Fi", isOn: setting(\.videosOnlyOnWiFi))
+                        .disabled(!app.settings.uploadOverCellular)
+                    Toggle("Only on the home Wi-Fi", isOn: setting(\.onlyOnHomeNetwork))
                     Button("Upload and sync now") { app.refresh() }
+                } header: {
+                    Text("Uploads")
+                } footer: {
+                    Text(
+                        "Home Wi-Fi: the server answers at its address at home, not over Tailscale. Videos also wait for Wi-Fi in Low Data Mode."
+                    )
+                }
+                Section {
+                    Toggle("Keep copies on this iPhone", isOn: setting(\.keepLocalCopies))
+                        .accessibilityIdentifier("keep-copies")
+                    if let copies {
+                        LabeledContent(
+                            "On this iPhone",
+                            value:
+                                "\(copies.count) · \(ByteCountFormatter.string(fromByteCount: copies.bytes, countStyle: .file))"
+                        )
+                    }
+                } header: {
+                    Text("Copies")
+                } footer: {
+                    Text(
+                        "When off, a photo or video taken with Halden leaves this iPhone once the server has it, checked by its hash, and its thumbnail and preview are here. It is fetched from the server when you open it."
+                    )
+                }
+                Section("Camera") {
+                    Picker("Photo format", selection: setting(\.photoFormat)) {
+                        Text("HEIC").tag(AppSettings.PhotoFormat.heic)
+                        Text("JPEG").tag(AppSettings.PhotoFormat.jpeg)
+                    }
+                    Picker("Video", selection: setting(\.videoResolution)) {
+                        Text("4K").tag(AppSettings.VideoResolution.uhd4K)
+                        Text("1080p").tag(AppSettings.VideoResolution.hd1080)
+                    }
+                    Picker("Frame rate", selection: setting(\.videoFrameRate)) {
+                        Text("30 fps").tag(30)
+                        Text("60 fps").tag(60)
+                    }
+                    Toggle("HDR video", isOn: setting(\.videoHDR))
+                    Toggle("Grid", isOn: setting(\.showGrid))
+                }
+                Section {
+                    Picker("Precise means within", selection: setting(\.locationAccuracyLimit)) {
+                        ForEach([10.0, 20, 50, 100, 500], id: \.self) { metres in
+                            Text("\(Int(metres)) m").tag(metres)
+                        }
+                    }
+                    Picker("Less precise places", selection: setting(\.inaccurateLocation)) {
+                        Text("Keep and mark").tag(AppSettings.InaccurateLocation.mark)
+                        Text("Leave out").tag(AppSettings.InaccurateLocation.omit)
+                    }
+                } header: {
+                    Text("Place")
+                } footer: {
+                    Text(
+                        "Every photo keeps how precisely its place was known. A place older than a minute is never used."
+                    )
                 }
                 Section {
                     Button("Sign out", role: .destructive) { confirmSignOut = true }
@@ -47,6 +118,9 @@ struct SettingsView: View {
                 }
             }
             .navigationTitle("Settings")
+            .task(id: app.libraryVersion) {
+                copies = try? LocalCopies.usage(database: app.database, files: app.files)
+            }
             .confirmationDialog(
                 "Sign out of this server?", isPresented: $confirmSignOut, titleVisibility: .visible
             ) {

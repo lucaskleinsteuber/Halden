@@ -1,6 +1,7 @@
 import Foundation
 import GRDB
 import HaldenKit
+import LockedCameraCapture
 import Observation
 import UIKit
 
@@ -21,6 +22,13 @@ final class AppModel {
     private(set) var reachable = false
     private(set) var problem: String?
     private(set) var busy = false
+    /// The network right now, and why uploads wait (`nil` when everything may go).
+    private(set) var network = NetworkSituation(kind: .wifi)
+    private(set) var uploadsWaitBecause: String?
+    /// "12 of 40" for the current round of uploads.
+    private(set) var uploadSummary = UploadSummary()
+    /// Goes up when something (a control, the lock-screen camera) asks for the camera.
+    private(set) var cameraRequests = 0
 
     let database: HaldenDatabase
     let files: FileLocations
@@ -30,7 +38,11 @@ final class AppModel {
     let pipeline: ImagePipeline
     /// Made at app start, so the camera is ready the moment its screen opens.
     let camera: CameraModel
+    /// Uploads the system goes on with while Halden is in the background.
+    let background: BackgroundUploads
     private var client: APIClient?
+    private let networkWatcher = NetworkWatcher()
+    private let uploadActivity = UploadActivity()
     private var observation: AnyDatabaseCancellable?
     private var uploadObservation: AnyDatabaseCancellable?
     private var working: Task<Void, Never>?
@@ -49,7 +61,8 @@ final class AppModel {
 
     init(
         database: HaldenDatabase, files: FileLocations, tokens: any TokenStore,
-        settings: any SettingsStore = DefaultsSettingsStore(), standInCamera: Bool = false
+        settings: any SettingsStore = DefaultsSettingsStore(), standInCamera: Bool = false,
+        backgroundConfiguration: URLSessionConfiguration? = nil
     ) {
         self.database = database
         self.files = files
@@ -59,18 +72,49 @@ final class AppModel {
         self.actions = Actions(database: database)
         self.pipeline = ImagePipeline(loader: ThumbnailLoader(files: files, client: nil))
         self.camera = CameraModel.make(standIn: standInCamera)
+        self.background = BackgroundUploads(database: database, files: files, configuration: backgroundConfiguration)
         camera.settings = { [weak self] in self?.settings ?? AppSettings() }
         camera.keepPhoto = { [weak self] photo, metadata in self?.keep(photo: photo, metadata: metadata) }
         camera.keepVideo = { [weak self] url, metadata in self?.keep(video: url, metadata: metadata) }
         camera.prepare()
+        networkWatcher.changed = { [weak self] situation in
+            self?.network = situation
+            // Back online, or onto Wi-Fi: go on at once instead of at the next round.
+            self?.refresh()
+        }
+        networkWatcher.start()
+        background.ended = { [weak self] in
+            // A background upload ended: the thumbnails follow when the app is in front.
+            Task { @MainActor in self?.backgroundUploadEnded() }
+        }
         observe()
         restore()
     }
 
+    /// What may be uploaded now, by the settings and the network.
+    var uploadPermit: UploadPermit {
+        UploadRules.permit(on: network, atHome: atHome, settings: settings)
+    }
+
+    /// The server answers at its home-network address (not over Tailscale).
+    var atHome: Bool {
+        guard let host = client?.base.host() else { return false }
+        return !Addresses.isTailscale(host)
+    }
+
     /// Changes a setting and keeps it.
     func update(_ change: (inout AppSettings) -> Void) {
+        let before = settings
         change(&settings)
         settingsStore.save(settings)
+        // Upload rules or copies changed: apply them now.
+        if before.uploadOverCellular != settings.uploadOverCellular
+            || before.videosOnlyOnWiFi != settings.videosOnlyOnWiFi
+            || before.onlyOnHomeNetwork != settings.onlyOnHomeNetwork
+            || before.keepLocalCopies != settings.keepLocalCopies
+        {
+            refresh()
+        }
     }
 
     /// The app's real database, files and Keychain; for UI tests (`-ui-testing`) an empty
@@ -88,7 +132,7 @@ final class AppModel {
             }
             let model = AppModel(
                 database: database, files: files, tokens: MemoryTokenStore(), settings: MemorySettingsStore(),
-                standInCamera: true)
+                standInCamera: true, backgroundConfiguration: .ephemeral)
             // Signed in to the real server the UI tests started (`ios/ui-tests.sh`).
             let environment = ProcessInfo.processInfo.environment
             if arguments.contains("-ui-testing-sign-in"), let server = environment["HALDEN_TEST_SERVER"],
@@ -146,6 +190,8 @@ final class AppModel {
                         uniqueKeysWithValues: items.map {
                             ($0.assetId, $0.size > 0 ? Double($0.sent) / Double($0.size) : 0)
                         })
+                    if let summary = try? self?.database.uploadSummary() { self?.uploadSummary = summary }
+                    self?.showUploadActivity()
                 }
             }
     }
@@ -222,6 +268,7 @@ final class AppModel {
         try? database.forgetServer()
         client = nil
         working?.cancel()
+        await background.cancelAll()
         self.connection = nil
         backup = nil
     }
@@ -277,7 +324,17 @@ final class AppModel {
         working = Task { [database, files, actions, weak self] in
             while !Task.isCancelled {
                 let uploader = Uploader(database: database, files: files, client: client)
-                await uploader.drain()
+                let permit = self?.uploadPermit ?? .nothing
+                self?.uploadsWaitBecause =
+                    (try? database.pendingUploads().isEmpty) == false
+                    ? UploadRules.reason(
+                        for: permit, on: self?.network ?? .offline, atHome: self?.atHome ?? false,
+                        settings: self?.settings ?? AppSettings())
+                    : nil
+                await uploader.drain(permit: permit, skipping: await self?.background.running() ?? [])
+                if self?.settings.keepLocalCopies == false {
+                    _ = try? LocalCopies.remove(database: database, files: files)
+                }
                 // Changes made here (trash, corrections, …) before the sync, so it shows them.
                 if await actions.send(with: client) == .signedOut {
                     await self?.signOut()
@@ -301,8 +358,67 @@ final class AppModel {
         }
     }
 
+    // MARK: In the background
+
+    /// The app left the screen: what is left of every upload goes to the system, which sends it
+    /// also while Halden is suspended; and background time is asked for, for the rest.
+    func enterBackground() {
+        working?.cancel()
+        working = nil
+        guard let client, (try? database.pendingUploads().isEmpty) == false else { return }
+        showUploadActivity(leaving: true)
+        let time = UIApplication.shared.beginBackgroundTask(withName: "Hand over uploads")
+        Task {
+            await background.handOver(client: client, permit: uploadPermit, settings: settings)
+            AppDelegate.scheduleProcessing()
+            UIApplication.shared.endBackgroundTask(time)
+        }
+    }
+
+    /// Background time from the system (`BGProcessingTask`): upload what may go, then hand the
+    /// rest over.
+    func backgroundWork() async {
+        guard let client else { return }
+        let uploader = Uploader(database: database, files: files, client: client)
+        await uploader.drain(permit: uploadPermit, skipping: await background.running())
+        if !Task.isCancelled {
+            _ = await actions.send(with: client)
+            _ = try? await Syncer(database: database, client: client).run()
+        }
+        await background.handOver(client: client, permit: uploadPermit, settings: settings)
+        if (try? database.pendingUploads().isEmpty) == false { AppDelegate.scheduleProcessing() }
+    }
+
+    private func showUploadActivity(leaving: Bool = false) {
+        guard let connection else { return }
+        uploadActivity.show(uploadSummary, waiting: uploadsWaitBecause, server: connection.name, leaving: leaving)
+    }
+
+    /// Photos and videos the lock-screen camera kept since the app last ran.
+    private func takeOverLockedCaptures() {
+        let folders = LockedCameraCaptureManager.shared.sessionContentURLs
+        guard !folders.isEmpty else { return }
+        Task {
+            for folder in folders
+            where (try? LockedCaptures.takeOver(from: folder, database: database, files: files)) != nil {
+                try? await LockedCameraCaptureManager.shared.invalidateSessionContent(at: folder)
+            }
+            work()
+        }
+    }
+
+    /// Shows the camera tab.
+    func showCamera() {
+        cameraRequests += 1
+    }
+
+    private func backgroundUploadEnded() {
+        if UIApplication.shared.applicationState == .active { refresh() }
+    }
+
     /// Pull to refresh, and when the app comes to the front.
     func refresh() {
+        takeOverLockedCaptures()
         working?.cancel()
         working = nil
         work()
