@@ -42,6 +42,11 @@ There are no version numbers yet; entries are grouped by date until the first re
 
 ### Fixed
 
+- Server: on a computer that also runs Docker (or Podman, virtual machines, containers), the
+  address of their internal network (like `172.17.0.1`) was handed out in pairing QR codes and
+  shown by `halden status`, and took one of the four places for addresses in the QR code; IPv6
+  link-local addresses (`fe80::…`), which a phone can't use from a link, too. Both are left out
+  now. Found when installing on a server with Docker.
 - Server: a correction could set a photo's time to any year (the year 5000 was taken). Times
   outside 1900 to 2200 are refused, as they are for uploads. Found by the app's tests.
 - Server: `halden setup` made missing parent folders (like `/srv/halden` for the default library

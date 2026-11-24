@@ -196,13 +196,29 @@ pub fn local_addresses() -> Vec<IpAddr> {
     let mut addresses: Vec<IpAddr> = if_addrs::get_if_addrs()
         .unwrap_or_default()
         .into_iter()
-        .filter(|iface| !iface.is_loopback())
+        .filter(|iface| !iface.is_loopback() && reachable_from_outside(&iface.name))
         .map(|iface| iface.ip())
-        .filter(|ip| is_home_network(*ip))
+        .filter(|ip| is_home_network(*ip) && !needs_a_zone(*ip))
         .collect();
     addresses.sort_by_key(|ip| (ip.is_ipv6(), is_tailscale(*ip), *ip));
     addresses.dedup();
     addresses
+}
+
+/// Networks that live inside this computer (Docker, Podman, virtual machines, containers): no
+/// phone can reach an address there, so it is not handed out.
+fn reachable_from_outside(interface: &str) -> bool {
+    const INSIDE: [&str; 11] = [
+        "docker", "br-", "veth", "virbr", "vnet", "lxcbr", "lxdbr", "podman", "cni", "flannel",
+        "vmnet",
+    ];
+    !INSIDE.iter().any(|prefix| interface.starts_with(prefix))
+}
+
+/// IPv6 link-local addresses (`fe80::/10`) only work together with the name of the network
+/// interface on the other side, which a phone can't know from a pairing link.
+fn needs_a_zone(ip: IpAddr) -> bool {
+    matches!(ip, IpAddr::V6(v6) if (v6.segments()[0] & 0xffc0) == 0xfe80)
 }
 
 #[cfg(test)]
@@ -319,6 +335,45 @@ mod tests {
         assert!("nonsense".parse::<Cidr>().is_err());
         assert!("0.0.0.0/0".parse::<Cidr>().unwrap().contains(ip("8.8.8.8")));
         assert!(!"10.0.0.0/8".parse::<Cidr>().unwrap().contains(ip("::1")));
+    }
+
+    /// Found on a server that also runs Docker: its bridge (172.17.0.1) was handed out to phones.
+    #[test]
+    fn addresses_inside_this_computer_are_not_handed_out() {
+        for inside in [
+            "docker0",
+            "br-3f2a9c",
+            "veth12ab",
+            "virbr0",
+            "vnet3",
+            "lxdbr0",
+            "podman0",
+            "cni0",
+            "vmnet8",
+        ] {
+            assert!(!reachable_from_outside(inside), "{inside}");
+        }
+        for outside in [
+            "eth0",
+            "eno1",
+            "enp3s0",
+            "wlan0",
+            "wlp2s0",
+            "en0",
+            "tailscale0",
+            "bond0",
+            "utun3",
+        ] {
+            assert!(reachable_from_outside(outside), "{outside}");
+        }
+        assert!(needs_a_zone(ip("fe80::c665:16ff:fea3:d532")));
+        assert!(needs_a_zone(ip("febf::1")));
+        assert!(!needs_a_zone(ip("fd5c:84d4:aa63:0:c665:16ff:fea3:d532")));
+        assert!(!needs_a_zone(ip("fd7a:115c:a1e0::e54a:ae54")));
+        assert!(!needs_a_zone(ip("192.168.178.87")));
+        for address in local_addresses() {
+            assert!(!needs_a_zone(address), "{address}");
+        }
     }
 
     #[test]
