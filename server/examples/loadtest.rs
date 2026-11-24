@@ -266,13 +266,18 @@ async fn main() -> Result<()> {
     .await?;
     seed(&db, &user.id).await?;
 
-    let server = Server(
+    // HALDEN_SERVER_LOG keeps what the server says (to find the cause if something breaks).
+    let log = match std::env::var_os("HALDEN_SERVER_LOG") {
+        Some(path) => Stdio::from(std::fs::File::create(path)?),
+        None => Stdio::null(),
+    };
+    let mut server = Server(
         Command::new(&binary)
             .arg("--config")
             .arg(&config_path)
             .arg("serve")
             .stdout(Stdio::null())
-            .stderr(Stdio::null())
+            .stderr(log)
             .spawn()
             .context("could not start the server")?,
     );
@@ -601,43 +606,56 @@ async fn main() -> Result<()> {
         }
         round += 1;
         let round_started = Instant::now();
-        if soak.is_some() {
-            for _ in 0..5 {
-                upload(&http, &base, &token, random(200_000), "image/heic").await?;
+        let outcome: Result<()> = async {
+            if soak.is_some() {
+                for _ in 0..5 {
+                    upload(&http, &base, &token, random(200_000), "image/heic").await?;
+                }
             }
-        }
-        let mut since = 0;
-        #[allow(clippy::while_immutable_condition)] // ends with `break`
-        while only != "bulk" {
-            // The compressed answer is only fetched (the client here can't unpack brotli).
-            http.get(format!("{base}/api/v1/sync?since={since}&limit=1000"))
-                .bearer_auth(&token)
-                .header("accept-encoding", "br")
-                .send()
-                .await?
-                .bytes()
-                .await?;
-            let plain: Value = http
-                .get(format!("{base}/api/v1/sync?since={since}&limit=1000"))
-                .bearer_auth(&token)
-                .send()
-                .await?
-                .json()
-                .await?;
-            let next = plain["nextSince"].as_i64().unwrap_or(since);
-            if plain["hasMore"] != true || next == since {
-                break;
+            let mut since = 0;
+            #[allow(clippy::while_immutable_condition)] // ends with `break`
+            while only != "bulk" {
+                // The compressed answer is only fetched (the client here can't unpack brotli).
+                http.get(format!("{base}/api/v1/sync?since={since}&limit=1000"))
+                    .bearer_auth(&token)
+                    .header("accept-encoding", "br")
+                    .send()
+                    .await?
+                    .bytes()
+                    .await?;
+                let plain: Value = http
+                    .get(format!("{base}/api/v1/sync?since={since}&limit=1000"))
+                    .bearer_auth(&token)
+                    .send()
+                    .await?
+                    .json()
+                    .await?;
+                let next = plain["nextSince"].as_i64().unwrap_or(since);
+                if plain["hasMore"] != true || next == since {
+                    break;
+                }
+                since = next;
             }
-            since = next;
+            for _ in 0..if only == "sync" { 0 } else { 20 } {
+                http.post(format!("{base}/api/v1/thumbnails"))
+                    .bearer_auth(&token)
+                    .json(&json!({ "ids": ids }))
+                    .send()
+                    .await?
+                    .bytes()
+                    .await?;
+            }
+            Ok(())
         }
-        for _ in 0..if only == "sync" { 0 } else { 20 } {
-            http.post(format!("{base}/api/v1/thumbnails"))
-                .bearer_auth(&token)
-                .json(&json!({ "ids": ids }))
-                .send()
-                .await?
-                .bytes()
-                .await?;
+        .await;
+        if let Err(error) = outcome {
+            let alive = server.0.try_wait().ok().flatten().is_none();
+            eprintln!(
+                "round {round} failed after {:?}: {error:#}; the server is {}",
+                soak_started.elapsed(),
+                if alive { "still running" } else { "gone" }
+            );
+            return Err(error);
         }
         let memory = footprint_mb(server.0.id()).unwrap_or(0.0);
         let files = open_files(server.0.id());

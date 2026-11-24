@@ -111,15 +111,27 @@ impl Disk {
         sudo(&["dmsetup", "resume", mapper]);
     }
 
-    /// Fills the disk up to `leave` bytes; returns the filler, to remove later.
+    /// Fills the disk so that about `leave` bytes stay free (with `0`: completely, as far as
+    /// the file system lets a file grow); returns the filler, to remove later.
     fn fill(&self, leave: u64) -> PathBuf {
         let free = fs4::available_space(&self.mount).unwrap();
         let filler = self.mount.join("filler");
-        let size = free.saturating_sub(leave);
+        // ext4 keeps some blocks for its own records: leave a little room for fallocate …
+        let size = free.saturating_sub(leave.max(2 * 1024 * 1024));
         run(
             "fallocate",
             &["-l", &size.to_string(), filler.to_str().unwrap()],
         );
+        if leave == 0 {
+            // … then write into the rest until the disk says no.
+            let _ = Command::new("dd")
+                .args([
+                    "if=/dev/zero",
+                    &format!("of={}", self.mount.join("filler-rest").display()),
+                    "bs=4096",
+                ])
+                .output();
+        }
         filler
     }
 }
@@ -174,7 +186,7 @@ fn library_files(root: &Path) -> Vec<PathBuf> {
     while let Some(folder) = folders.pop() {
         for entry in std::fs::read_dir(folder).into_iter().flatten().flatten() {
             let name = entry.file_name().to_string_lossy().into_owned();
-            if name.starts_with('.') || name == "lost+found" || name == "filler" {
+            if name.starts_with('.') || name == "lost+found" || name.starts_with("filler") {
                 continue;
             }
             if entry.file_type().unwrap().is_dir() {
@@ -289,6 +301,10 @@ async fn a_full_system_disk_keeps_the_server_alive() {
     let api = Api::start_in(&disk.path("data"), &dir.path().join("library"), |_| {}).await;
     let token = owner(&api).await;
     let filler = disk.fill(0);
+    assert!(
+        fs4::available_space(&disk.mount).unwrap() < 1024 * 1024,
+        "the disk is full"
+    );
     // Writing to the database may fail now, reading doesn't; nothing crashes.
     for n in 0..20 {
         let reply = api
@@ -307,6 +323,7 @@ async fn a_full_system_disk_keeps_the_server_alive() {
     }
     assert_eq!(api.get("/api/v1/me", &token).await.status, 200);
     std::fs::remove_file(filler).unwrap();
+    let _ = std::fs::remove_file(disk.mount.join("filler-rest"));
     let data = random_bytes(10_000);
     let created = announce(&api, &token, &data).await;
     let upload = created.body["uploadId"].as_str().unwrap().to_string();
