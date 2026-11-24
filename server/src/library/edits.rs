@@ -53,6 +53,11 @@ impl Correction {
         if let Some(Some(location)) = &self.location {
             location.check()?;
         }
+        if let Some(taken) = self.taken_at
+            && !(super::EARLIEST_TAKEN_AT..=super::LATEST_TAKEN_AT).contains(&taken)
+        {
+            return Err("takenAt must be between 1900 and 2200.".into());
+        }
         if let Some(offset) = self.tz_offset_min
             && !(-18 * 60..=18 * 60).contains(&offset)
         {

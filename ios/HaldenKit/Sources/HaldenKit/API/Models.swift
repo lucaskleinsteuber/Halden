@@ -88,21 +88,32 @@ public struct AssetLocation: Codable, Sendable, Equatable {
     public var source: String?
 }
 
+public struct AssetCamera: Codable, Sendable, Equatable {
+    public var make: String?
+    public var model: String?
+    public var lens: String?
+}
+
 /// A photo or video as the server knows it.
 public struct Asset: Codable, Sendable, Equatable {
     public var id: String
     public var kind: String
     public var takenAt: Int64
     public var timeZoneOffsetMinutes: Int?
+    /// `client`, `exif`, `upload`, or `manual` once corrected.
+    public var takenAtSource: String?
     public var width: Int?
     public var height: Int?
     public var durationMs: Int64?
+    /// The effective place: a correction if there is one, else the original.
     public var location: AssetLocation?
+    public var camera: AssetCamera?
     public var files: [AssetFile]
     public var seq: Int64
     public var trashedAt: Int64?
     public var deletedAt: Int64?
     public var title: String?
+    public var description: String?
 
     public func file(_ role: String) -> AssetFile? {
         files.first { $0.role == role }
@@ -194,4 +205,86 @@ public struct ErrorBody: Codable, Sendable {
     public var error: String
     public var message: String
     public var offset: Int64?
+}
+
+/// One field of a correction: left as it is, set, or removed (`null` on the wire).
+public enum Change<Value: Codable & Sendable & Equatable>: Sendable, Equatable {
+    case keep
+    case set(Value)
+    case clear
+}
+
+/// A place given by hand or accepted from a suggestion (`estimated`).
+public struct CorrectedLocation: Codable, Sendable, Equatable {
+    public var latitude: Double
+    public var longitude: Double
+    public var altitude: Double?
+    public var estimated: Bool
+
+    public init(latitude: Double, longitude: Double, altitude: Double? = nil, estimated: Bool = false) {
+        self.latitude = latitude
+        self.longitude = longitude
+        self.altitude = altitude
+        self.estimated = estimated
+    }
+}
+
+/// `PATCH /assets/{id}`: corrections. The original values stay on the server; `restore` drops
+/// corrections of these fields (`takenAt`, `location`, …) and shows the originals again.
+public struct AssetCorrection: Codable, Sendable, Equatable {
+    public var takenAt: Change<Int64> = .keep
+    public var timeZoneOffsetMinutes: Change<Int> = .keep
+    public var location: Change<CorrectedLocation> = .keep
+    public var title: Change<String> = .keep
+    public var description: Change<String> = .keep
+    public var restore: [String] = []
+
+    public init(
+        takenAt: Change<Int64> = .keep, timeZoneOffsetMinutes: Change<Int> = .keep,
+        location: Change<CorrectedLocation> = .keep, title: Change<String> = .keep,
+        description: Change<String> = .keep, restore: [String] = []
+    ) {
+        self.takenAt = takenAt
+        self.timeZoneOffsetMinutes = timeZoneOffsetMinutes
+        self.location = location
+        self.title = title
+        self.description = description
+        self.restore = restore
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case takenAt, timeZoneOffsetMinutes, location, title, description, restore
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        func put<V>(_ change: Change<V>, _ key: CodingKeys) throws {
+            switch change {
+            case .keep: break
+            case .set(let value): try container.encode(value, forKey: key)
+            case .clear: try container.encodeNil(forKey: key)
+            }
+        }
+        try put(takenAt, .takenAt)
+        try put(timeZoneOffsetMinutes, .timeZoneOffsetMinutes)
+        try put(location, .location)
+        try put(title, .title)
+        try put(description, .description)
+        if !restore.isEmpty { try container.encode(restore, forKey: .restore) }
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        func get<V>(_ key: CodingKeys) throws -> Change<V> {
+            guard container.contains(key) else { return .keep }
+            if try container.decodeNil(forKey: key) { return .clear }
+            return .set(try container.decode(V.self, forKey: key))
+        }
+        takenAt = try get(.takenAt)
+        timeZoneOffsetMinutes = try get(.timeZoneOffsetMinutes)
+        location = try get(.location)
+        title = try get(.title)
+        description = try get(.description)
+        restore = try container.decodeIfPresent([String].self, forKey: .restore) ?? []
+    }
 }

@@ -114,11 +114,9 @@ pub struct ClientLocation {
 impl ClientMetadata {
     /// Refuses values that can't be true, so nonsense never reaches the library.
     pub fn check(&self) -> Result<(), String> {
-        // Years 1900 to 2200.
-        const EARLIEST: i64 = -2_208_988_800_000;
-        const LATEST: i64 = 7_258_118_400_000;
         if let Some(taken) = self.taken_at
-            && !(EARLIEST..=LATEST).contains(&taken)
+            && !(crate::library::EARLIEST_TAKEN_AT..=crate::library::LATEST_TAKEN_AT)
+                .contains(&taken)
         {
             return Err("takenAt must be between 1900 and 2200.".into());
         }

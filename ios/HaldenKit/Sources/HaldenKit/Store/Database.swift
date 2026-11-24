@@ -71,6 +71,48 @@ public final class HaldenDatabase: Sendable {
                 t.column("createdAt", .integer).notNull()
             }
         }
+        migrator.registerMigration("2: details, actions, Apple Photos") { db in
+            try db.alter(table: "asset") { t in
+                t.add(column: "durationMs", .integer)
+                t.add(column: "description", .text)
+                // The effective place (a correction if there is one), for the map and the
+                // "without location" view without asking the server.
+                t.add(column: "latitude", .double)
+                t.add(column: "longitude", .double)
+                t.add(column: "altitude", .double)
+                t.add(column: "locationAccuracy", .double)
+                t.add(column: "heading", .double)
+                // `client`, `exif`, `manual` or `estimated`.
+                t.add(column: "locationSource", .text)
+                // Where a photo on this device came from: `camera` (Halden) or `photos` (Apple
+                // Photos). Empty for photos that came from the server.
+                t.add(column: "origin", .text)
+            }
+            try db.create(index: "asset_without_location", on: "asset", columns: ["latitude", "takenAt"])
+            // Changes made here that the server hasn't heard of yet, oldest first.
+            try db.create(table: "action") { t in
+                t.autoIncrementedPrimaryKey("id")
+                // `trash`, `restore`, `delete`, `correct`, `locate`
+                t.column("kind", .text).notNull()
+                t.column("assetIds", .jsonText).notNull()
+                t.column("payload", .blob)
+                t.column("createdAt", .integer).notNull()
+                t.column("attempts", .integer).notNull().defaults(to: 0)
+                t.column("lastError", .text)
+            }
+            // Which Apple Photos item became which Halden asset, so nothing comes in twice.
+            try db.create(table: "photosLink") { t in
+                t.primaryKey("localIdentifier", .text)
+                t.column("assetId", .text).notNull()
+                t.column("linkedAt", .integer).notNull()
+            }
+            try db.create(index: "photosLink_by_asset", on: "photosLink", columns: ["assetId"])
+            // Small pieces of state (e.g. how far the Apple Photos import got).
+            try db.create(table: "meta") { t in
+                t.primaryKey("key", .text)
+                t.column("value", .blob)
+            }
+        }
         return migrator
     }
 }
@@ -110,6 +152,18 @@ public struct LocalAsset: Codable, Sendable, Equatable, Identifiable, FetchableR
     public var seq: Int64?
     public var trashedAt: Int64?
     public var deletedAt: Int64?
+    public var durationMs: Int64?
+    public var description: String?
+    public var latitude: Double?
+    public var longitude: Double?
+    public var altitude: Double?
+    public var locationAccuracy: Double?
+    public var heading: Double?
+    public var locationSource: String?
+    public var origin: String?
+
+    public var isVideo: Bool { kind == "video" }
+    public var hasLocation: Bool { latitude != nil && longitude != nil }
 
     public init(
         id: String, kind: String, takenAt: Int64, timeZoneOffsetMinutes: Int? = nil,
@@ -145,7 +199,54 @@ public struct UploadItem: Codable, Sendable, Equatable, FetchableRecord, Persist
     public var createdAt: Int64
 }
 
+/// A change made on this device, waiting for the server.
+public struct PendingAction: Codable, Sendable, Equatable, FetchableRecord, MutablePersistableRecord {
+    public static let databaseTableName = "action"
+    public var id: Int64?
+    public var kind: String
+    public var assetIds: [String]
+    /// The JSON body for `correct` and `locate`.
+    public var payload: Data?
+    public var createdAt: Int64
+    public var attempts: Int
+    public var lastError: String?
+
+    public mutating func didInsert(_ inserted: InsertionSuccess) {
+        id = inserted.rowID
+    }
+}
+
+/// An Apple Photos item that became a Halden asset (imported, or saved there from the camera).
+public struct PhotosLink: Codable, Sendable, Equatable, FetchableRecord, PersistableRecord {
+    public static let databaseTableName = "photosLink"
+    public var localIdentifier: String
+    public var assetId: String
+    public var linkedAt: Int64
+
+    public init(localIdentifier: String, assetId: String, linkedAt: Int64) {
+        self.localIdentifier = localIdentifier
+        self.assetId = assetId
+        self.linkedAt = linkedAt
+    }
+}
+
 extension HaldenDatabase {
+    /// A small value kept across launches.
+    public func meta(_ key: String) throws -> Data? {
+        try writer.read { db in
+            try Data.fetchOne(db, sql: "SELECT value FROM meta WHERE key = ?", arguments: [key])
+        }
+    }
+
+    public func setMeta(_ key: String, _ value: Data?) throws {
+        try writer.write { db in
+            try db.execute(
+                sql:
+                    "INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value",
+                arguments: [key, value])
+        }
+    }
+
     public func server() throws -> StoredServer? {
         try writer.read { db in try StoredServer.fetchOne(db) }
     }
@@ -165,6 +266,19 @@ extension HaldenDatabase {
             try db.execute(sql: "DELETE FROM asset WHERE localFile IS NULL")
             try db.execute(sql: "UPDATE asset SET backedUp = 0, seq = NULL")
             try db.execute(sql: "UPDATE upload SET uploadId = NULL, sent = 0, state = 'waiting'")
+            // Changes meant for the old server don't apply to the next one.
+            try db.execute(sql: "DELETE FROM action")
+            try db.execute(sql: "DELETE FROM photosLink WHERE assetId NOT IN (SELECT id FROM asset)")
+        }
+    }
+
+    /// Photos and videos in the trash, most recently trashed first.
+    public func trash() throws -> [LocalAsset] {
+        try writer.read { db in
+            try LocalAsset
+                .filter(sql: "trashedAt IS NOT NULL AND deletedAt IS NULL")
+                .order(sql: "trashedAt DESC, id")
+                .fetchAll(db)
         }
     }
 

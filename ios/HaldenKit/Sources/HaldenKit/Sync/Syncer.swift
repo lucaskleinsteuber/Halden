@@ -31,7 +31,10 @@ public actor Syncer {
             }
             let next = page.nextSince
             try await database.writer.write { db in
-                for asset in page.assets {
+                // A change made here that the server hasn't heard of yet wins until it has: the
+                // asset comes again with a new number once the change arrived.
+                let waiting = try Actions.waitingAssetIds(db)
+                for asset in page.assets where !waiting.contains(asset.id.lowercased()) {
                     try Self.merge(asset, into: db)
                 }
                 try db.execute(sql: "UPDATE server SET syncSince = ?", arguments: [next])
@@ -42,7 +45,7 @@ public actor Syncer {
         }
     }
 
-    static func merge(_ asset: Asset, into db: Database) throws {
+    public static func merge(_ asset: Asset, into db: Database) throws {
         let id = asset.id.lowercased()
         var local =
             try LocalAsset.fetchOne(db, key: id)
@@ -53,6 +56,14 @@ public actor Syncer {
         local.width = asset.width ?? local.width
         local.height = asset.height ?? local.height
         local.title = asset.title
+        local.description = asset.description
+        local.durationMs = asset.durationMs ?? local.durationMs
+        local.latitude = asset.location?.latitude
+        local.longitude = asset.location?.longitude
+        local.altitude = asset.location?.altitude
+        local.locationAccuracy = asset.location?.accuracyMeters
+        local.heading = asset.location?.heading
+        local.locationSource = asset.location?.source
         local.seq = asset.seq
         local.trashedAt = asset.trashedAt
         local.deletedAt = asset.deletedAt

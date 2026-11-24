@@ -316,6 +316,22 @@ async fn corrections_keep_the_original_and_their_history() {
     assert_eq!(corrected.status, 200, "{}", corrected.body);
     let asset = &corrected.body;
     assert_eq!(asset["takenAt"], at - 3_600_000);
+    // The same limits as for uploads (found by the app's tests: the year 5000 was taken).
+    for impossible in [95_617_584_000_000_i64, -2_208_988_800_001] {
+        let refused = api
+            .call(
+                Method::PATCH,
+                &path,
+                Some(&token),
+                Some(json!({ "takenAt": impossible })),
+            )
+            .await;
+        assert_eq!(
+            (refused.status, refused.error()),
+            (422, "validation_failed"),
+            "{impossible}"
+        );
+    }
     assert_eq!(asset["timeZoneOffsetMinutes"], 120);
     assert_eq!(asset["takenAtSource"], "manual");
     assert_eq!(asset["location"]["latitude"], 48.137);

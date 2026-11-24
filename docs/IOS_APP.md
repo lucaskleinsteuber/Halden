@@ -1,8 +1,8 @@
 # The iPhone app
 
-Native Swift and SwiftUI, iOS 26 and newer. Right now it is the skeleton: connect to the
-server, take a photo, watch it go up (also after a break), see it in the grid with a check mark.
-Design, video, background uploads, the trash, Apple Photos and the Live Activity come next.
+Native Swift and SwiftUI, iOS 26 and newer. Being built up to the full first version (camera
+with video, background uploads, library, trash, Apple Photos, settings and server management);
+the design comes after that. What works today is described below.
 
 ## Layout
 
@@ -28,8 +28,21 @@ Design, video, background uploads, the trash, Apple Photos and the Live Activity
   Once the original is checked on the server, the phone sends its own thumbnail (512 px) and
   preview (2048 px).
 - **The grid**: everything the phone took and everything synced from the server
-  (`GET /sync`, only what changed), newest first. Thumbnails come from a cache on disk, from the
-  local file, or 500 at a time from the server. A check mark means: safely on the server.
+  (`GET /sync`, only what changed), newest first. A `UICollectionView` rather than a SwiftUI
+  grid, so 50,000 photos scroll without a hitch: cells are reused, only changed cells are
+  redrawn, and pictures are asked for before they scroll in. `ImagePipeline` decodes and scales
+  each thumbnail to the cell's size off the main thread and keeps decoded pictures in memory
+  (96 MB); thumbnails come from a cache on disk, from the local file, or from the server, where
+  all cells asking within 15 ms go out as one request. A check mark means: safely on the
+  server; a ring shows an upload going.
+- **Changes on the phone** (`Actions`): trash, restore, delete for good, corrections and one
+  place for many photos show at once and are kept in the `action` table until the server has
+  them, in the order they were made. The sync leaves photos with waiting changes alone. A
+  change for a photo still uploading waits for it. Errors that may pass (server busy, no
+  connection) are tried again later, up to 10 times; a change the server refuses for good is
+  dropped and the photo shown as the server has it.
+- **Settings** (`AppSettings`): saved on the phone; values from an older version or options
+  that went away fall back to their default.
 
 ## On your iPhone
 
@@ -47,9 +60,14 @@ With a free developer account the app runs for 7 days; then install it again the
 ```sh
 cd server && cargo build                 # the end-to-end tests start the real server
 cd ../ios/HaldenKit && swift test        # unit tests and the whole chain against the server
-cd .. && xcodebuild test -project Halden.xcodeproj -scheme Halden \
-  -destination 'platform=iOS Simulator,name=iPhone 18 Pro' CODE_SIGNING_ALLOWED=NO
+cd .. && ./ui-tests.sh                   # the app in the simulator, against a real server
 ```
+
+`ui-tests.sh` sets up a server in a temporary folder, starts it on the Mac (the simulator
+reaches it on 127.0.0.1) and stops it afterwards; extra arguments go to `xcodebuild`, e.g.
+`-only-testing:HaldenUITests/HaldenUITests/testTheGridScrollsThroughFiftyThousandPhotos`.
+Started with `-ui-testing-library 50000`, the app fills its database with that many photos
+instead of connecting.
 
 The CI (`.github/workflows/ios.yml`) runs all of it on macOS and checks that the Xcode project
 matches `project.yml`.

@@ -8,6 +8,14 @@ There are no version numbers yet; entries are grouped by date until the first re
 
 ### Added
 
+- iPhone app foundations for the full app: the grid is now a collection view that stays smooth
+  with 50,000 photos (pictures decoded and scaled off the main thread, kept in memory, fetched
+  in bulk and ahead of scrolling); changes made on the phone (trash, restore, delete for good,
+  corrections, one place for many photos) show at once and reach the server in order once it
+  can be reached, also after days offline; all app settings with their defaults; the local
+  database learns video length, description, place, origin and links to Apple Photos.
+- UI tests against the real server (`ios/ui-tests.sh` starts one on the Mac): signing in with a
+  password after comparing the fingerprint, and scrolling through 50,000 photos.
 - `halden doctor`, run as root, checks that the server's own user can get through every folder
   on the way to its data and library and write there, and names the folder that stops it.
 - Tests for things happening at the same time (the same photo from two phones at once; trash,
@@ -34,6 +42,8 @@ There are no version numbers yet; entries are grouped by date until the first re
 
 ### Fixed
 
+- Server: a correction could set a photo's time to any year (the year 5000 was taken). Times
+  outside 1900 to 2200 are refused, as they are for uploads. Found by the app's tests.
 - Server: `halden setup` made missing parent folders (like `/srv/halden` for the default library
   `/srv/halden/library`) with the library's restrictive permissions and owned by root, so the
   server's user could not get to its library: under systemd every upload and the daily database

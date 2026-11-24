@@ -4,12 +4,17 @@ import SwiftUI
 /// Every photo, newest first, with a check mark once it is safely on the server.
 struct PhotosView: View {
     @Environment(AppModel.self) private var app
-    @State private var thumbnails: [String: URL] = [:]
-    private let columns = [GridItem(.adaptive(minimum: 96), spacing: 2)]
+    @State private var path: [String] = []
 
     var body: some View {
-        NavigationStack {
-            ScrollView {
+        NavigationStack(path: $path) {
+            LibraryGrid(
+                assets: app.library, version: app.libraryVersion, uploads: app.uploads, pipeline: app.pipeline
+            ) { id in
+                path.append(id)
+            }
+            .ignoresSafeArea(edges: .bottom)
+            .overlay {
                 if app.library.isEmpty {
                     ContentUnavailableView(
                         "No photos yet", systemImage: "photo",
@@ -17,42 +22,9 @@ struct PhotosView: View {
                     )
                     .accessibilityIdentifier("empty-library")
                 }
-                LazyVGrid(columns: columns, spacing: 2) {
-                    ForEach(app.library) { asset in
-                        NavigationLink(value: asset.id) {
-                            Thumbnail(url: thumbnails[asset.id])
-                                .overlay(alignment: .bottomTrailing) { badge(for: asset) }
-                        }
-                        .accessibilityIdentifier("photo-\(asset.id)")
-                    }
-                }
             }
             .navigationTitle("Photos")
             .navigationDestination(for: String.self) { id in PhotoDetailView(id: id) }
-            .refreshable { app.refresh() }
-            .task(id: app.library.map { "\($0.id)\($0.thumbnailSha256 ?? "")" }) {
-                let found = await app.thumbnails(for: app.library)
-                thumbnails.merge(found) { _, new in new }
-            }
-        }
-    }
-
-    @ViewBuilder private func badge(for asset: LocalAsset) -> some View {
-        if asset.backedUp {
-            Image(systemName: "checkmark.circle.fill")
-                .foregroundStyle(.white, .green)
-                .padding(4)
-                .accessibilityLabel("Backed up")
-        } else if let progress = app.uploads[asset.id] {
-            ProgressView(value: progress)
-                .progressViewStyle(.circular)
-                .padding(4)
-                .accessibilityLabel("Uploading")
-        } else {
-            Image(systemName: "icloud.slash")
-                .foregroundStyle(.white)
-                .padding(4)
-                .accessibilityLabel("Not backed up yet")
         }
     }
 }

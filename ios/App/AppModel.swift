@@ -12,6 +12,9 @@ final class AppModel {
     private(set) var connection: ServerConnection?
     /// Newest first, without trash.
     private(set) var library: [LocalAsset] = []
+    /// Goes up whenever `library` changes, so views can tell cheaply.
+    private(set) var libraryVersion = 0
+    private(set) var settings: AppSettings
     /// Uploads not finished yet, by asset id: how much of the file the server has (0…1).
     private(set) var uploads: [String: Double] = [:]
     private(set) var backup: BackupState?
@@ -22,6 +25,9 @@ final class AppModel {
     let database: HaldenDatabase
     let files: FileLocations
     let tokens: any TokenStore
+    let settingsStore: any SettingsStore
+    let actions: Actions
+    let pipeline: ImagePipeline
     private var client: APIClient?
     private var observation: AnyDatabaseCancellable?
     private var uploadObservation: AnyDatabaseCancellable?
@@ -39,12 +45,25 @@ final class AppModel {
         DeviceDescription(name: UIDevice.current.name, platform: "ios", installationId: Self.installationId)
     }
 
-    init(database: HaldenDatabase, files: FileLocations, tokens: any TokenStore) {
+    init(
+        database: HaldenDatabase, files: FileLocations, tokens: any TokenStore,
+        settings: any SettingsStore = DefaultsSettingsStore()
+    ) {
         self.database = database
         self.files = files
         self.tokens = tokens
+        self.settingsStore = settings
+        self.settings = settings.load()
+        self.actions = Actions(database: database)
+        self.pipeline = ImagePipeline(loader: ThumbnailLoader(files: files, client: nil))
         observe()
         restore()
+    }
+
+    /// Changes a setting and keeps it.
+    func update(_ change: (inout AppSettings) -> Void) {
+        change(&settings)
+        settingsStore.save(settings)
     }
 
     /// The app's real database, files and Keychain; for UI tests (`-ui-testing`) an empty
@@ -53,10 +72,15 @@ final class AppModel {
         let arguments = ProcessInfo.processInfo.arguments
         if arguments.contains("-ui-testing") || arguments.contains("-ui-testing-signed-in") {
             let temporary = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+            let database = try! HaldenDatabase()
+            let files = try! FileLocations(root: temporary, caches: temporary.appendingPathComponent("caches"))
+            if let index = arguments.firstIndex(of: "-ui-testing-library"), index + 1 < arguments.count,
+                let count = Int(arguments[index + 1])
+            {
+                try! UITestWorld.fill(database, files: files, with: count)
+            }
             let model = AppModel(
-                database: try! HaldenDatabase(),
-                files: try! FileLocations(root: temporary, caches: temporary.appendingPathComponent("caches")),
-                tokens: MemoryTokenStore())
+                database: database, files: files, tokens: MemoryTokenStore(), settings: MemorySettingsStore())
             if arguments.contains("-ui-testing-signed-in") {
                 model.connection = ServerConnection(
                     serverId: "00000000-0000-0000-0000-000000000000", name: "Test server",
@@ -85,7 +109,10 @@ final class AppModel {
             }
             .start(in: database.writer, scheduling: .async(onQueue: .main)) { _ in
             } onChange: { [weak self] assets in
-                MainActor.assumeIsolated { self?.library = assets }
+                MainActor.assumeIsolated {
+                    self?.library = assets
+                    self?.libraryVersion += 1
+                }
             }
         uploadObservation =
             ValueObservation
@@ -113,7 +140,9 @@ final class AppModel {
         guard let address = connection.addresses.first,
             let base = APIClient.base(address: address, port: connection.port)
         else { return }
-        client = APIClient(base: base, trust: .pinned(connection.fingerprint), token: token)
+        let first = APIClient(base: base, trust: .pinned(connection.fingerprint), token: token)
+        client = first
+        Task { await pipeline.use(ThumbnailLoader(files: files, client: first)) }
         work()
         // Home network or Tailscale: whichever address answers right now.
         Task { [weak self] in
@@ -121,7 +150,9 @@ final class AppModel {
                 addresses: connection.addresses, port: connection.port,
                 fingerprint: connection.fingerprint, serverId: connection.serverId)
             {
-                self?.client = found.signedIn(with: token)
+                let client = found.signedIn(with: token)
+                self?.client = client
+                if let self { await self.pipeline.use(ThumbnailLoader(files: self.files, client: client)) }
                 self?.refresh()
             }
         }
@@ -198,10 +229,15 @@ final class AppModel {
     /// half minute while the app is open.
     func work() {
         guard working == nil, let client else { return }
-        working = Task { [database, files, weak self] in
+        working = Task { [database, files, actions, weak self] in
             while !Task.isCancelled {
                 let uploader = Uploader(database: database, files: files, client: client)
                 await uploader.drain()
+                // Changes made here (trash, corrections, …) before the sync, so it shows them.
+                if await actions.send(with: client) == .signedOut {
+                    await self?.signOut()
+                    return
+                }
                 var reachable = true
                 do {
                     try await Syncer(database: database, client: client).run()
@@ -227,8 +263,4 @@ final class AppModel {
         work()
     }
 
-    /// Thumbnails for these photos, from the cache, the local file or the server.
-    func thumbnails(for assets: [LocalAsset]) async -> [String: URL] {
-        await ThumbnailLoader(files: files, client: client).load(assets)
-    }
 }

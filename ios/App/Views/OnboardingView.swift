@@ -75,6 +75,7 @@ struct LoginView: View {
                     .accessibilityIdentifier("address")
                 TextField("Port", text: $port)
                     .keyboardType(.numberPad)
+                    .accessibilityIdentifier("port")
                 Button("Look up") {
                     Task {
                         problem = nil
@@ -86,6 +87,7 @@ struct LoginView: View {
                     }
                 }
                 .disabled(address.isEmpty)
+                .accessibilityIdentifier("look-up")
             }
             if let server {
                 Section {
@@ -93,6 +95,7 @@ struct LoginView: View {
                     Text(Fingerprint.display(server.fingerprint))
                         .font(.system(.footnote, design: .monospaced))
                     Toggle("It is the same as on the server", isOn: $confirmed)
+                        .accessibilityIdentifier("fingerprint-confirmed")
                 } header: {
                     Text("Fingerprint")
                 } footer: {
@@ -104,7 +107,9 @@ struct LoginView: View {
                     TextField("Username", text: $username)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
+                        .accessibilityIdentifier("username")
                     SecureField("Password", text: $password)
+                        .accessibilityIdentifier("password")
                     Button("Sign in") {
                         Task {
                             await model.login(
@@ -113,6 +118,7 @@ struct LoginView: View {
                         }
                     }
                     .disabled(username.isEmpty || password.isEmpty || model.busy || !server.passwordLogin)
+                    .accessibilityIdentifier("sign-in")
                     if !server.passwordLogin {
                         Text("This server only allows pairing with a QR code.")
                     }

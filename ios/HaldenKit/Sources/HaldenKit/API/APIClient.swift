@@ -234,6 +234,31 @@ public final class APIClient: Sendable {
         try await changed("assets/restore", ids)
     }
 
+    /// Deletes for good, only assets that are in the trash.
+    public func deleteForGood(_ ids: [String]) async throws -> Int {
+        try await changed("assets/delete", ids)
+    }
+
+    /// One asset as it is now (`GET /assets/{id}`).
+    public func asset(_ id: String) async throws -> Asset {
+        try await get("assets/\(id)")
+    }
+
+    public func correct(_ id: String, _ correction: AssetCorrection) async throws -> Asset {
+        try await call("PATCH", "assets/\(id)", json: correction)
+    }
+
+    /// One place for many photos.
+    public func setLocation(_ ids: [String], _ location: CorrectedLocation) async throws -> Int {
+        struct Body: Encodable {
+            var ids: [String]
+            var location: CorrectedLocation
+        }
+        struct Answer: Decodable { var changed: Int }
+        let answer: Answer = try await call("POST", "assets/location", json: Body(ids: ids, location: location))
+        return answer.changed
+    }
+
     private func changed(_ path: String, _ ids: [String]) async throws -> Int {
         struct Body: Encodable { var ids: [String] }
         struct Answer: Decodable { var changed: Int }

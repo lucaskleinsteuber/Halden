@@ -93,8 +93,21 @@ final class RealServer: @unchecked Sendable {
         }
         try Self.run(base + ["user", "add", "lucas", "--owner"], input: Self.password + "\n")
         process = Process()
-        process.executableURL = Self.binary
-        process.arguments = base + ["serve"]
+        // Through a small shell that stops the server when this test run ends in any way, also
+        // when it is killed and `deinit` never runs.
+        process.executableURL = URL(fileURLWithPath: "/bin/sh")
+        process.arguments =
+            [
+                "-c",
+                """
+                parent=$1; shift
+                "$@" & child=$!
+                trap 'kill $child 2> /dev/null; wait $child; exit 0' TERM
+                while kill -0 "$parent" 2> /dev/null && kill -0 $child 2> /dev/null; do sleep 1; done
+                kill $child 2> /dev/null; wait $child
+                """,
+                "halden-e2e", String(ProcessInfo.processInfo.processIdentifier), Self.binary.path,
+            ] + base + ["serve"]
         process.standardOutput = FileHandle.nullDevice
         process.standardError = FileHandle.nullDevice
         try process.run()
@@ -123,11 +136,11 @@ final class RealServer: @unchecked Sendable {
 }
 
 /// A real photo: a 2000 × 1500 picture of noise (so it doesn't compress small) as JPEG.
-func noiseJPEG(at url: URL) throws {
+func noiseJPEG(at url: URL, seed: UInt32 = 2_463_534_242) throws {
     let width = 2000
     let height = 1500
     var pixels = [UInt8](repeating: 0, count: width * height * 4)
-    var state: UInt32 = 2_463_534_242
+    var state: UInt32 = seed
     for index in pixels.indices {
         state ^= state << 13
         state ^= state >> 17
@@ -296,6 +309,90 @@ struct EndToEndTests {
         #expect(library.map(\.id) == [first], "the copy became the photo that was already there")
         #expect(library.first?.backedUp == true)
         #expect(try await client.sync(since: 0).assets.count == 1)
+    }
+
+    /// Changes made without a connection reach the server later, in order; one for a photo still
+    /// uploading waits for it; one the server refuses for good is dropped and the server's state
+    /// comes back.
+    @Test func changesMadeOfflineReachTheServerLater() async throws {
+        let server = try RealServer()
+        let info = try await server.ready()
+        let (connection, token) = try await Connector.login(
+            address: "127.0.0.1", port: server.port, fingerprint: info.fingerprint,
+            username: "lucas", password: RealServer.password, device: device)
+        let client = APIClient(
+            base: APIClient.base(address: "127.0.0.1", port: server.port)!, trust: .pinned(connection.fingerprint),
+            token: token)
+        let nowhere = APIClient(
+            base: APIClient.base(address: "127.0.0.1", port: 1)!, trust: .pinned(connection.fingerprint),
+            token: token, timeout: 2)
+        let database = try HaldenDatabase()
+        try database.save(
+            server: StoredServer(serverId: connection.serverId, connection: connection, syncSince: 0, backup: nil))
+        let root = server.folder.appendingPathComponent("phone")
+        let files = try FileLocations(root: root, caches: root.appendingPathComponent("caches"))
+        var ids: [String] = []
+        for n in 0..<4 {
+            let id = UUID().uuidString.lowercased()
+            try noiseJPEG(at: files.original("\(n).jpg"), seed: UInt32(n + 1) &* 2_654_435_761)
+            try Uploader.enqueue(
+                database: database, files: files, assetId: id, fileName: "\(n).jpg", kind: "photo",
+                mimeType: "image/jpeg", metadata: UploadMetadata(takenAt: 1_795_443_730_000 + Int64(n)))
+            ids.append(id)
+        }
+        let uploader = Uploader(database: database, files: files, client: client)
+        let (a, b, c, later) = (ids[0], ids[1], ids[2], ids[3])
+        // The first three go up; the fourth stays waiting for now.
+        try await database.writer.write { db in
+            try db.execute(sql: "UPDATE upload SET retryAt = ? WHERE assetId = ?", arguments: [Int64.max, later])
+        }
+        #expect(await uploader.drain() == 3)
+
+        let actions = Actions(database: database)
+        try actions.trash([a, b, later])
+        try actions.restore([b])
+        try actions.correct(
+            c,
+            AssetCorrection(
+                location: .set(CorrectedLocation(latitude: 48.137, longitude: 11.575)), title: .set("Munich")))
+        try actions.setLocation([b], CorrectedLocation(latitude: 50.5, longitude: 9.6, estimated: true))
+        #expect(await actions.send(with: nowhere) == .later)
+        #expect(try actions.pending().count == 4)
+
+        // Back home: everything goes, except what waits for the fourth photo's upload.
+        #expect(await actions.send(with: client) == .done)
+        #expect(try actions.pending().map(\.kind) == ["trash"], "waits for the photo still uploading")
+        #expect(try actions.pending().first?.assetIds == [later], "the others of that change went")
+        let onServer = Dictionary(
+            uniqueKeysWithValues: try await client.sync(since: 0).assets.map { ($0.id.lowercased(), $0) })
+        #expect(onServer[a]?.trashedAt != nil)
+        #expect(onServer[b]?.trashedAt == nil)
+        #expect(onServer[b]?.location?.source == "estimated")
+        #expect(onServer[c]?.title == "Munich")
+        #expect(onServer[c]?.location?.source == "manual")
+
+        // The fourth photo goes up; then its change follows.
+        try await database.writer.write { db in try db.execute(sql: "UPDATE upload SET retryAt = 0") }
+        #expect(await uploader.drain() == 1)
+        #expect(await actions.send(with: client) == .done)
+        #expect(try actions.pending().isEmpty)
+        #expect(try await client.asset(later).trashedAt != nil)
+        try await Syncer(database: database, client: client).run()
+        #expect(try database.trash().map(\.id).sorted() == [a, later].sorted())
+
+        // Deleting for good.
+        try actions.deleteForGood([a])
+        #expect(await actions.send(with: client) == .done)
+        #expect(try await client.asset(a).deletedAt != nil)
+
+        // A correction the server refuses (a date in the year 5000): dropped, and the server's
+        // date comes back here.
+        let before = try #require(try database.asset(c)).takenAt
+        try actions.correct(c, AssetCorrection(takenAt: .set(95_617_584_000_000)))
+        #expect(try database.asset(c)?.takenAt == 95_617_584_000_000)
+        #expect(await actions.send(with: client) == .done)
+        #expect(try actions.pending().isEmpty)
+        #expect(try database.asset(c)?.takenAt == before)
     }
 
     /// Two phones send the same photo; the second finishes while the first is halfway. When the
