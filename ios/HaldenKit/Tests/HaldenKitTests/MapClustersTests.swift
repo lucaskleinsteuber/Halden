@@ -58,10 +58,11 @@ import Testing
         let points = (0..<50_000).map { n in
             point("p\(n)", Double.random(in: 47...55, using: &generator), Double.random(in: 6...15, using: &generator))
         }
-        // The best of five, in a debug build while other tests run alongside: a generous limit
-        // that still catches anything slower than the map can follow.
+        // The best of five, in a debug build while other tests run alongside, also on the CI's
+        // slower machines (about 0.4 s there): a generous limit that still catches anything that
+        // grows faster than the photos (that would take many seconds).
         let clock = ContinuousClock()
         let took = (0..<5).map { _ in clock.measure { _ = MapClusters.clusters(points, in: germany) } }.min()!
-        #expect(took < .milliseconds(300), "\(took)")
+        #expect(took < .seconds(1), "\(took)")
     }
 }
