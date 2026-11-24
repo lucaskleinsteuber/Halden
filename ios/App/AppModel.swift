@@ -1,9 +1,11 @@
+import AVFoundation
 import Foundation
 import GRDB
 import HaldenKit
 import LockedCameraCapture
 import Observation
 import UIKit
+import UniformTypeIdentifiers
 
 /// Everything the screens show and do. Lives as long as the app.
 @MainActor
@@ -36,6 +38,8 @@ final class AppModel {
     let settingsStore: any SettingsStore
     let actions: Actions
     let pipeline: ImagePipeline
+    /// Previews and originals for the full-screen view and sharing.
+    let media: MediaFiles
     /// Made at app start, so the camera is ready the moment its screen opens.
     let camera: CameraModel
     /// Uploads the system goes on with while Halden is in the background.
@@ -71,6 +75,7 @@ final class AppModel {
         self.settings = settings.load()
         self.actions = Actions(database: database)
         self.pipeline = ImagePipeline(loader: ThumbnailLoader(files: files, client: nil))
+        self.media = MediaFiles(files: files, client: nil)
         self.camera = CameraModel.make(standIn: standInCamera)
         self.background = BackgroundUploads(database: database, files: files, configuration: backgroundConfiguration)
         camera.settings = { [weak self] in self?.settings ?? AppSettings() }
@@ -210,7 +215,10 @@ final class AppModel {
         else { return }
         let first = APIClient(base: base, trust: .pinned(connection.fingerprint), token: token)
         client = first
-        Task { await pipeline.use(ThumbnailLoader(files: files, client: first)) }
+        Task {
+            await pipeline.use(ThumbnailLoader(files: files, client: first))
+            await media.use(first)
+        }
         work()
         // Home network or Tailscale: whichever address answers right now.
         Task { [weak self] in
@@ -220,7 +228,10 @@ final class AppModel {
             {
                 let client = found.signedIn(with: token)
                 self?.client = client
-                if let self { await self.pipeline.use(ThumbnailLoader(files: self.files, client: client)) }
+                if let self {
+                    await self.pipeline.use(ThumbnailLoader(files: self.files, client: client))
+                    await self.media.use(client)
+                }
                 self?.refresh()
             }
         }
@@ -355,6 +366,91 @@ final class AppModel {
                 self?.reachable = reachable
                 try? await Task.sleep(for: .seconds(30))
             }
+        }
+    }
+
+    // MARK: The library
+
+    /// One asset as this iPhone knows it.
+    func asset(_ id: String) -> LocalAsset? {
+        try? database.asset(id)
+    }
+
+    /// A video from the server, played through the pinned connection.
+    func stream(_ asset: LocalAsset) -> AVURLAsset? {
+        StreamLoader.asset(id: asset.id, client: client)
+    }
+
+    /// Everything the server knows about one asset.
+    func detail(_ id: String) async throws -> AssetDetail {
+        guard let client else { throw APIError.unreachable("not connected") }
+        return try await client.detail(id)
+    }
+
+    /// Corrects time, place, title or description; shows at once, reaches the server when it can.
+    func correct(_ id: String, _ correction: AssetCorrection) {
+        do {
+            try actions.correct(id, correction)
+            refresh()
+        } catch {
+            problem = "The correction could not be saved: \(error.localizedDescription)"
+        }
+    }
+
+    /// One place for many photos.
+    func setPlace(_ ids: [String], _ place: CorrectedLocation) {
+        do {
+            try actions.setLocation(ids, place)
+            refresh()
+        } catch {
+            problem = "The place could not be saved: \(error.localizedDescription)"
+        }
+    }
+
+    /// The server's suggestions for photos without a place (the place of the nearest photo in
+    /// time), by asset id.
+    func placeSuggestions() async -> [String: PlaceSuggestion] {
+        guard let client else { return [:] }
+        var found: [String: PlaceSuggestion] = [:]
+        var before: Int64?
+        for _ in 0..<20 {
+            guard let page = try? await client.withoutPlace(before: before, limit: 500), let last = page.last
+            else { break }
+            for entry in page { found[entry.asset.id.lowercased()] = entry.suggestion }
+            before = last.asset.takenAt
+            if page.count < 500 { break }
+        }
+        return found
+    }
+
+    enum ShareKind {
+        /// The file as it was taken.
+        case original
+        /// With the corrected time, place, title and description written into it.
+        case corrected
+        /// The copy in the account's preferred format (`/me/settings`).
+        case preferred
+    }
+
+    /// A file to share; fetched from the server when it isn't on this iPhone.
+    func fileToShare(_ asset: LocalAsset, as kind: ShareKind) async throws -> URL {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("Share", isDirectory: true)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        switch kind {
+        case .original:
+            return try await media.original(of: asset)
+        case .corrected:
+            let original = try await media.original(of: asset)
+            return try await Export.copy(of: original, asset: asset, withCorrections: true, into: folder)
+        case .preferred:
+            guard let client else { throw APIError.unreachable("not connected") }
+            let download = folder.appendingPathComponent("\(asset.id).download")
+            let type = try await client.download(asset: asset.id, role: "converted", to: download)
+            let ext = type.flatMap { UTType(mimeType: $0)?.preferredFilenameExtension } ?? "bin"
+            let named = folder.appendingPathComponent("Halden-\(asset.id.prefix(8)).\(ext)")
+            try? FileManager.default.removeItem(at: named)
+            try FileManager.default.moveItem(at: download, to: named)
+            return named
         }
     }
 

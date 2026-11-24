@@ -61,6 +61,17 @@ final class HaldenUITests: XCTestCase {
         let deeper = grid.cells.matching(NSPredicate(format: "identifier BEGINSWITH 'photo-'")).firstMatch
         XCTAssertTrue(deeper.waitForExistence(timeout: 5))
         XCTAssertNotEqual(deeper.identifier, newestId, "scrolled far into the library")
+
+        // Full screen, and on to the next photo.
+        let opened = deeper.identifier.replacingOccurrences(of: "photo-", with: "")
+        deeper.tap()
+        let page = app.descendants(matching: .any)["page-\(opened)"]
+        XCTAssertTrue(page.waitForExistence(timeout: 10), "the photo full screen")
+        app.swipeLeft()
+        let next = app.descendants(matching: .any)
+            .matching(NSPredicate(format: "identifier BEGINSWITH 'page-' AND identifier != %@", "page-\(opened)"))
+            .firstMatch
+        XCTAssertTrue(next.waitForExistence(timeout: 5), "swiped to the next photo")
     }
 
     /// The camera from the shutter to the server: a photo, one with the self-timer and a video
@@ -110,8 +121,9 @@ final class HaldenUITests: XCTestCase {
         while (photos.count < 2 || videos.count < 1) && Date() < deadline {
             Thread.sleep(forTimeInterval: 1)
         }
-        XCTAssertEqual(photos.count, 2, "both photos are on the server")
-        XCTAssertEqual(videos.count, 1, "the video is on the server")
+        // Photos from other tests come from the server too; the round below counts only these.
+        XCTAssertGreaterThanOrEqual(photos.count, 2, "both photos are on the server")
+        XCTAssertGreaterThanOrEqual(videos.count, 1, "the video is on the server")
 
         tabs.buttons["Settings"].tap()
         app.buttons["uploads"].tap()
@@ -120,6 +132,49 @@ final class HaldenUITests: XCTestCase {
             .firstMatch
         XCTAssertTrue(round.waitForExistence(timeout: 10), "the uploads screen counts the round")
         XCTAssertTrue(app.staticTexts["Everything is on the server"].exists)
+    }
+
+    /// A correction shows at once and reaches the server, which keeps it next to the original.
+    @MainActor
+    func testACorrectionShowsAtOnceAndReachesTheServer() throws {
+        let environment = ProcessInfo.processInfo.environment
+        guard let server = environment["HALDEN_TEST_SERVER"], let password = environment["HALDEN_TEST_PASSWORD"]
+        else {
+            throw XCTSkip("no server: run ios/ui-tests.sh")
+        }
+        allowLocation()
+        let app = XCUIApplication()
+        app.launchArguments = ["-ui-testing", "-ui-testing-sign-in"]
+        app.launchEnvironment = ["HALDEN_TEST_SERVER": server, "HALDEN_TEST_PASSWORD": password]
+        app.launch()
+        let tabs = app.tabBars.firstMatch
+        XCTAssertTrue(tabs.waitForExistence(timeout: 30), "signed in")
+        tabs.buttons["Camera"].tap()
+        XCTAssertTrue(app.buttons["shutter"].waitForExistence(timeout: 10))
+        app.buttons["shutter"].tap()
+        tabs.buttons["Photos"].tap()
+        let grid = app.collectionViews["library-grid"]
+        // The newest photo, the one just taken, comes first.
+        let newest = grid.cells.firstMatch
+        XCTAssertTrue(newest.waitForExistence(timeout: 30))
+        let backedUp = NSPredicate(format: "label == 'Photo, backed up'")
+        expectation(for: backedUp, evaluatedWith: newest)
+        waitForExpectations(timeout: 60)
+        newest.tap()
+
+        XCTAssertTrue(app.buttons["info"].waitForExistence(timeout: 10))
+        app.buttons["info"].tap()
+        XCTAssertTrue(app.buttons["correct"].waitForExistence(timeout: 5))
+        app.buttons["correct"].tap()
+        let title = app.textFields["title-field"]
+        XCTAssertTrue(title.waitForExistence(timeout: 5))
+        title.tap()
+        title.typeText("Harbour")
+        app.buttons["save-correction"].tap()
+        let shown = app.descendants(matching: .any)["info-title"]
+        XCTAssertTrue(shown.waitForExistence(timeout: 5), "the title shows at once")
+        // The server lists the correction once it has it.
+        XCTAssertTrue(app.staticTexts["title"].waitForExistence(timeout: 60), "the server keeps the correction")
     }
 
     /// Answers the question for the place, should the simulator ask.

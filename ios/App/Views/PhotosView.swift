@@ -3,15 +3,21 @@ import SwiftUI
 
 /// Every photo, newest first, with a check mark once it is safely on the server.
 struct PhotosView: View {
+    enum Route: Hashable {
+        case photo(String)
+        case withoutPlace
+        case uploads
+    }
+
     @Environment(AppModel.self) private var app
-    @State private var path: [String] = []
+    @State private var path: [Route] = []
 
     var body: some View {
         NavigationStack(path: $path) {
             LibraryGrid(
                 assets: app.library, version: app.libraryVersion, uploads: app.uploads, pipeline: app.pipeline
             ) { id in
-                path.append(id)
+                path.append(.photo(id))
             }
             .ignoresSafeArea(edges: .bottom)
             .overlay {
@@ -23,59 +29,28 @@ struct PhotosView: View {
                     .accessibilityIdentifier("empty-library")
                 }
             }
+            .refreshable { app.refresh() }
             .navigationTitle("Photos")
-            .navigationDestination(for: String.self) { id in PhotoDetailView(id: id) }
-        }
-    }
-}
-
-struct Thumbnail: View {
-    let url: URL?
-
-    var body: some View {
-        Color.secondary.opacity(0.15)
-            .aspectRatio(1, contentMode: .fit)
-            .overlay {
-                if let url, let image = UIImage(contentsOfFile: url.path) {
-                    Image(uiImage: image).resizable().scaledToFill()
+            .toolbar {
+                ToolbarItem(placement: .primaryAction) {
+                    Menu {
+                        Button("Without place", systemImage: "mappin.slash") { path.append(.withoutPlace) }
+                            .accessibilityIdentifier("without-place")
+                        Button("Uploads", systemImage: "arrow.up.circle") { path.append(.uploads) }
+                    } label: {
+                        Image(systemName: "ellipsis.circle")
+                    }
+                    .accessibilityLabel("More")
+                    .accessibilityIdentifier("photos-menu")
                 }
             }
-            .clipped()
-    }
-}
-
-struct PhotoDetailView: View {
-    @Environment(AppModel.self) private var app
-    let id: String
-
-    var body: some View {
-        let asset = app.library.first { $0.id == id }
-        VStack {
-            if let asset, let image = image(of: asset) {
-                Image(uiImage: image).resizable().scaledToFit()
-            } else {
-                ContentUnavailableView("Not on this iPhone", systemImage: "photo")
-            }
-            if let asset {
-                Text(Date(timeIntervalSince1970: Double(asset.takenAt) / 1000).formatted(date: .long, time: .shortened))
-                    .font(.footnote)
-                Label(
-                    asset.backedUp ? "Backed up" : "Not backed up yet",
-                    systemImage: asset.backedUp ? "checkmark.circle" : "icloud.slash"
-                )
-                .font(.footnote)
+            .navigationDestination(for: Route.self) { route in
+                switch route {
+                case .photo(let id): PhotoView(start: id, assets: app.library)
+                case .withoutPlace: WithoutPlaceView()
+                case .uploads: UploadsView()
+                }
             }
         }
-        .navigationBarTitleDisplayMode(.inline)
-    }
-
-    private func image(of asset: LocalAsset) -> UIImage? {
-        if let name = asset.localFile, let image = UIImage(contentsOfFile: app.files.original(name).path) {
-            return image
-        }
-        if let sha = asset.previewSha256 ?? asset.thumbnailSha256 {
-            return UIImage(contentsOfFile: app.files.thumbnail(sha256: sha).path)
-        }
-        return nil
     }
 }

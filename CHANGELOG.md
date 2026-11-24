@@ -8,6 +8,13 @@ There are no version numbers yet; entries are grouped by date until the first re
 
 ### Added
 
+- iPhone library: full screen with swiping and zooming (thumbnail, then preview, then the
+  original, without jumps), videos played from the phone or streamed from the server through
+  the pinned connection; info in three layers (as shown, as taken with EXIF, on the server) with
+  a map showing accuracy and direction; corrections of time, time zone, title, description and
+  place, or back to the original; "Without place" with the server's suggestions or a place from
+  the map for many photos at once; sharing the original, a copy with the corrections written
+  into the file, or the copy in the preferred format.
 - iPhone uploads: the network rules (over cellular or not, videos only on Wi-Fi, only on the
   home Wi-Fi); uploads go on in the background, handed to the system as one request for the
   rest of each file, also while Halden is closed; a screen with every waiting upload, its

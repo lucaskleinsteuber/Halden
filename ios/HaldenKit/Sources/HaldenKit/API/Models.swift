@@ -288,3 +288,83 @@ public struct AssetCorrection: Codable, Sendable, Equatable {
         restore = try container.decodeIfPresent([String].self, forKey: .restore) ?? []
     }
 }
+
+/// Everything about one asset (`GET /assets/{id}`): the asset as shown, and next to it what it
+/// was originally, its EXIF data, and every correction made.
+public struct AssetDetail: Decodable, Sendable {
+    public var asset: Asset
+    /// The values from the upload or the file, before any correction.
+    public var original: OriginalValues?
+    /// Camera settings read from the file, as text.
+    public var exif: [String: String]
+    public var edits: [AssetEdit]
+
+    public struct OriginalValues: Codable, Sendable, Equatable {
+        public var takenAt: Int64?
+        public var timeZoneOffsetMinutes: Int?
+        public var takenAtSource: String?
+        public var location: AssetLocation?
+    }
+
+    public struct AssetEdit: Decodable, Sendable, Equatable {
+        public var at: Int64
+        public var field: String
+        public var deviceId: String?
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case original, exif, edits
+    }
+
+    public init(from decoder: Decoder) throws {
+        asset = try Asset(from: decoder)
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        original = try container.decodeIfPresent(OriginalValues.self, forKey: .original)
+        let raw = (try? container.decodeIfPresent([String: LooseText].self, forKey: .exif)) ?? nil
+        exif = (raw ?? [:]).mapValues(\.text)
+        edits = (try? container.decodeIfPresent([AssetEdit].self, forKey: .edits)) ?? []
+    }
+}
+
+/// Any JSON value as text (EXIF values come as strings, numbers or lists).
+struct LooseText: Decodable {
+    var text: String
+
+    init(from decoder: Decoder) throws {
+        let value = try decoder.singleValueContainer()
+        if let string = try? value.decode(String.self) {
+            text = string
+        } else if let number = try? value.decode(Int64.self) {
+            text = String(number)
+        } else if let number = try? value.decode(Double.self) {
+            text = String(number)
+        } else if let flag = try? value.decode(Bool.self) {
+            text = flag ? "yes" : "no"
+        } else if let list = try? value.decode([LooseText].self) {
+            text = list.map(\.text).joined(separator: ", ")
+        } else {
+            text = "…"
+        }
+    }
+}
+
+/// A photo without a place, with the place of the nearest photo in time.
+public struct PlaceSuggestion: Codable, Sendable, Equatable {
+    public var latitude: Double
+    public var longitude: Double
+    public var fromAssetId: String?
+    public var minutesApart: Int?
+}
+
+public struct AssetWithoutPlace: Decodable, Sendable {
+    public var asset: Asset
+    public var suggestion: PlaceSuggestion?
+
+    enum CodingKeys: String, CodingKey { case suggestion }
+
+    public init(from decoder: Decoder) throws {
+        asset = try Asset(from: decoder)
+        suggestion = try decoder.container(keyedBy: CodingKeys.self).decodeIfPresent(
+            PlaceSuggestion.self, forKey: .suggestion)
+    }
+}

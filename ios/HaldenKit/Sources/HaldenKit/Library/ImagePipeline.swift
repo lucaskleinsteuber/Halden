@@ -100,7 +100,7 @@ public actor ImagePipeline {
     }
 
     /// Decodes a JPEG (or any picture ImageIO reads) at no more than `pixels` on its longer side.
-    nonisolated static func decode(_ url: URL, pixels: Int) -> DecodedImage? {
+    public nonisolated static func decode(_ url: URL, pixels: Int) -> DecodedImage? {
         guard let source = CGImageSourceCreateWithURL(url as CFURL, [kCGImageSourceShouldCache: false] as CFDictionary)
         else { return nil }
         let options: [CFString: Any] = [

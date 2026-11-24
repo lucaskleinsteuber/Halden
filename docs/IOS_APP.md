@@ -77,6 +77,24 @@ the design comes after that. What works today is described below.
   (96 MB); thumbnails come from a cache on disk, from the local file, or from the server, where
   all cells asking within 15 ms go out as one request. A check mark means: safely on the
   server; a ring shows an upload going.
+- **Full screen**: swipe between photos, pinch or double-tap to zoom. The thumbnail is there at
+  once, the preview (2048 px) fades in over it at the same size, the original follows when
+  zoomed in; what isn't on the iPhone comes from the server once and stays in the cache by its
+  hash. Videos play from the iPhone, or stream from the server in ranges through the pinned
+  connection (`StreamLoader`; the system's player can't check Halden's certificate itself).
+- **Info**: three layers. As shown (with corrections: time and time zone, place on a map with
+  its accuracy circle and direction, title, description), as taken (the original time and place
+  and where they came from, camera, lens, EXIF), and on the server (backed up, checksum, every
+  file kept with its type and size, the copy in the preferred format).
+- **Corrections**: time, time zone, title, description and place (tapped on a map), or back to
+  the time and place as taken. They show at once and reach the server through `Actions`, also
+  later; the server keeps the original values and every correction.
+- **Without place** (Photos › … › Without place): photos without a place, from this iPhone's
+  library (also offline); choose some, then give them the place of the photo taken nearest in
+  time (the server's suggestion, marked as estimated) or a place tapped on the map.
+- **Sharing**: the original, a copy with the corrected time, place, title and description
+  written into the file (EXIF/GPS/IPTC for photos, QuickTime metadata for videos, the picture
+  copied without encoding it again), or the copy in the account's preferred format.
 - **Changes on the phone** (`Actions`): trash, restore, delete for good, corrections and one
   place for many photos show at once and are kept in the `action` table until the server has
   them, in the order they were made. The sync leaves photos with waiting changes alone. A

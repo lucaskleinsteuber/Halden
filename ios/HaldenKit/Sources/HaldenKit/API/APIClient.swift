@@ -248,6 +248,58 @@ public final class APIClient: Sendable {
         try await changed("assets/delete", ids)
     }
 
+    /// Everything about one asset: original values, EXIF, corrections.
+    public func detail(_ id: String) async throws -> AssetDetail {
+        try await get("assets/\(id)")
+    }
+
+    /// Photos and videos without a place, newest first, each with a suggestion.
+    public func withoutPlace(before: Int64? = nil, limit: Int = 200) async throws -> [AssetWithoutPlace] {
+        struct Page: Decodable { var assets: [AssetWithoutPlace] }
+        var query = [URLQueryItem(name: "limit", value: String(limit))]
+        if let before { query.append(URLQueryItem(name: "before", value: String(before))) }
+        let page: Page = try await get("assets/without-location", query: query)
+        return page.assets
+    }
+
+    /// A file of an asset (`original`, `preview`, `converted`, …) downloaded to `destination`,
+    /// without holding it in memory. Returns its type.
+    @discardableResult
+    public func download(asset id: String, role: String, to destination: URL) async throws -> String? {
+        let (temporary, response): (URL, URLResponse)
+        do {
+            (temporary, response) = try await session.download(for: request("GET", "assets/\(id)/files/\(role)"))
+        } catch let error as URLError {
+            throw APIError.unreachable(error.localizedDescription)
+        }
+        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+            try? FileManager.default.removeItem(at: temporary)
+            let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+            throw APIError.server(
+                status: status, code: "http_\(status)", message: "The file could not be fetched.", offset: nil)
+        }
+        try? FileManager.default.removeItem(at: destination)
+        try FileManager.default.moveItem(at: temporary, to: destination)
+        return http.mimeType
+    }
+
+    /// A part of a file: `length` bytes from `offset` (to the end with `nil`). Returns the bytes,
+    /// the whole file's size and its type.
+    public func range(
+        asset id: String, role: String, offset: Int64, length: Int64?
+    ) async throws -> (data: Data, total: Int64, mimeType: String) {
+        var request = request("GET", "assets/\(id)/files/\(role)")
+        let end = length.map { String(offset + $0 - 1) } ?? ""
+        request.setValue("bytes=\(offset)-\(end)", forHTTPHeaderField: "Range")
+        let (data, response) = try await send(request)
+        let mimeType = response.value(forHTTPHeaderField: "Content-Type") ?? "application/octet-stream"
+        // "bytes 0-99/1234"
+        let total =
+            response.value(forHTTPHeaderField: "Content-Range")?.split(separator: "/").last.flatMap { Int64($0) }
+            ?? Int64(data.count)
+        return (data, total, mimeType)
+    }
+
     /// One asset as it is now (`GET /assets/{id}`).
     public func asset(_ id: String) async throws -> Asset {
         try await get("assets/\(id)")

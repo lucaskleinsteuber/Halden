@@ -15,6 +15,7 @@
 		169F24FE07DB4AA45218A7A1 /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 44FFBB666B16F8EAFC12B0F2 /* AppDelegate.swift */; };
 		1A3071743BB7165FCFE51777 /* LibraryGrid.swift in Sources */ = {isa = PBXBuildFile; fileRef = B5DE17A5A6B072AE573A3107 /* LibraryGrid.swift */; };
 		1C4A95BC88D4E44A70DEE043 /* SharedIntents.swift in Sources */ = {isa = PBXBuildFile; fileRef = F3B360B4ABEBAD5E54337C81 /* SharedIntents.swift */; };
+		3DAEFCB4BCCF0F1420801D9D /* PhotoView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CCDEB459ACF35A5382B17B06 /* PhotoView.swift */; };
 		41B53AF02D73AB8EE6107451 /* HaldenWidgets.swift in Sources */ = {isa = PBXBuildFile; fileRef = C021AAFC98EA6F297083D1E9 /* HaldenWidgets.swift */; };
 		442C9FD29309011799EB92F9 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 80A08A19CFB7DE203B87EE2F /* SettingsView.swift */; };
 		49FC6542BD2AE2DE9BB10B29 /* HaldenUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 330BB49007FE4A8212AE2A53 /* HaldenUITests.swift */; };
@@ -31,8 +32,10 @@
 		9308131D436654AB7AB96174 /* CaptureBackend.swift in Sources */ = {isa = PBXBuildFile; fileRef = 28B6F0CD3C366126B6E02E33 /* CaptureBackend.swift */; };
 		97449D449BB9B1DC96C1267A /* RootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1FE32D68F3EDCDF19843B399 /* RootView.swift */; };
 		9F64B285C463AC47333BECF3 /* CameraModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = DBEEA719E7976B95C7A812F2 /* CameraModel.swift */; };
+		C5BEB796768D84CB9050598F /* Viewer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B4EC6EBA149179462421878 /* Viewer.swift */; };
 		C6F2BAB2216CDFB906390167 /* HaldenApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5C56DCD1A8AC3F879F869CCE /* HaldenApp.swift */; };
 		D190BA231FC90D7AF3D76836 /* UploadActivity.swift in Sources */ = {isa = PBXBuildFile; fileRef = 62E1A8A22DAC6A515A2252D0 /* UploadActivity.swift */; };
+		D816E69AF03071F4318B0F5A /* WithoutPlaceView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B3DC81E0143A53F37F02DDAE /* WithoutPlaceView.swift */; };
 		E3BA005A93D6AF34E0722BFD /* HaldenKit in Frameworks */ = {isa = PBXBuildFile; productRef = 52C9458930B85A4D8D21B7D8 /* HaldenKit */; };
 		E5569A0CC388C712D638DB6F /* HaldenLockedCamera.appex in Embed ExtensionKit Extensions */ = {isa = PBXBuildFile; fileRef = 5C6A70B0F5041CC14CECE7FA /* HaldenLockedCamera.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		E640748C0B9FBEFC7342C21F /* SharedIntents.swift in Sources */ = {isa = PBXBuildFile; fileRef = F3B360B4ABEBAD5E54337C81 /* SharedIntents.swift */; };
@@ -114,7 +117,9 @@
 		84E944B12B866D15937D76FD /* HaldenUITests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = HaldenUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		8B87BE49FB107498769D1FDA /* Base.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Base.xcconfig; sourceTree = "<group>"; };
 		8C8F6CBCE5F738CE28E84C59 /* UITestWorld.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UITestWorld.swift; sourceTree = "<group>"; };
+		9B4EC6EBA149179462421878 /* Viewer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Viewer.swift; sourceTree = "<group>"; };
 		AE56A441B2CFDD9C6F0A36EE /* CameraScreen.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraScreen.swift; sourceTree = "<group>"; };
+		B3DC81E0143A53F37F02DDAE /* WithoutPlaceView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WithoutPlaceView.swift; sourceTree = "<group>"; };
 		B5DE17A5A6B072AE573A3107 /* LibraryGrid.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LibraryGrid.swift; sourceTree = "<group>"; };
 		BBE86FE0737D0847976455E0 /* AppModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppModel.swift; sourceTree = "<group>"; };
 		BD3E0AE6BBB76C8313C728EA /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
@@ -123,6 +128,7 @@
 		C06E109E4E6B69033341E2A7 /* Halden.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = Halden.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		C24C0EE92119A576C7B20EEF /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		C765E5168916BA5A5355EF98 /* PhotosView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotosView.swift; sourceTree = "<group>"; };
+		CCDEB459ACF35A5382B17B06 /* PhotoView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoView.swift; sourceTree = "<group>"; };
 		DBEEA719E7976B95C7A812F2 /* CameraModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraModel.swift; sourceTree = "<group>"; };
 		F3B360B4ABEBAD5E54337C81 /* SharedIntents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SharedIntents.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
@@ -175,10 +181,13 @@
 				B5DE17A5A6B072AE573A3107 /* LibraryGrid.swift */,
 				BD8F20F7C6963AF7826E38E6 /* OnboardingView.swift */,
 				C765E5168916BA5A5355EF98 /* PhotosView.swift */,
+				CCDEB459ACF35A5382B17B06 /* PhotoView.swift */,
 				34CBFFD46E988B3DE34FFBFD /* QRScannerView.swift */,
 				1FE32D68F3EDCDF19843B399 /* RootView.swift */,
 				80A08A19CFB7DE203B87EE2F /* SettingsView.swift */,
 				371EA27A9FA82A61CA687680 /* UploadsView.swift */,
+				9B4EC6EBA149179462421878 /* Viewer.swift */,
+				B3DC81E0143A53F37F02DDAE /* WithoutPlaceView.swift */,
 			);
 			path = Views;
 			sourceTree = "<group>";
@@ -432,6 +441,7 @@
 				1A3071743BB7165FCFE51777 /* LibraryGrid.swift in Sources */,
 				FED0DC6246F4D4D89C793019 /* NetworkWatcher.swift in Sources */,
 				9051085D202825975E1E609C /* OnboardingView.swift in Sources */,
+				3DAEFCB4BCCF0F1420801D9D /* PhotoView.swift in Sources */,
 				F43C263C31DC78D082C53F87 /* PhotosView.swift in Sources */,
 				064F948830F9B67FA84C37D2 /* QRScannerView.swift in Sources */,
 				97449D449BB9B1DC96C1267A /* RootView.swift in Sources */,
@@ -441,6 +451,8 @@
 				81759963AC86569602CA84B8 /* UITestWorld.swift in Sources */,
 				D190BA231FC90D7AF3D76836 /* UploadActivity.swift in Sources */,
 				7002EEBD674D90FA00CA5D22 /* UploadsView.swift in Sources */,
+				C5BEB796768D84CB9050598F /* Viewer.swift in Sources */,
+				D816E69AF03071F4318B0F5A /* WithoutPlaceView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
