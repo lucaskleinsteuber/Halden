@@ -57,6 +57,8 @@ struct CameraState: Equatable, Sendable {
     var focusLocked = false
     /// Live Photos can be taken (this camera, photo mode).
     var canLive = false
+    /// What can be set by hand on this camera now; `nil` when nothing.
+    var manualLimits: ManualLimits?
     /// The video format actually used (the wished one may not exist on this camera).
     var videoFormat: String?
 }
@@ -96,6 +98,8 @@ struct VideoRequest: Sendable {
 @MainActor
 protocol CaptureBackend: AnyObject {
     var state: CameraState { get }
+    /// ISO, shutter, white balance and focus as the camera has them now (a few times a second).
+    var readings: CameraReadings { get }
     /// Shows what the camera sees.
     var previewView: UIView { get }
     /// Gets everything ready without starting, so the picture is there the moment the camera
@@ -111,6 +115,8 @@ protocol CaptureBackend: AnyObject {
     /// A point in `previewView`. `lock` keeps focus and exposure until the next tap.
     func focus(at point: CGPoint, lock: Bool)
     func setTorch(_ on: Bool)
+    /// Values set by hand; what is `nil` the camera decides. Kept across lenses and modes.
+    func setManual(_ settings: ManualSettings)
     func takePhoto(_ request: PhotoRequest) async -> TakenPhoto?
     func startRecording(_ request: VideoRequest) -> Bool
     /// The finished video file, or `nil` when nothing usable was recorded.

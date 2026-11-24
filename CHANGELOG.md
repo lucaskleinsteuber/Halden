@@ -8,6 +8,10 @@ There are no version numbers yet; entries are grouped by date until the first re
 
 ### Added
 
+- iPhone manual camera settings: ISO, shutter speed, white balance (kelvin and tint), focus and
+  exposure compensation, each automatic or set within what the camera can do, with the current
+  value always shown and a bigger picture while focusing; back to automatic when the camera
+  closes unless they are to be kept.
 - iPhone slow motion: 1080p at 240 or 120 fps with sound; the original stays as recorded and a
   slow part (by default most of it, at 30 frames a second) is set next to it, changeable in the
   full-screen view, kept on the server as the asset's `playback` and synced to every device;

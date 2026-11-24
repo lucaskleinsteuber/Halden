@@ -20,11 +20,15 @@ final class CameraModel {
     private(set) var problem: String?
     /// Goes up with every photo taken, for the flash on the screen.
     private(set) var shots = 0
+    /// ISO, shutter, white balance, focus and exposure compensation set by hand.
+    private(set) var manual = ManualSettings()
 
     @ObservationIgnored let location = LocationTracker()
     @ObservationIgnored var settings: () -> AppSettings = { AppSettings() }
     @ObservationIgnored var keepPhoto: ((TakenPhoto, UploadMetadata) -> Void)?
     @ObservationIgnored var keepVideo: ((URL, UploadMetadata) -> Void)?
+    /// Keeps the manual values for the next time, when that is set (the app saves them).
+    @ObservationIgnored var keepManual: ((ManualSettings?) -> Void)?
     @ObservationIgnored private var countdownTask: Task<Void, Never>?
     @ObservationIgnored private var video: (request: VideoRequest, place: ClientLocation?)?
     @ObservationIgnored private var applied: CaptureOptions?
@@ -49,6 +53,27 @@ final class CameraModel {
         let options = CaptureOptions(settings())
         applied = options
         backend.prepare(mode: mode, options: options)
+        if settings().keepManualSettings, let kept = settings().keptManual {
+            manual = kept
+            backend.setManual(kept)
+        }
+    }
+
+    /// Changes values set by hand (within what the camera can do).
+    func setManual(_ change: (inout ManualSettings) -> Void) {
+        var changed = manual
+        change(&changed)
+        if let limits = backend.state.manualLimits { changed = limits.fitted(changed) }
+        guard changed != manual else { return }
+        manual = changed
+        backend.setManual(changed)
+    }
+
+    /// Everything back to the camera.
+    func resetManual() {
+        guard !manual.isAutomatic else { return }
+        manual = ManualSettings()
+        backend.setManual(manual)
     }
 
     func appear() {
@@ -77,6 +102,12 @@ final class CameraModel {
         cancelCountdown()
         if recording { stopRecording() }
         setTorch(false)
+        // Closed: manual values stay only when that is wanted.
+        if settings().keepManualSettings {
+            keepManual?(manual.isAutomatic ? nil : manual)
+        } else {
+            resetManual()
+        }
         location.stop()
         backend.stop()
     }

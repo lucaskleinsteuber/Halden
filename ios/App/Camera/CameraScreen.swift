@@ -21,6 +21,10 @@ struct CameraScreen<Gallery: View>: View {
     @State private var dialStart: Double?
     @State private var dialShown = false
     @State private var dialTouches = 0
+    @State private var showManual = false
+    @State private var manualValue: ManualPanel.Value?
+    /// The focus is being turned by hand: the picture bigger, to see what is sharp.
+    @State private var focusing = false
 
     private var state: CameraState { camera.backend.state }
     static var topBarHeight: CGFloat { 44 }
@@ -96,6 +100,9 @@ struct CameraScreen<Gallery: View>: View {
                             .allowsHitTesting(false)
                     }
                 }
+                .scaleEffect(focusing ? 2.5 : 1)
+                .clipped()
+                .animation(.easeOut(duration: 0.2), value: focusing)
                 .accessibilityIdentifier("camera-preview")
             } else {
                 Text(state.problem ?? "Starting the camera…")
@@ -123,6 +130,11 @@ struct CameraScreen<Gallery: View>: View {
                     .background(.black.opacity(0.5), in: .rect(cornerRadius: 6))
                     .padding(.bottom, 8)
             }
+            if showManual {
+                ManualPanel(camera: camera, chosen: $manualValue, focusing: $focusing)
+                    .padding(.bottom, 4)
+                    .transition(.opacity)
+            }
             zoomControl.frame(height: 64)
             modeStrip.frame(height: 34)
             shutterRow.frame(height: 92)
@@ -136,6 +148,7 @@ struct CameraScreen<Gallery: View>: View {
     private var topBar: some View {
         HStack(spacing: 0) {
             lightButton.frame(width: 44, height: 44)
+            manualButton.frame(width: 44, height: 44)
             Spacer(minLength: 0)
             HStack(spacing: 6) {
                 timerButton.frame(height: 44)
@@ -180,6 +193,24 @@ struct CameraScreen<Gallery: View>: View {
             .disabled(!state.hasTorch)
             .accessibilityLabel(camera.torch ? "Light on" : "Light off")
             .accessibilityIdentifier("torch")
+        }
+    }
+
+    /// Shows or hides the manual values; yellow while any is set.
+    @ViewBuilder private var manualButton: some View {
+        if state.manualLimits != nil {
+            Button {
+                withAnimation(.snappy(duration: 0.2)) { showManual.toggle() }
+            } label: {
+                Image(systemName: "slider.horizontal.3")
+                    .foregroundStyle(camera.manual.isAutomatic ? .white : .yellow)
+                    .frame(width: 44, height: 44)
+            }
+            .accessibilityLabel(showManual ? "Hide manual settings" : "Manual settings")
+            .accessibilityValue(camera.manual.isAutomatic ? "automatic" : "set")
+            .accessibilityIdentifier("manual")
+        } else {
+            Color.clear
         }
     }
 

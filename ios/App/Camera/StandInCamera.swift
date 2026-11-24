@@ -10,7 +10,9 @@ import UIKit
 final class StandInCamera: CaptureBackend {
     private(set) var state = CameraState(
         ready: true, side: .back, canFlip: true, presets: [0.5, 1, 2], zoom: 1, zoomRange: 0.5...10,
-        hasFlash: true, hasTorch: true, canLive: true)
+        hasFlash: true, hasTorch: true, canLive: true,
+        manualLimits: ManualLimits(shutter: (1.0 / 8000)...1, iso: 50...3200, exposureBias: -8...8))
+    private(set) var readings = CameraReadings(shutter: 1.0 / 120, iso: 100, kelvin: 5200, tint: 0, focus: 0.5)
     @ObservationIgnored let previewView: UIView = StandInPreview()
     @ObservationIgnored private var taken = 0
     @ObservationIgnored private var recording: (request: VideoRequest, started: Date)?
@@ -68,6 +70,13 @@ final class StandInCamera: CaptureBackend {
     }
 
     func setTorch(_ on: Bool) {}
+
+    func setManual(_ settings: ManualSettings) {
+        readings.shutter = settings.shutter ?? 1.0 / 120
+        readings.iso = settings.iso ?? 100
+        readings.kelvin = settings.whiteBalance?.kelvin ?? 5200
+        readings.focus = settings.focus ?? 0.5
+    }
 
     /// A seed that differs between photos and between runs of the app.
     private func nextSeed() -> Int {

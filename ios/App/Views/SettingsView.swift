@@ -227,6 +227,11 @@ struct CameraSettings: View {
                 } label: {
                     Explained("Format", "HEIC is half the size at the same quality; JPEG opens everywhere.")
                 }
+                Toggle(isOn: app.setting(\.keepManualSettings)) {
+                    Explained(
+                        "Keep manual values",
+                        "Off: ISO, shutter, white balance and focus go back to automatic when the camera closes.")
+                }
                 Toggle(isOn: app.setting(\.livePhotos)) {
                     Explained(
                         "Live Photos", "With 1.5 seconds of video and sound before and after; also on the camera.")

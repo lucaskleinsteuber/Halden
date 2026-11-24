@@ -18,6 +18,8 @@ final class DeviceCamera: CaptureBackend {
     @ObservationIgnored private var rotationObservation: NSKeyValueObservation?
     @ObservationIgnored private var zoomObservation: NSKeyValueObservation?
     @ObservationIgnored private var zoomRelay: Relay<Double>?
+    private(set) var readings = CameraReadings()
+    @ObservationIgnored private var readingsWatch: ReadingsWatch?
     @ObservationIgnored private var configured = false
     @ObservationIgnored private var mode = CameraMode.photo
     @ObservationIgnored private var video: CaptureOptions?
@@ -29,6 +31,9 @@ final class DeviceCamera: CaptureBackend {
             Task { @MainActor in self?.update(state, device: device?.value) }
         }
         zoomRelay = Relay { [weak self] zoom in self?.state.zoom = zoom }
+        readingsWatch = ReadingsWatch { [weak self] readings in
+            if self?.readings != readings { self?.readings = readings }
+        }
     }
 
     static var allowed: Bool { AVCaptureDevice.authorizationStatus(for: .video) == .authorized }
@@ -111,6 +116,10 @@ final class DeviceCamera: CaptureBackend {
         core.run { $0.torch(on) }
     }
 
+    func setManual(_ settings: ManualSettings) {
+        core.run { $0.manual(settings) }
+    }
+
     /// Which way is up for what is recorded now (the screen stays upright, the phone may not).
     private var captureAngle: CGFloat {
         rotation?.videoRotationAngleForHorizonLevelCapture ?? 90
@@ -163,6 +172,7 @@ final class DeviceCamera: CaptureBackend {
         state = new
         guard let device, device !== rotation?.device else { return }
         if let zoomRelay { zoomObservation = Self.follow(zoomOf: device, into: zoomRelay) }
+        readingsWatch?.watch(device)
         let coordinator = AVCaptureDevice.RotationCoordinator(device: device, previewLayer: preview.previewLayer)
         rotation = coordinator
         rotationObservation = coordinator.observe(
@@ -240,6 +250,8 @@ final class CaptureCore: NSObject, @unchecked Sendable {
     private let frameOutput = AVCaptureVideoDataOutput()
     private let timeLapse = TimeLapseRecorder()
     private var timeLapsing = false
+    /// Values set by hand, applied to every camera and mode.
+    private var manual = ManualSettings()
     private var input: AVCaptureDeviceInput?
     private var audioInput: AVCaptureDeviceInput?
     private var mode = CameraMode.photo
@@ -338,6 +350,8 @@ final class CaptureCore: NSObject, @unchecked Sendable {
         session.beginConfiguration()
         apply(mode: mode, on: device)
         session.commitConfiguration()
+        // Another format has other limits.
+        applyManual(on: device)
         state = describe(device)
         publish(device: nil)
     }
@@ -499,6 +513,7 @@ final class CaptureCore: NSObject, @unchecked Sendable {
         device.isSubjectAreaChangeMonitoringEnabled = true
         if device.isLowLightBoostSupported { device.automaticallyEnablesLowLightBoostWhenAvailable = true }
         device.unlockForConfiguration()
+        applyManual(on: device)
         state.focusLocked = false
         for observer in observers.dropFirst() { NotificationCenter.default.removeObserver(observer) }
         observers = Array(observers.prefix(1))
@@ -536,6 +551,7 @@ final class CaptureCore: NSObject, @unchecked Sendable {
         described.hasFlash = device.hasFlash
         described.hasTorch = device.hasTorch
         described.canLive = mode == .photo && photoOutput.isLivePhotoCaptureSupported
+        described.manualLimits = limits(of: device)
         described.focusLocked = state.focusLocked
         described.videoFormat = state.videoFormat
         return described
@@ -555,15 +571,78 @@ final class CaptureCore: NSObject, @unchecked Sendable {
         device.unlockForConfiguration()
     }
 
+    /// What can be set by hand on this camera, in its current format. In video modes the shutter
+    /// can't stay open longer than a frame.
+    private func limits(of device: AVCaptureDevice) -> ManualLimits? {
+        let format = device.activeFormat
+        guard device.isExposureModeSupported(.custom) else { return nil }
+        var longest = format.maxExposureDuration.seconds
+        if mode.records { longest = min(longest, device.activeVideoMaxFrameDuration.seconds) }
+        let shortest = format.minExposureDuration.seconds
+        guard shortest > 0, longest >= shortest, format.maxISO >= format.minISO else { return nil }
+        return ManualLimits(
+            shutter: shortest...longest, iso: Double(format.minISO)...Double(format.maxISO),
+            exposureBias: Double(device.minExposureTargetBias)...Double(device.maxExposureTargetBias),
+            canFocus: device.isLockingFocusWithCustomLensPositionSupported,
+            canSetWhiteBalance: device.isLockingWhiteBalanceWithCustomDeviceGainsSupported)
+    }
+
+    func manual(_ settings: ManualSettings) {
+        manual = settings
+        if let device { applyManual(on: device) }
+    }
+
+    /// Exposure (shutter, ISO; the one not set stays where the camera had it), white balance
+    /// and focus as set by hand; everything else back to the camera.
+    private func applyManual(on device: AVCaptureDevice) {
+        guard let limits = limits(of: device), (try? device.lockForConfiguration()) != nil else { return }
+        defer { device.unlockForConfiguration() }
+        let set = limits.fitted(manual)
+        if set.exposureIsManual {
+            let duration = set.shutter.map { CMTime(seconds: $0, preferredTimescale: 1_000_000_000) }
+            device.setExposureModeCustom(
+                duration: duration ?? AVCaptureDevice.currentExposureDuration,
+                iso: set.iso.map(Float.init) ?? AVCaptureDevice.currentISO)
+        } else if device.exposureMode == .custom, device.isExposureModeSupported(.continuousAutoExposure) {
+            device.exposureMode = .continuousAutoExposure
+        }
+        device.setExposureTargetBias(Float(set.exposureBias))
+        if let balance = set.whiteBalance {
+            var gains = device.deviceWhiteBalanceGains(
+                for: .init(temperature: Float(balance.kelvin), tint: Float(balance.tint)))
+            let most = device.maxWhiteBalanceGain
+            gains.redGain = min(max(gains.redGain, 1), most)
+            gains.greenGain = min(max(gains.greenGain, 1), most)
+            gains.blueGain = min(max(gains.blueGain, 1), most)
+            device.setWhiteBalanceModeLocked(with: gains)
+        } else if device.whiteBalanceMode == .locked,
+            device.isWhiteBalanceModeSupported(.continuousAutoWhiteBalance)
+        {
+            device.whiteBalanceMode = .continuousAutoWhiteBalance
+        }
+        if let focus = set.focus {
+            device.setFocusModeLocked(lensPosition: Float(focus))
+        } else if device.focusMode == .locked, !state.focusLocked,
+            device.isFocusModeSupported(.continuousAutoFocus)
+        {
+            device.focusMode = .continuousAutoFocus
+        }
+    }
+
     /// `point` in the camera's coordinates (0…1). Locked: focus and expose once, then keep.
+    /// What is set by hand stays.
     func focus(at point: CGPoint, lock: Bool) {
         guard let device, (try? device.lockForConfiguration()) != nil else { return }
-        if device.isFocusPointOfInterestSupported { device.focusPointOfInterest = point }
-        let focusMode: AVCaptureDevice.FocusMode = lock ? .autoFocus : .continuousAutoFocus
-        if device.isFocusModeSupported(focusMode) { device.focusMode = focusMode }
-        if device.isExposurePointOfInterestSupported { device.exposurePointOfInterest = point }
-        let exposureMode: AVCaptureDevice.ExposureMode = lock ? .autoExpose : .continuousAutoExposure
-        if device.isExposureModeSupported(exposureMode) { device.exposureMode = exposureMode }
+        if manual.focus == nil {
+            if device.isFocusPointOfInterestSupported { device.focusPointOfInterest = point }
+            let focusMode: AVCaptureDevice.FocusMode = lock ? .autoFocus : .continuousAutoFocus
+            if device.isFocusModeSupported(focusMode) { device.focusMode = focusMode }
+        }
+        if !manual.exposureIsManual {
+            if device.isExposurePointOfInterestSupported { device.exposurePointOfInterest = point }
+            let exposureMode: AVCaptureDevice.ExposureMode = lock ? .autoExpose : .continuousAutoExposure
+            if device.isExposureModeSupported(exposureMode) { device.exposureMode = exposureMode }
+        }
         device.isSubjectAreaChangeMonitoringEnabled = !lock
         device.unlockForConfiguration()
         if state.focusLocked != lock {
@@ -768,5 +847,79 @@ final class GPSWriter: NSObject, AVCapturePhotoFileDataRepresentationCustomizer 
         }
         metadata[kCGImagePropertyGPSDictionary as String] = gps
         return metadata
+    }
+}
+
+/// Follows ISO, shutter speed, white balance and focus as the camera changes them, and hands them
+/// to the main thread at most five times a second (and the last one always).
+final class ReadingsWatch: @unchecked Sendable {
+    private let lock = NSLock()
+    private var readings = CameraReadings()
+    private var observations: [NSKeyValueObservation] = []
+    private var lastSent = Date.distantPast
+    private var waiting = false
+    private let relay: Relay<CameraReadings>
+    private let pause = 0.2
+
+    init(_ deliver: @escaping @MainActor (CameraReadings) -> Void) {
+        relay = Relay(deliver)
+    }
+
+    @MainActor func watch(_ device: AVCaptureDevice) {
+        observations = Self.observe(device, into: self)
+    }
+
+    nonisolated private static func observe(_ device: AVCaptureDevice, into watch: ReadingsWatch)
+        -> [NSKeyValueObservation]
+    {
+        [
+            device.observe(\.iso, options: [.initial]) { @Sendable device, _ in
+                watch.change { $0.iso = Double(device.iso) }
+            },
+            device.observe(\.exposureDuration, options: [.initial]) { @Sendable device, _ in
+                watch.change { $0.shutter = device.exposureDuration.seconds }
+            },
+            device.observe(\.lensPosition, options: [.initial]) { @Sendable device, _ in
+                watch.change { $0.focus = Double(device.lensPosition) }
+            },
+            device.observe(\.deviceWhiteBalanceGains, options: [.initial]) { @Sendable device, _ in
+                var gains = device.deviceWhiteBalanceGains
+                let most = device.maxWhiteBalanceGain
+                gains.redGain = min(max(gains.redGain, 1), most)
+                gains.greenGain = min(max(gains.greenGain, 1), most)
+                gains.blueGain = min(max(gains.blueGain, 1), most)
+                let balance = device.temperatureAndTintValues(for: gains)
+                watch.change {
+                    $0.kelvin = Double(balance.temperature)
+                    $0.tint = Double(balance.tint)
+                }
+            },
+        ]
+    }
+
+    private func change(_ update: (inout CameraReadings) -> Void) {
+        let (send, later): (CameraReadings?, Double?) = lock.withLock {
+            update(&readings)
+            let since = Date().timeIntervalSince(lastSent)
+            if since >= pause {
+                lastSent = Date()
+                return (readings, nil)
+            }
+            if waiting { return (nil, nil) }
+            waiting = true
+            return (nil, pause - since)
+        }
+        if let send { relay.send(send) }
+        if let later {
+            DispatchQueue.global().asyncAfter(deadline: .now() + later) { [weak self] in
+                guard let self else { return }
+                let latest = self.lock.withLock {
+                    self.waiting = false
+                    self.lastSent = Date()
+                    return self.readings
+                }
+                self.relay.send(latest)
+            }
+        }
     }
 }

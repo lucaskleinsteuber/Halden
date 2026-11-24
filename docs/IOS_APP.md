@@ -53,6 +53,14 @@ the design comes after that. What works today is described below.
   uploads count them as one. Full screen shows "LIVE" and plays it while held
   (`PHLivePhotoView`, the video fetched from the server when it isn't on this iPhone). Saved to
   Apple Photos as a Live Photo; shared with both files. The lock-screen camera takes them too.
+- **Manual settings** (the slider button on top): ISO in thirds of a stop, shutter speed in the
+  usual steps, white balance (kelvin and tint), focus and exposure compensation (`ManualSettings`,
+  `ManualLimits`). Each value shows what the camera does now (white when automatic, yellow when
+  set) and can be given back with "Auto"; set by hand, it stays while tapping to focus and when
+  changing lenses or modes. What can be set comes from the camera in use (in video modes the
+  shutter can't be open longer than a frame). While the focus is turned, the picture is shown
+  bigger. Closing the camera brings back automatic, unless Settings › Camera › Keep manual
+  values is on.
 - **Slow motion** (Slo-mo): 1080p at 240 fps (or 120, in the settings or on the camera
   screen), with sound, on the camera that can record that fast. The file stays as recorded;
   played, a part of it is slow (`Retiming.slowMotion`, the sound slowing down with it): by

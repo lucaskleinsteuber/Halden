@@ -55,6 +55,8 @@ import UniformTypeIdentifiers
         #expect(settings.keepLocalCopies)
         #expect(settings.videoResolution == .uhd4K && settings.videoFrameRate == 60 && !settings.videoHDR)
         #expect(settings.importFromPhotos && settings.saveToPhotos && settings.syncDeletionsWithPhotos)
+        #expect(settings.livePhotos && settings.slowMotionRate == 240 && settings.timeLapseInterval == 0)
+        #expect(!settings.keepManualSettings && settings.keptManual == nil)
     }
 
     /// Settings saved by an older version (missing keys) or with an option that went away keep the

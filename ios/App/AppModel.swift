@@ -106,6 +106,7 @@ final class AppModel {
         camera.settings = { [weak self] in self?.settings ?? AppSettings() }
         camera.keepPhoto = { [weak self] photo, metadata in self?.keep(photo: photo, metadata: metadata) }
         camera.keepVideo = { [weak self] url, metadata in self?.keep(video: url, metadata: metadata) }
+        camera.keepManual = { [weak self] manual in self?.update { $0.keptManual = manual } }
         camera.prepare()
         networkWatcher.changed = { [weak self] situation in
             self?.network = situation

@@ -74,6 +74,24 @@ final class HaldenUITests: XCTestCase {
             .firstMatch
         XCTAssertNotEqual(zoomedOut.value as? String, "2×", "the dial zoomed out")
 
+        // Manual values: ISO set by hand, then back to the camera.
+        app.buttons["manual"].tap()
+        let iso = app.buttons["manual-iso"]
+        XCTAssertTrue(iso.waitForExistence(timeout: 5))
+        XCTAssertEqual(iso.value as? String, "automatic")
+        XCTAssertEqual(iso.label, "ISO 100", "what the camera does now")
+        iso.tap()
+        app.sliders.firstMatch.adjust(toNormalizedSliderPosition: 0.9)
+        expectation(for: NSPredicate(format: "value == 'set'"), evaluatedWith: iso)
+        waitForExpectations(timeout: 5)
+        XCTAssertNotEqual(iso.label, "ISO 100")
+        XCTAssertEqual(app.buttons["manual"].value as? String, "set")
+        app.buttons["manual-auto"].tap()
+        expectation(for: NSPredicate(format: "value == 'automatic'"), evaluatedWith: iso)
+        waitForExpectations(timeout: 5)
+        app.buttons["manual"].tap()
+        XCTAssertTrue(iso.waitForNonExistence(timeout: 5))
+
         let preview = app.descendants(matching: .any)["camera-preview"]
         preview.swipeRight()
         XCTAssertTrue(app.buttons["Record a video"].waitForExistence(timeout: 5), "swiped to video")
