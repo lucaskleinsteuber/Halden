@@ -12,26 +12,135 @@ public struct EditRecipe: Codable, Sendable, Hashable {
     /// Newer apps may know more; an edit from a newer version is shown as far as it is understood.
     public static let currentVersion = 1
 
-    public var version = EditRecipe.currentVersion
+    /// The values live in a box shared by copies until one changes (copy on write): the library
+    /// holds one recipe per photo, and most photos have none, so a recipe costs a pointer there.
+    struct Values: Codable, Hashable, Sendable {
+        var version: Int = EditRecipe.currentVersion
+        var exposure: Double = 0
+        var brightness: Double = 0
+        var contrast: Double = 0
+        var highlights: Double = 0
+        var shadows: Double = 0
+        var saturation: Double = 0
+        var vibrance: Double = 0
+        var warmth: Double = 0
+        var tint: Double = 0
+        var quarterTurns: Int = 0
+        var straighten: Double = 0
+        var crop: Crop? = nil
+        var trimStartMs: Int64? = nil
+        var trimEndMs: Int64? = nil
+
+        enum CodingKeys: String, CodingKey {
+            case version, exposure, brightness, contrast, highlights, shadows, saturation, vibrance, warmth, tint
+            case quarterTurns, straighten, crop, trimStartMs, trimEndMs
+        }
+
+        init() {}
+
+        /// Missing values (an edit from an older version) are unchanged; unknown ones (from a
+        /// newer version) are left out.
+        init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            func read<T: Decodable>(_ key: CodingKeys, _ value: inout T) {
+                if let found = try? container.decodeIfPresent(T.self, forKey: key) { value = found }
+            }
+            read(.version, &version)
+            read(.exposure, &exposure)
+            read(.brightness, &brightness)
+            read(.contrast, &contrast)
+            read(.highlights, &highlights)
+            read(.shadows, &shadows)
+            read(.saturation, &saturation)
+            read(.vibrance, &vibrance)
+            read(.warmth, &warmth)
+            read(.tint, &tint)
+            read(.quarterTurns, &quarterTurns)
+            read(.straighten, &straighten)
+            crop = try? container.decodeIfPresent(Crop.self, forKey: .crop)
+            trimStartMs = try? container.decodeIfPresent(Int64.self, forKey: .trimStartMs)
+            trimEndMs = try? container.decodeIfPresent(Int64.self, forKey: .trimEndMs)
+        }
+    }
+
+    /// Changed only while nobody else holds it (see `change`).
+    private final class Box: @unchecked Sendable {
+        var values: Values
+        init(_ values: Values) { self.values = values }
+    }
+
+    private var box: Box
+
+    private mutating func change(_ update: (inout Values) -> Void) {
+        if !isKnownUniquelyReferenced(&box) { box = Box(box.values) }
+        update(&box.values)
+    }
+
+    public var version: Int {
+        get { box.values.version }
+        set { change { $0.version = newValue } }
+    }
     // Light, each -1…1 (exposure in stops, -3…3).
-    public var exposure = 0.0
-    public var brightness = 0.0
-    public var contrast = 0.0
-    public var highlights = 0.0
-    public var shadows = 0.0
+    public var exposure: Double {
+        get { box.values.exposure }
+        set { change { $0.exposure = newValue } }
+    }
+    public var brightness: Double {
+        get { box.values.brightness }
+        set { change { $0.brightness = newValue } }
+    }
+    public var contrast: Double {
+        get { box.values.contrast }
+        set { change { $0.contrast = newValue } }
+    }
+    public var highlights: Double {
+        get { box.values.highlights }
+        set { change { $0.highlights = newValue } }
+    }
+    public var shadows: Double {
+        get { box.values.shadows }
+        set { change { $0.shadows = newValue } }
+    }
     // Colour, each -1…1.
-    public var saturation = 0.0
-    public var vibrance = 0.0
-    public var warmth = 0.0
-    public var tint = 0.0
+    public var saturation: Double {
+        get { box.values.saturation }
+        set { change { $0.saturation = newValue } }
+    }
+    public var vibrance: Double {
+        get { box.values.vibrance }
+        set { change { $0.vibrance = newValue } }
+    }
+    public var warmth: Double {
+        get { box.values.warmth }
+        set { change { $0.warmth = newValue } }
+    }
+    public var tint: Double {
+        get { box.values.tint }
+        set { change { $0.tint = newValue } }
+    }
     // Shape: quarter turns clockwise, straightening in degrees (-45…45), and the part kept
     // (0…1 of the turned and straightened picture).
-    public var quarterTurns = 0
-    public var straighten = 0.0
-    public var crop: Crop?
+    public var quarterTurns: Int {
+        get { box.values.quarterTurns }
+        set { change { $0.quarterTurns = newValue } }
+    }
+    public var straighten: Double {
+        get { box.values.straighten }
+        set { change { $0.straighten = newValue } }
+    }
+    public var crop: Crop? {
+        get { box.values.crop }
+        set { change { $0.crop = newValue } }
+    }
     // Videos: the part kept, in milliseconds.
-    public var trimStartMs: Int64?
-    public var trimEndMs: Int64?
+    public var trimStartMs: Int64? {
+        get { box.values.trimStartMs }
+        set { change { $0.trimStartMs = newValue } }
+    }
+    public var trimEndMs: Int64? {
+        get { box.values.trimEndMs }
+        set { change { $0.trimEndMs = newValue } }
+    }
 
     public struct Crop: Codable, Sendable, Hashable {
         public var x: Double
@@ -55,35 +164,24 @@ public struct EditRecipe: Codable, Sendable, Hashable {
         }
     }
 
-    public init() {}
-
-    enum CodingKeys: String, CodingKey {
-        case version, exposure, brightness, contrast, highlights, shadows, saturation, vibrance, warmth, tint
-        case quarterTurns, straighten, crop, trimStartMs, trimEndMs
+    public init() {
+        box = Box(Values())
     }
 
-    /// Missing values (an edit from an older version) are unchanged; unknown ones (from a newer
-    /// version) are left out.
     public init(from decoder: Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        func read<T: Decodable>(_ key: CodingKeys, _ value: inout T) {
-            if let found = try? container.decodeIfPresent(T.self, forKey: key) { value = found }
-        }
-        read(.version, &version)
-        read(.exposure, &exposure)
-        read(.brightness, &brightness)
-        read(.contrast, &contrast)
-        read(.highlights, &highlights)
-        read(.shadows, &shadows)
-        read(.saturation, &saturation)
-        read(.vibrance, &vibrance)
-        read(.warmth, &warmth)
-        read(.tint, &tint)
-        read(.quarterTurns, &quarterTurns)
-        read(.straighten, &straighten)
-        crop = try? container.decodeIfPresent(Crop.self, forKey: .crop)
-        trimStartMs = try? container.decodeIfPresent(Int64.self, forKey: .trimStartMs)
-        trimEndMs = try? container.decodeIfPresent(Int64.self, forKey: .trimEndMs)
+        box = Box(try Values(from: decoder))
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        try box.values.encode(to: encoder)
+    }
+
+    public static func == (lhs: EditRecipe, rhs: EditRecipe) -> Bool {
+        lhs.box === rhs.box || lhs.box.values == rhs.box.values
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(box.values)
     }
 
     /// Nothing changed: the same as no edit.

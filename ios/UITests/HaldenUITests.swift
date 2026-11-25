@@ -30,11 +30,18 @@ final class HaldenUITests: XCTestCase {
         XCTAssertTrue(app.descendants(matching: .any)["empty-library"].waitForExistence(timeout: 5))
         tabs.buttons["Settings"].tap()
         XCTAssertTrue(app.navigationBars["Settings"].waitForExistence(timeout: 5))
-        for page in ["upload-settings", "camera-settings", "place-settings", "photos-settings", "storage-settings"] {
+        // Each page by its title; back only once it is there, on again only once it is gone (a
+        // tap in the middle of the animation would get lost on a slow machine).
+        for (page, title) in [
+            ("upload-settings", "Uploads"), ("camera-settings", "Camera"), ("place-settings", "Place"),
+            ("photos-settings", "Apple Photos"), ("storage-settings", "Storage"),
+        ] {
             app.buttons[page].tap()
-            XCTAssertTrue(app.navigationBars.element(boundBy: 0).buttons.firstMatch.waitForExistence(timeout: 5), page)
-            app.navigationBars.buttons.firstMatch.tap()
-            XCTAssertTrue(app.navigationBars["Settings"].waitForExistence(timeout: 5), page)
+            let bar = app.navigationBars[title]
+            XCTAssertTrue(bar.waitForExistence(timeout: 10), page)
+            bar.buttons.firstMatch.tap()
+            XCTAssertTrue(bar.waitForNonExistence(timeout: 10), page)
+            XCTAssertTrue(app.buttons[page].waitForExistence(timeout: 10), page)
         }
         app.buttons["server-account"].tap()
         let signOut = app.buttons["sign-out"]

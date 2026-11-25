@@ -57,6 +57,7 @@ struct AlbumsView: View {
                 .accessibilityIdentifier("new-album")
             }
         }
+        .task(id: app.libraryVersion) { app.findTrips() }
         .alert("New album", isPresented: $naming) {
             TextField("Name", text: $newName).accessibilityIdentifier("album-name")
             Button("Make") {

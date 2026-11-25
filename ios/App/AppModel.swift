@@ -224,7 +224,6 @@ final class AppModel {
                 MainActor.assumeIsolated {
                     self?.library = assets
                     self?.libraryVersion += 1
-                    self?.findTrips()
                 }
             }
         albumObservation =
@@ -548,8 +547,9 @@ final class AppModel {
         Task { await tripFinder.kept(trip.id) }
     }
 
-    /// Looks for trips again a moment after the library changed (not for every photo coming in).
-    private func findTrips() {
+    /// Looks for trips (when the albums are shown), a moment after the library changed, not for
+    /// every photo coming in; nothing runs for it at start.
+    func findTrips() {
         findingTrips?.cancel()
         let rules = Trips.Rules(kilometres: settings.tripKilometres)
         findingTrips = Task { [weak self, tripFinder] in

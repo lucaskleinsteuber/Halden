@@ -25,6 +25,9 @@ There are no version numbers yet; entries are grouped by date until the first re
 
 ### Changed
 
+- iPhone: less memory with a big library (172 instead of 207 MB peak while scrolling through
+  50,000 photos in the simulator): an edit recipe costs a pointer per photo until a photo has
+  one, and trips are looked for only while the albums are shown.
 - iPhone: a new album for chosen photos is named right in the album list (no extra question on
   top, which didn't always close); the buttons for chosen photos are icons, so all four fit.
 

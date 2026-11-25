@@ -47,6 +47,19 @@ import Testing
         #expect(fitted.crop == .init(x: 0.5, y: 0, width: 0.5, height: 1))
     }
 
+    /// A copy changed is another recipe; the first stays as it was.
+    @Test func copiesStayApart() {
+        var first = EditRecipe()
+        first.exposure = 0.5
+        var second = first
+        #expect(second == first && second.hashValue == first.hashValue)
+        second.exposure = 1
+        second.crop = .init(x: 0, y: 0, width: 0.5, height: 0.5)
+        #expect(first.exposure == 0.5 && first.crop == nil)
+        #expect(second.exposure == 1 && second != first)
+        #expect(MemoryLayout<EditRecipe?>.size <= 8, "a pointer in every library row")
+    }
+
     @Test func lightAndColourChangeThePicture() {
         var brighter = EditRecipe()
         brighter.exposure = 1
