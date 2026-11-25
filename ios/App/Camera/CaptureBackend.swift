@@ -22,12 +22,17 @@ enum CameraSide: Sendable {
     case back, front
 }
 
-/// How the camera is set up (from the settings): videos, and Live Photos.
+/// How the camera is set up (from the settings): photos, videos, and Live Photos.
 struct CaptureOptions: Equatable, Sendable {
     var resolution: AppSettings.VideoResolution
     var frameRate: Int
     var hdr: Bool
+    var autoLowLightFPS: Bool
     var live: Bool
+    var photoResolution: PhotoResolution
+    var captureRAW: Bool
+    var prioritizeFasterShooting: Bool
+    var allowAudioPlayback: Bool
     var slowMotionRate: Int
     /// Seconds between pictures of a time-lapse; `nil` for automatic.
     var timeLapseInterval: Double?
@@ -36,7 +41,12 @@ struct CaptureOptions: Equatable, Sendable {
         resolution = settings.videoResolution
         frameRate = settings.videoFrameRate
         hdr = settings.videoHDR
+        autoLowLightFPS = settings.autoLowLightFPS
         live = settings.livePhotos
+        photoResolution = settings.photoResolution
+        captureRAW = settings.captureRAW
+        prioritizeFasterShooting = settings.prioritizeFasterShooting
+        allowAudioPlayback = settings.allowAudioPlayback
         slowMotionRate = settings.slowMotionRate
         timeLapseInterval = settings.timeLapseInterval > 0 ? settings.timeLapseInterval : nil
     }
@@ -57,6 +67,10 @@ struct CameraState: Equatable, Sendable {
     var focusLocked = false
     /// Live Photos can be taken (this camera, photo mode).
     var canLive = false
+    /// Bayer RAW (DNG) can be captured on this camera in photo mode.
+    var canRAW = false
+    /// Photo resolutions the active camera supports (subset of 12 / 24 / 48 MP).
+    var availableResolutions: [PhotoResolution] = [.mp12]
     /// What can be set by hand on this camera now; `nil` when nothing.
     var manualLimits: ManualLimits?
     /// The video format actually used (the wished one may not exist on this camera).
@@ -71,6 +85,10 @@ struct TakenPhoto: Sendable {
     var height: Int
     /// The short video of a Live Photo, in a temporary file.
     var liveVideo: URL? = nil
+    /// Companion Bayer DNG when RAW was enabled.
+    var rawData: Data? = nil
+    /// Non-destructive crop/edit (such as 16:9 or 1:1 aspect ratio).
+    var edit: EditRecipe? = nil
 }
 
 struct PhotoRequest: Sendable {
@@ -82,6 +100,12 @@ struct PhotoRequest: Sendable {
     var takenAt: Date
     /// A Live Photo: with its short video (when the camera can).
     var live = false
+    /// Target photo resolution (12 / 24 / 48 MP).
+    var resolution = PhotoResolution.mp24
+    /// Also capture Bayer DNG when supported.
+    var raw = false
+    /// Prefer faster capture over maximum processing latency.
+    var prioritizeFaster = true
 }
 
 struct VideoRequest: Sendable {

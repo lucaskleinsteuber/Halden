@@ -46,8 +46,8 @@ struct LockedCameraView: View {
             camera.settings = { settings }
             camera.keepPhoto = { photo, metadata in
                 if (try? LockedCaptures.save(
-                    photo: photo.data, heic: photo.heic, liveVideo: photo.liveVideo, metadata: metadata,
-                    into: folder))
+                    photo: photo.data, heic: photo.heic, liveVideo: photo.liveVideo, rawData: photo.rawData,
+                    edit: photo.edit, metadata: metadata, into: folder))
                     != nil
                 {
                     taken += 1

@@ -49,6 +49,14 @@ final class LayoutTests: XCTestCase {
         settle()
         shot("camera-manual")
         app.buttons["manual"].tap()
+        app.buttons["camera-controls-toggle"].tap()
+        settle()
+        shot("camera-controls-photo")
+        app.buttons["drawer-exposure"].tap()
+        settle()
+        shot("camera-controls-exposure")
+        app.buttons["camera-controls-toggle"].tap()
+        settle()
         app.buttons["zoom-1"].press(forDuration: 0.1, thenDragTo: app.buttons["zoom-0.5"])
         shot("camera-zoom-dial")
         settle(1.5)
@@ -56,6 +64,13 @@ final class LayoutTests: XCTestCase {
             app.buttons["mode-\(mode)"].tap()
             settle()
             shot("camera-\(mode)")
+            if mode == "video" {
+                app.buttons["camera-controls-toggle"].tap()
+                settle()
+                shot("camera-controls-video")
+                app.buttons["camera-controls-toggle"].tap()
+                settle()
+            }
         }
         // Back through the modes, each one beside the chosen one (the far ones are off screen).
         for mode in ["slowMotion", "video", "photo"] {
@@ -131,6 +146,21 @@ final class LayoutTests: XCTestCase {
             button.tap()
             settle()
             shot("settings-\(page)")
+            if page == "camera-settings" {
+                for (sub, subTitle) in [
+                    ("camera-preserve-settings", "Preserve Settings"),
+                    ("camera-top-bar-settings", "Top Bar Controls"),
+                ] {
+                    let subButton = app.buttons[sub]
+                    if subButton.waitForExistence(timeout: 3) {
+                        subButton.tap()
+                        settle()
+                        shot("settings-\(sub)")
+                        app.navigationBars[subTitle].buttons.firstMatch.tap()
+                        settle()
+                    }
+                }
+            }
             let bar = title.map { app.navigationBars[$0] } ?? app.navigationBars.element(boundBy: 0)
             bar.buttons.firstMatch.tap()
             settle()

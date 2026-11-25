@@ -22,6 +22,7 @@ struct CameraScreen<Gallery: View>: View {
     @State private var dialShown = false
     @State private var dialTouches = 0
     @State private var showManual = false
+    @State private var showControls = false
     @State private var manualValue: ManualPanel.Value?
     /// The focus is being turned by hand: the picture bigger, to see what is sharp.
     @State private var focusing = false
@@ -57,10 +58,12 @@ struct CameraScreen<Gallery: View>: View {
         }
     }
 
-    /// The picture as it will be taken: 4:3 under the top bar for photos, 16:9 in the middle for
+    /// The picture as it will be taken: 4:3, 1:1 or 16:9 for photos, 16:9 in the middle for
     /// videos (like Apple's camera, the controls lie over it).
     @ViewBuilder private var viewfinder: some View {
         let photo = camera.mode == .photo
+        let ratio = photo ? settings.photoAspectRatio.portraitRatio : (9.0 / 16.0)
+        let fullFrame = !photo || settings.photoAspectRatio == .sixteenByNine
         Group {
             if state.ready {
                 CameraPreviewHost(
@@ -98,7 +101,7 @@ struct CameraScreen<Gallery: View>: View {
                             .padding(.horizontal, 6)
                             .background(.yellow, in: .rect(cornerRadius: 4))
                             .foregroundStyle(.black)
-                            .padding(.top, photo ? 10 : Self.topBarHeight + 70)
+                            .padding(.top, fullFrame ? Self.topBarHeight + 70 : 10)
                             .allowsHitTesting(false)
                     }
                 }
@@ -116,12 +119,12 @@ struct CameraScreen<Gallery: View>: View {
                     .accessibilityIdentifier("no-camera")
             }
         }
-        .aspectRatio(photo ? 3.0 / 4.0 : 9.0 / 16.0, contentMode: .fit)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: photo ? .top : .center)
-        .padding(.top, photo ? Self.topBarHeight : 0)
-        .ignoresSafeArea(edges: photo ? [] : .all)
+        .aspectRatio(ratio, contentMode: .fit)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: fullFrame ? .center : .top)
+        .padding(.top, fullFrame ? 0 : Self.topBarHeight)
+        .ignoresSafeArea(edges: fullFrame ? .all : [])
         // The frame glides into its new shape under the blur.
-        .animation(.snappy(duration: 0.28), value: photo)
+        .animation(.snappy(duration: 0.28), value: ratio)
     }
 
     /// Laid out like Apple's camera: the modes start where the 4:3 picture ends, so the lens
@@ -156,8 +159,31 @@ struct CameraScreen<Gallery: View>: View {
                     .padding(.bottom, 4)
                     .transition(.opacity)
             }
-            zoomControl.frame(height: 56)
-            modeStrip.frame(height: Self.modeHeight)
+            if showControls && !camera.recording {
+                CameraDrawer(camera: camera, settings: settings, update: update)
+                    .padding(.bottom, 4)
+                    .transition(.opacity.combined(with: .move(edge: .bottom)))
+            } else {
+                zoomControl.frame(height: 56)
+            }
+            modeStrip
+                .frame(height: Self.modeHeight)
+                .simultaneousGesture(
+                    DragGesture(minimumDistance: 18)
+                        .onEnded { value in
+                            guard !camera.recording,
+                                abs(value.translation.height) > abs(value.translation.width)
+                            else { return }
+                            withAnimation(.snappy(duration: 0.2)) {
+                                if value.translation.height < -24 {
+                                    showControls = true
+                                    showManual = false
+                                } else if value.translation.height > 24 {
+                                    showControls = false
+                                }
+                            }
+                        }
+                )
             shutterRow.frame(height: Self.shutterHeight)
         }
         .foregroundStyle(.white)
@@ -166,24 +192,139 @@ struct CameraScreen<Gallery: View>: View {
 
     // MARK: Top
 
+    private var visibleTopControls: [TopBarControl] {
+        let configured = CameraControls.sanitizedTopBar(settings.topBarControls)
+        return camera.mode == .photo ? configured : configured.filter { !$0.photoOnly }
+    }
+
     private var topBar: some View {
-        HStack(spacing: 0) {
-            lightButton.frame(width: 44, height: 44)
-            manualButton.frame(width: 44, height: 44)
+        let items = visibleTopControls
+        let split = (items.count + 1) / 2
+        let left = Array(items.prefix(split))
+        let right = Array(items.dropFirst(split))
+        return HStack(spacing: 0) {
+            HStack(spacing: 0) {
+                ForEach(left) { control in topControlView(control) }
+            }
             // In the middle, with the room left between the buttons (never on top of them).
             Color.clear
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .overlay { topMiddle }
-            HStack(spacing: 2) {
-                timerButton.frame(height: 44)
-                gridButton.frame(width: 44, height: 44)
-                liveButton.frame(width: 44, height: 44)
+            HStack(spacing: 0) {
+                ForEach(right) { control in topControlView(control) }
+                if camera.mode.records && !camera.recording {
+                    drawerToggleButton
+                }
             }
         }
         .font(.title3)
         .frame(height: Self.topBarHeight)
         .padding(.horizontal, 12)
-        .background(camera.mode.records ? Color.black.opacity(0.25) : .clear)
+        .background(
+            camera.mode.records || settings.photoAspectRatio == .sixteenByNine
+                ? Color.black.opacity(0.25) : .clear)
+    }
+
+    @ViewBuilder private func topControlView(_ control: TopBarControl) -> some View {
+        switch control {
+        case .flash: lightButton.frame(width: 44, height: 44)
+        case .manual: manualButton.frame(width: 44, height: 44)
+        case .timer: timerButton.frame(height: 44)
+        case .grid: gridButton.frame(width: 44, height: 44)
+        case .live: liveButton.frame(width: 44, height: 44)
+        case .exposure: exposureTopButton.frame(height: 44)
+        case .aspectRatio: aspectTopButton.frame(height: 44)
+        case .resolution: resolutionTopButton.frame(height: 44)
+        case .raw: rawTopButton.frame(height: 44)
+        }
+    }
+
+    private var drawerToggleButton: some View {
+        Button {
+            withAnimation(.snappy(duration: 0.2)) {
+                showControls.toggle()
+                if showControls { showManual = false }
+            }
+        } label: {
+            Image(systemName: showControls ? "chevron.down" : "chevron.up")
+                .font(.body.weight(.semibold))
+                .foregroundStyle(showControls ? .yellow : .white)
+                .frame(width: 44, height: 44)
+                .background(.white.opacity(0.14), in: .circle)
+                .frame(width: 44, height: 44)
+        }
+        .accessibilityLabel(showControls ? "Hide camera controls" : "Show camera controls")
+        .accessibilityIdentifier("camera-controls-toggle")
+    }
+
+    private var exposureTopButton: some View {
+        Button {
+            withAnimation(.snappy(duration: 0.2)) {
+                showControls = true
+                showManual = false
+            }
+        } label: {
+            let bias = camera.manual.exposureBias
+            Text(bias == 0 ? "±" : ManualText.bias(bias))
+                .font(.caption.bold().monospacedDigit())
+                .foregroundStyle(bias != 0 ? .yellow : .white)
+                .frame(minWidth: 44, minHeight: 44)
+        }
+        .accessibilityLabel("Exposure \(ManualText.bias(camera.manual.exposureBias))")
+        .accessibilityIdentifier("top-exposure")
+    }
+
+    private var aspectTopButton: some View {
+        Button {
+            let all = PhotoAspectRatio.allCases
+            let next = all[((all.firstIndex(of: settings.photoAspectRatio) ?? 0) + 1) % all.count]
+            update { $0.photoAspectRatio = next }
+        } label: {
+            Text(settings.photoAspectRatio.label)
+                .font(.caption.bold().monospacedDigit())
+                .foregroundStyle(settings.photoAspectRatio != .fourByThree ? .yellow : .white)
+                .frame(minWidth: 44, minHeight: 44)
+        }
+        .accessibilityLabel("Aspect ratio \(settings.photoAspectRatio.label)")
+        .accessibilityIdentifier("top-aspect")
+    }
+
+    private var resolutionTopButton: some View {
+        Button {
+            let options = state.availableResolutions
+            guard !options.isEmpty else { return }
+            let next = options[((options.firstIndex(of: settings.photoResolution) ?? 0) + 1) % options.count]
+            update { $0.photoResolution = next }
+            camera.settingsChanged()
+        } label: {
+            Text("\(settings.photoResolution.shortLabel)MP")
+                .font(.caption2.bold().monospacedDigit())
+                .foregroundStyle(settings.photoResolution == .mp48 ? .yellow : .white)
+                .frame(minWidth: 44, minHeight: 44)
+        }
+        .accessibilityLabel("Resolution \(settings.photoResolution.label)")
+        .accessibilityIdentifier("top-resolution")
+    }
+
+    @ViewBuilder private var rawTopButton: some View {
+        if state.canRAW {
+            Button {
+                update {
+                    $0.captureRAW.toggle()
+                    if $0.captureRAW { $0.livePhotos = false }
+                }
+                camera.settingsChanged()
+            } label: {
+                Text("RAW")
+                    .font(.caption2.bold())
+                    .foregroundStyle(settings.captureRAW ? .yellow : .white)
+                    .frame(minWidth: 44, minHeight: 44)
+            }
+            .accessibilityLabel(settings.captureRAW ? "RAW on" : "RAW off")
+            .accessibilityIdentifier("top-raw")
+        } else {
+            Color.clear.frame(width: 44, height: 44)
+        }
     }
 
     /// Flash for photos, the light for videos.
@@ -223,7 +364,10 @@ struct CameraScreen<Gallery: View>: View {
     @ViewBuilder private var manualButton: some View {
         if state.manualLimits != nil {
             Button {
-                withAnimation(.snappy(duration: 0.2)) { showManual.toggle() }
+                withAnimation(.snappy(duration: 0.2)) {
+                    showManual.toggle()
+                    if showManual { showControls = false }
+                }
             } label: {
                 Image(systemName: "slider.horizontal.3")
                     .foregroundStyle(camera.manual.isAutomatic ? .white : .yellow)
@@ -239,7 +383,7 @@ struct CameraScreen<Gallery: View>: View {
 
     private var timerButton: some View {
         Button {
-            camera.timer = camera.timer == 0 ? 3 : camera.timer == 3 ? 10 : 0
+            camera.timer = CameraControls.nextTimer(after: camera.timer)
         } label: {
             HStack(spacing: 3) {
                 Image(systemName: "timer")
@@ -268,21 +412,25 @@ struct CameraScreen<Gallery: View>: View {
     @ViewBuilder private var liveButton: some View {
         if camera.mode == .photo && state.canLive {
             Button {
-                update { $0.livePhotos.toggle() }
+                update {
+                    $0.livePhotos.toggle()
+                    if $0.livePhotos { $0.captureRAW = false }
+                }
                 camera.settingsChanged()
             } label: {
-                Image(systemName: settings.livePhotos ? "livephoto" : "livephoto.slash")
-                    .foregroundStyle(settings.livePhotos ? .yellow : .white)
+                let active = settings.livePhotos && !settings.captureRAW
+                Image(systemName: active ? "livephoto" : "livephoto.slash")
+                    .foregroundStyle(active ? .yellow : .white)
                     .frame(width: 44, height: 44)
             }
-            .accessibilityLabel(settings.livePhotos ? "Live Photo on" : "Live Photo off")
+            .accessibilityLabel(settings.livePhotos && !settings.captureRAW ? "Live Photo on" : "Live Photo off")
             .accessibilityIdentifier("live")
         } else {
             Color.clear
         }
     }
 
-    /// The recording time while recording; for videos otherwise the format, to change it here.
+    /// Recording time while recording, the format menu for videos, or the drawer chevron for photos.
     @ViewBuilder private var topMiddle: some View {
         if let since = camera.recordingSince {
             TimelineView(.periodic(from: since, by: 1)) { context in
@@ -313,23 +461,27 @@ struct CameraScreen<Gallery: View>: View {
                         Text("1080p").tag(AppSettings.VideoResolution.hd1080)
                     }
                     Picker("Frame rate", selection: videoSetting(\.videoFrameRate)) {
-                        Text("60 fps").tag(60)
-                        Text("30 fps").tag(30)
+                        ForEach(CameraControls.videoFrameRates, id: \.self) { rate in
+                            Text(CameraControls.frameRateLabel(rate)).tag(rate)
+                        }
                     }
                     Toggle("HDR", isOn: videoSetting(\.videoHDR))
+                    Toggle("Auto low-light FPS", isOn: videoSetting(\.autoLowLightFPS))
                 }
             } label: {
                 Text(state.videoFormat ?? "Video")
                     .font(.caption.bold())
                     .lineLimit(1)
-                    .minimumScaleFactor(0.7)
+                    .minimumScaleFactor(0.65)
                     .padding(.horizontal, 8)
                     .padding(.vertical, 4)
-                    .background(.black.opacity(0.4), in: .capsule)
+                    .background(.black.opacity(0.45), in: .capsule)
                     .frame(minWidth: 44, minHeight: 44)
                     .contentShape(.rect)
             }
             .accessibilityIdentifier("video-format")
+        } else {
+            drawerToggleButton
         }
     }
 

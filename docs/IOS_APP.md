@@ -37,14 +37,23 @@ the design comes after that. What works today is described below.
   app starts, all on a queue of its own, so its picture is there at once and the screen never
   waits for it.
 - **Camera screen**: laid out like Apple's camera, with the tab bar (Camera, Photos, Settings)
-  visible at the bottom and clear space between it and the shutter row. On top flash (or the
-  light), self-timer, grid and Live Photo, for videos the format in the middle (in the room
-  between the buttons). The picture as it will be taken: 4:3 under the top bar for photos, 16:9
-  for videos. The modes start where the 4:3 picture ends when space allows, so the zoom buttons
-  lie on its lower edge; below them the modes (also changed by swiping over the picture) and the
-  shutter between the last photo and the button that turns the camera around. Nothing moves
-  when the mode changes: the picture blurs for a moment (`SwitchBlur`) while the camera changes
-  its format and the frame glides into its new shape. Every control is at least 44×44 points.
+  visible at the bottom and clear space between it and the shutter row. On top up to four
+  customizable controls (default: flash/light, manual controls, self-timer 3/5/10 s, Live Photo)
+  plus the chevron that opens the expandable iOS 26 control drawer above the modes (also opened
+  by swiping up over the mode strip); for videos the format sits in the middle. The drawer holds
+  flash, Live Photo, EV (−2…+2), aspect ratio (4:3, 16:9, 1:1), timer (off/3/5/10 s), photo
+  resolution (12/24/48 MP) and Bayer RAW (DNG) in photo mode, and 1080p/4K, 24/25 (PAL)/30/60
+  fps, HDR and auto low-light FPS in video mode. Non-4:3 aspect ratios are stored non-destructively
+  as `EditRecipe.crop` so Halden keeps the full original while Apple Photos receives the cropped
+  copy. Settings › Camera mirrors Apple's layout (Preserve Settings, Top Bar Controls, Formats,
+  Record Video, Shooting including faster capture prioritization, audio playback while filming,
+  default focal length and Volume Up for burst, and Composition). The picture as it will be
+  taken: 4:3 or 1:1 under the top bar, 16:9 full-height for 16:9 photos and videos. The modes
+  start where the 4:3 picture ends when space allows, so the zoom buttons lie on its lower edge;
+  below them the modes (also changed by swiping over the picture) and the shutter between the
+  last photo and the button that turns the camera around. Nothing moves when the mode changes:
+  the picture blurs for a moment (`SwitchBlur`) while the camera changes its format and the
+  frame glides into its new shape. Every control is at least 44×44 points.
 - **Last photo**: the photo just taken shows at once (from the capture itself), otherwise the
   newest one in the library (its thumbnail, or its own file when the thumbnail isn't made yet).
   A tap opens it full screen, with "All Photos" leading on to the library; with no photos yet

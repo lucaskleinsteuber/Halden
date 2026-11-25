@@ -16,6 +16,7 @@
 		169F24FE07DB4AA45218A7A1 /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 44FFBB666B16F8EAFC12B0F2 /* AppDelegate.swift */; };
 		1A3071743BB7165FCFE51777 /* LibraryGrid.swift in Sources */ = {isa = PBXBuildFile; fileRef = B5DE17A5A6B072AE573A3107 /* LibraryGrid.swift */; };
 		1C4A95BC88D4E44A70DEE043 /* SharedIntents.swift in Sources */ = {isa = PBXBuildFile; fileRef = F3B360B4ABEBAD5E54337C81 /* SharedIntents.swift */; };
+		299B6118DFEFE47B7455EA1A /* CameraDrawer.swift in Sources */ = {isa = PBXBuildFile; fileRef = B405A03771F3024F2993A6B7 /* CameraDrawer.swift */; };
 		3AAF8055F9AD167AAA48A7AB /* TimeLapseRecorder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 627A73F43AA825EA877229B8 /* TimeLapseRecorder.swift */; };
 		3DAEFCB4BCCF0F1420801D9D /* PhotoView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CCDEB459ACF35A5382B17B06 /* PhotoView.swift */; };
 		41B53AF02D73AB8EE6107451 /* HaldenWidgets.swift in Sources */ = {isa = PBXBuildFile; fileRef = C021AAFC98EA6F297083D1E9 /* HaldenWidgets.swift */; };
@@ -32,6 +33,7 @@
 		66986C431A10928BD13E6424 /* CameraScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE56A441B2CFDD9C6F0A36EE /* CameraScreen.swift */; };
 		6BBB5CD4E7E10F304D97B71F /* PerformanceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11DCCBE9E6F18A02FCC7FE6E /* PerformanceTests.swift */; };
 		6C637643DD40A5422A144B37 /* CaptureBackend.swift in Sources */ = {isa = PBXBuildFile; fileRef = 28B6F0CD3C366126B6E02E33 /* CaptureBackend.swift */; };
+		6E84DC6493D57247245C3EEE /* CameraDrawer.swift in Sources */ = {isa = PBXBuildFile; fileRef = B405A03771F3024F2993A6B7 /* CameraDrawer.swift */; };
 		7002EEBD674D90FA00CA5D22 /* UploadsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 371EA27A9FA82A61CA687680 /* UploadsView.swift */; };
 		71B99CF29DE1A7DD33488186 /* SharedIntents.swift in Sources */ = {isa = PBXBuildFile; fileRef = F3B360B4ABEBAD5E54337C81 /* SharedIntents.swift */; };
 		81759963AC86569602CA84B8 /* UITestWorld.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8C8F6CBCE5F738CE28E84C59 /* UITestWorld.swift */; };
@@ -149,6 +151,7 @@
 		A956D2E7B37916DA28E53461 /* LayoutTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LayoutTests.swift; sourceTree = "<group>"; };
 		AE56A441B2CFDD9C6F0A36EE /* CameraScreen.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraScreen.swift; sourceTree = "<group>"; };
 		B3DC81E0143A53F37F02DDAE /* WithoutPlaceView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WithoutPlaceView.swift; sourceTree = "<group>"; };
+		B405A03771F3024F2993A6B7 /* CameraDrawer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraDrawer.swift; sourceTree = "<group>"; };
 		B5DE17A5A6B072AE573A3107 /* LibraryGrid.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LibraryGrid.swift; sourceTree = "<group>"; };
 		BBE86FE0737D0847976455E0 /* AppModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppModel.swift; sourceTree = "<group>"; };
 		BD3E0AE6BBB76C8313C728EA /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
@@ -190,6 +193,7 @@
 		1CB52E6F41434C026F97955B /* Camera */ = {
 			isa = PBXGroup;
 			children = (
+				B405A03771F3024F2993A6B7 /* CameraDrawer.swift */,
 				DBEEA719E7976B95C7A812F2 /* CameraModel.swift */,
 				AE56A441B2CFDD9C6F0A36EE /* CameraScreen.swift */,
 				28B6F0CD3C366126B6E02E33 /* CaptureBackend.swift */,
@@ -478,6 +482,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				299B6118DFEFE47B7455EA1A /* CameraDrawer.swift in Sources */,
 				0B0210EB0D18FAF7577ECB53 /* CameraModel.swift in Sources */,
 				62C41FB582518DFF154BB936 /* CameraScreen.swift in Sources */,
 				6C637643DD40A5422A144B37 /* CaptureBackend.swift in Sources */,
@@ -499,6 +504,7 @@
 				9CACD74C6ECC3C680BE4D01F /* AlbumsView.swift in Sources */,
 				169F24FE07DB4AA45218A7A1 /* AppDelegate.swift in Sources */,
 				F208962660CBA8090DB0272F /* AppModel.swift in Sources */,
+				6E84DC6493D57247245C3EEE /* CameraDrawer.swift in Sources */,
 				9F64B285C463AC47333BECF3 /* CameraModel.swift in Sources */,
 				66986C431A10928BD13E6424 /* CameraScreen.swift in Sources */,
 				0CDFEFC6CE12BBEDF37B2362 /* CameraView.swift in Sources */,

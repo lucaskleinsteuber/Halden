@@ -10,6 +10,15 @@ part of the first versions.
 
 ### Added
 
+- In-camera iOS 26 control drawer (`CameraDrawer`, opened by the top-bar chevron or swiping up
+  over the modes) with photo controls (flash, Live Photo, EV −2…+2 slider, aspect ratio
+  4:3/16:9/1:1, timer off/3/5/10 s, 12/24/48 MP resolution, Bayer RAW DNG) and video controls
+  (1080p/4K, 24/25 PAL/30/60 fps, HDR, auto low-light FPS), plus customizable top-bar controls.
+- Non-destructive camera aspect ratios (16:9 and 1:1 stored as `EditRecipe.crop`, keeping the
+  full original in Halden while saving the cropped copy to Apple Photos).
+- Restructured Settings › Camera like Apple's (Preserve Settings, Top Bar Controls, Formats,
+  Record Video with PAL and audio playback while filming, faster shooting prioritization,
+  default focal length, Volume Up for burst, and Composition).
 - Screenshots and screen recordings without GPS get an estimated place in Halden only (Apple
   Photos stays unchanged): this iPhone's current place (new server location source `device`)
   when taken within 30 minutes while Halden is open, otherwise the place of the nearest photo

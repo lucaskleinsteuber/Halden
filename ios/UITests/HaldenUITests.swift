@@ -160,6 +160,73 @@ final class HaldenUITests: XCTestCase {
         XCTAssertTrue(app.buttons["Take a photo"].waitForExistence(timeout: 5), "swiped back to photo")
     }
 
+    /// The expandable control drawer adjusts photo and video settings directly in the camera,
+    /// and Settings › Camera exposes Preserve Settings and Top Bar Controls.
+    @MainActor
+    func testCameraControlsDrawerAndCameraSettings() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-ui-testing-signed-in"]
+        app.launch()
+        let toggle = app.buttons["camera-controls-toggle"]
+        XCTAssertTrue(toggle.waitForExistence(timeout: 10))
+        toggle.tap()
+        XCTAssertTrue(app.descendants(matching: .any)["camera-drawer"].waitForExistence(timeout: 5))
+
+        // Aspect ratio 4:3 → 16:9 → 4:3.
+        app.buttons["drawer-aspect"].tap()
+        app.buttons["drawer-aspect-16:9"].tap()
+        XCTAssertEqual(app.buttons["drawer-aspect"].label, "Aspect ratio 16:9")
+        app.buttons["drawer-aspect"].tap()
+        app.buttons["drawer-aspect-4:3"].tap()
+
+        // Exposure compensation slider (-2...+2 EV).
+        app.buttons["drawer-exposure"].tap()
+        let evSlider = app.sliders["drawer-ev-slider"]
+        XCTAssertTrue(evSlider.waitForExistence(timeout: 5))
+        evSlider.adjust(toNormalizedSliderPosition: 0.75)
+        app.buttons["drawer-ev-reset"].tap()
+
+        // Resolution (48 MP) and RAW.
+        let res = app.buttons["drawer-resolution"]
+        if res.exists {
+            res.tap()
+            app.buttons["drawer-res-48"].tap()
+            XCTAssertEqual(res.label, "Resolution 48 MP")
+        }
+        let raw = app.buttons["drawer-raw"]
+        if raw.exists {
+            raw.tap()
+            XCTAssertEqual(raw.label, "RAW on")
+            raw.tap()
+            XCTAssertEqual(raw.label, "RAW off")
+        }
+        toggle.tap()
+
+        // Video drawer: 25 fps (PAL) and Auto low-light FPS.
+        app.buttons["mode-video"].tap()
+        XCTAssertTrue(app.buttons["Record a video"].waitForExistence(timeout: 5))
+        app.buttons["camera-controls-toggle"].tap()
+        app.buttons["drawer-video-fps"].tap()
+        app.buttons["drawer-fps-25"].tap()
+        XCTAssertTrue(app.buttons["drawer-video-fps"].label.contains("25 fps (PAL)"))
+        app.buttons["drawer-video-autofps"].tap()
+        XCTAssertEqual(app.buttons["drawer-video-autofps"].label, "Auto low-light FPS on")
+        app.buttons["camera-controls-toggle"].tap()
+
+        // Settings › Camera › Preserve Settings and Top Bar Controls.
+        let tabs = Tabs(app)
+        tabs.buttons["Settings"].tap()
+        app.buttons["camera-settings"].tap()
+        XCTAssertTrue(app.navigationBars["Camera"].waitForExistence(timeout: 5))
+        app.buttons["camera-preserve-settings"].tap()
+        XCTAssertTrue(app.navigationBars["Preserve Settings"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.switches["preserve-mode"].exists)
+        app.navigationBars["Preserve Settings"].buttons.firstMatch.tap()
+        app.buttons["camera-top-bar-settings"].tap()
+        XCTAssertTrue(app.navigationBars["Top Bar Controls"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["topbar-reset"].exists)
+    }
+
     /// Fifty thousand photos scroll without waiting for pictures.
     @MainActor
     func testTheGridScrollsThroughFiftyThousandPhotos() {
@@ -255,6 +322,9 @@ final class HaldenUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["countdown"].waitForExistence(timeout: 2), "the self-timer counts down")
         XCTAssertTrue(app.staticTexts["countdown"].waitForNonExistence(timeout: 6))
         app.buttons["timer"].tap()
+        XCTAssertEqual(app.buttons["timer"].label, "Self-timer 5 seconds")
+        app.buttons["timer"].tap()
+        XCTAssertEqual(app.buttons["timer"].label, "Self-timer 10 seconds")
         app.buttons["timer"].tap()
         XCTAssertEqual(app.buttons["timer"].label, "Self-timer off")
 

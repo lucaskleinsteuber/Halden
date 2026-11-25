@@ -386,16 +386,18 @@ final class CaptureCore: NSObject, @unchecked Sendable {
         if !session.outputs.contains(output), session.canAddOutput(output) { session.addOutput(output) }
     }
 
-    /// Photo: the photo output in the best quality the camera has. Video and slow motion: the
-    /// movie output with the chosen format, HEVC, stabilized, with sound when allowed. Time-lapse:
-    /// the frames, without sound.
+    /// Photo: the photo output in the chosen resolution and prioritization. Video and slow motion:
+    /// the movie output with the chosen format, HEVC, stabilized, with sound when allowed.
+    /// Time-lapse: the frames, without sound.
     private func apply(mode: CameraMode, on device: AVCaptureDevice) {
         session.automaticallyConfiguresCaptureDeviceForWideColor = mode == .photo
+        configureAudioSession(allowPlayback: video?.allowAudioPlayback == true, needsAudio: mode != .timeLapse)
         switch mode {
         case .photo:
             use(photoOutput)
-            // Live Photos record sound; plain photos need no microphone.
-            let live = video?.live == true
+            // Live Photos record sound (unless RAW is active, which cannot combine with Live Photos).
+            let raw = video?.captureRAW == true && availableBayerRAW() != nil
+            let live = video?.live == true && !raw
             if live {
                 addMicrophone()
             } else if let audioInput {
@@ -403,13 +405,19 @@ final class CaptureCore: NSObject, @unchecked Sendable {
                 self.audioInput = nil
             }
             if session.canSetSessionPreset(.photo) { session.sessionPreset = .photo }
-            photoOutput.maxPhotoQualityPrioritization = .quality
-            if let largest = device.activeFormat.supportedMaxPhotoDimensions.max(by: {
-                $0.width * $0.height < $1.width * $1.height
-            }) {
+            let faster = video?.prioritizeFasterShooting ?? true
+            photoOutput.maxPhotoQualityPrioritization = faster ? .balanced : .quality
+            let supported = device.activeFormat.supportedMaxPhotoDimensions
+            let tuples = supported.map { (width: Int($0.width), height: Int($0.height)) }
+            let wanted = video?.photoResolution ?? .mp24
+            if let index = PhotoResolution.bestDimensionIndex(wanted: wanted, in: tuples) {
+                photoOutput.maxPhotoDimensions = supported[index]
+            } else if let largest = supported.max(by: { $0.width * $0.height < $1.width * $1.height }) {
                 photoOutput.maxPhotoDimensions = largest
             }
-            if photoOutput.isResponsiveCaptureSupported { photoOutput.isResponsiveCaptureEnabled = true }
+            if photoOutput.isResponsiveCaptureSupported {
+                photoOutput.isResponsiveCaptureEnabled = faster
+            }
             photoOutput.isLivePhotoCaptureEnabled = live && photoOutput.isLivePhotoCaptureSupported
             if photoOutput.isLivePhotoCaptureEnabled { photoOutput.isLivePhotoAutoTrimmingEnabled = true }
             state.videoFormat = nil
@@ -419,11 +427,13 @@ final class CaptureCore: NSObject, @unchecked Sendable {
             if let video {
                 if mode == .slowMotion {
                     applyVideoFormat(
-                        sizes: [(1920, 1080)], rate: Double(video.slowMotionRate), hdr: false, on: device)
+                        sizes: [(1920, 1080)], rate: Double(video.slowMotionRate), hdr: false,
+                        autoLowLightFPS: false, on: device)
                 } else {
                     applyVideoFormat(
                         sizes: video.resolution == .uhd4K ? [(3840, 2160), (1920, 1080)] : [(1920, 1080)],
-                        rate: Double(video.frameRate), hdr: video.hdr, on: device)
+                        rate: Double(video.frameRate), hdr: video.hdr, autoLowLightFPS: video.autoLowLightFPS,
+                        on: device)
                 }
             }
             if let connection = movieOutput.connection(with: .video) {
@@ -443,13 +453,34 @@ final class CaptureCore: NSObject, @unchecked Sendable {
             if let video {
                 applyVideoFormat(
                     sizes: video.resolution == .uhd4K ? [(3840, 2160), (1920, 1080)] : [(1920, 1080)], rate: 30,
-                    hdr: false, on: device)
+                    hdr: false, autoLowLightFPS: false, on: device)
                 state.videoFormat = video.timeLapseInterval.map { "every \(CameraMode.intervalText($0))" } ?? "Auto"
             }
             if let connection = frameOutput.connection(with: .video), connection.isVideoStabilizationSupported {
                 connection.preferredVideoStabilizationMode = .auto
             }
         }
+    }
+
+    /// Lets music or podcasts keep playing while filming when `allowPlayback` is on.
+    private func configureAudioSession(allowPlayback: Bool, needsAudio: Bool) {
+        guard needsAudio else {
+            session.automaticallyConfiguresApplicationAudioSession = true
+            return
+        }
+        if allowPlayback {
+            session.automaticallyConfiguresApplicationAudioSession = false
+            let audio = AVAudioSession.sharedInstance()
+            try? audio.setCategory(
+                .playAndRecord, mode: .videoRecording, options: [.mixWithOthers, .defaultToSpeaker, .allowBluetoothHFP])
+            try? audio.setActive(true)
+        } else {
+            session.automaticallyConfiguresApplicationAudioSession = true
+        }
+    }
+
+    private func availableBayerRAW() -> OSType? {
+        photoOutput.availableRawPhotoPixelFormatTypes.first { AVCapturePhotoOutput.isBayerRAWPixelFormat($0) }
     }
 
     /// Sound, when allowed.
@@ -463,8 +494,11 @@ final class CaptureCore: NSObject, @unchecked Sendable {
     }
 
     /// The format closest to what was asked: the size first, then the frame rate, then HDR (10
-    /// bit with HLG) or not. What was actually chosen is shown on the camera screen.
-    private func applyVideoFormat(sizes: [(Int, Int)], rate: Double, hdr wantHDR: Bool, on device: AVCaptureDevice) {
+    /// bit with HLG) or not, and auto low-light FPS when requested and supported. What was
+    /// actually chosen is shown on the camera screen.
+    private func applyVideoFormat(
+        sizes: [(Int, Int)], rate: Double, hdr wantHDR: Bool, autoLowLightFPS: Bool, on device: AVCaptureDevice
+    ) {
         func dimensions(_ format: AVCaptureDevice.Format) -> (Int, Int) {
             let size = CMVideoFormatDescriptionGetDimensions(format.formatDescription)
             return (Int(size.width), Int(size.height))
@@ -492,9 +526,15 @@ final class CaptureCore: NSObject, @unchecked Sendable {
         let used = min(rate, maxRate(format)).rounded()
         guard (try? device.lockForConfiguration()) != nil else { return }
         device.activeFormat = format
-        let frame = CMTime(value: 1, timescale: CMTimeScale(used))
-        device.activeVideoMinFrameDuration = frame
-        device.activeVideoMaxFrameDuration = frame
+        // Setting frame durations while `isAutoVideoFrameRateEnabled` is true throws an exception.
+        if autoLowLightFPS && format.isAutoVideoFrameRateSupported {
+            device.isAutoVideoFrameRateEnabled = true
+        } else {
+            if device.isAutoVideoFrameRateEnabled { device.isAutoVideoFrameRateEnabled = false }
+            let frame = CMTime(value: 1, timescale: CMTimeScale(used))
+            device.activeVideoMinFrameDuration = frame
+            device.activeVideoMaxFrameDuration = frame
+        }
         if wantHDR, format.supportedColorSpaces.contains(.HLG_BT2020) {
             device.activeColorSpace = .HLG_BT2020
         } else if format.supportedColorSpaces.contains(.sRGB) {
@@ -503,7 +543,9 @@ final class CaptureCore: NSObject, @unchecked Sendable {
         device.unlockForConfiguration()
         let (width, _) = dimensions(format)
         let hdr = device.activeColorSpace == .HLG_BT2020
-        state.videoFormat = "\(width >= 3840 ? "4K" : "1080p") · \(Int(used)) fps\(hdr ? " · HDR" : "")"
+        let fpsText = CameraControls.frameRateLabel(Int(used))
+        let autoSuffix = device.isAutoVideoFrameRateEnabled ? " · Auto" : ""
+        state.videoFormat = "\(width >= 3840 ? "4K" : "1080p") · \(fpsText)\(hdr ? " · HDR" : "")\(autoSuffix)"
     }
 
     /// 1× (the main camera), focus and exposure following the picture.
@@ -555,6 +597,11 @@ final class CaptureCore: NSObject, @unchecked Sendable {
         described.hasFlash = device.hasFlash
         described.hasTorch = device.hasTorch
         described.canLive = mode == .photo && photoOutput.isLivePhotoCaptureSupported
+        described.canRAW = mode == .photo && availableBayerRAW() != nil
+        let dims = device.activeFormat.supportedMaxPhotoDimensions.map {
+            (width: Int($0.width), height: Int($0.height))
+        }
+        described.availableResolutions = PhotoResolution.available(for: dims)
         described.manualLimits = limits(of: device)
         described.focusLocked = state.focusLocked
         described.videoFormat = state.videoFormat
@@ -668,8 +715,18 @@ final class CaptureCore: NSObject, @unchecked Sendable {
         }
         if connection.isVideoRotationAngleSupported(angle) { connection.videoRotationAngle = angle }
         let heic = request.format == .heic && photoOutput.availablePhotoCodecTypes.contains(.hevc)
-        let settings = AVCapturePhotoSettings(format: [AVVideoCodecKey: heic ? AVVideoCodecType.hevc : .jpeg])
-        settings.photoQualityPrioritization = .quality
+        let processedFormat: [String: Any] = [AVVideoCodecKey: heic ? AVVideoCodecType.hevc : .jpeg]
+        let rawFormat = request.raw ? availableBayerRAW() : nil
+        let settings: AVCapturePhotoSettings
+        if let rawFormat {
+            settings = AVCapturePhotoSettings(rawPixelFormatType: rawFormat, processedFormat: processedFormat)
+        } else {
+            settings = AVCapturePhotoSettings(format: processedFormat)
+        }
+        let wantedPriority: AVCapturePhotoOutput.QualityPrioritization = request.prioritizeFaster ? .balanced : .quality
+        settings.photoQualityPrioritization =
+            wantedPriority.rawValue <= photoOutput.maxPhotoQualityPrioritization.rawValue
+            ? wantedPriority : photoOutput.maxPhotoQualityPrioritization
         settings.maxPhotoDimensions = photoOutput.maxPhotoDimensions
         let flash: AVCaptureDevice.FlashMode =
             switch request.flash {
@@ -678,7 +735,7 @@ final class CaptureCore: NSObject, @unchecked Sendable {
             case .off: .off
             }
         if photoOutput.supportedFlashModes.contains(flash) { settings.flashMode = flash }
-        if request.live, photoOutput.isLivePhotoCaptureEnabled {
+        if request.live, rawFormat == nil, photoOutput.isLivePhotoCaptureEnabled {
             settings.livePhotoMovieFileURL = FileManager.default.temporaryDirectory
                 .appendingPathComponent("\(UUID().uuidString).mov")
             if photoOutput.availableLivePhotoVideoCodecTypes.contains(.hevc) {
@@ -736,6 +793,7 @@ final class PhotoCapture: NSObject, AVCapturePhotoCaptureDelegate, @unchecked Se
     let heic: Bool
     let done: @Sendable (TakenPhoto?) -> Void
     private var photo: TakenPhoto?
+    private var rawData: Data?
     private var movie: URL?
 
     init(request: PhotoRequest, heic: Bool, done: @escaping @Sendable (TakenPhoto?) -> Void) {
@@ -749,6 +807,10 @@ final class PhotoCapture: NSObject, AVCapturePhotoCaptureDelegate, @unchecked Se
             let data = photo.fileDataRepresentation(
                 with: GPSWriter(location: request.location, trueNorth: request.trueNorth, at: request.takenAt))
         else { return }
+        if photo.isRawPhoto {
+            rawData = data
+            return
+        }
         let size = Thumbnails.shownSize(of: data)
         let dimensions = photo.resolvedSettings.photoDimensions
         self.photo = TakenPhoto(
@@ -763,13 +825,14 @@ final class PhotoCapture: NSObject, AVCapturePhotoCaptureDelegate, @unchecked Se
         if error == nil { movie = outputFileURL }
     }
 
-    /// Called last, after the photo and (for a Live Photo) its video.
+    /// Called last, after the photo and (for a Live Photo / RAW) its companion.
     func photoOutput(
         _ output: AVCapturePhotoOutput, didFinishCaptureFor resolvedSettings: AVCaptureResolvedPhotoSettings,
         error: Error?
     ) {
-        if var photo, let movie, FileManager.default.fileExists(atPath: movie.path) {
-            photo.liveVideo = movie
+        if var photo {
+            if let movie, FileManager.default.fileExists(atPath: movie.path) { photo.liveVideo = movie }
+            if let rawData { photo.rawData = rawData }
             self.photo = photo
         }
         done(photo)

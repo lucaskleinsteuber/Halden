@@ -186,17 +186,34 @@ public actor PhotosSync {
         return true
     }
 
-    /// A photo or video taken with Halden goes into Apple Photos too.
+    /// A photo or video taken with Halden goes into Apple Photos too. When a photo carries a
+    /// non-destructive edit (such as a 16:9 or 1:1 camera aspect crop), Apple Photos receives the
+    /// cropped copy while Halden keeps the full original.
     public func save(assetId: String, settings: AppSettings) async {
         guard settings.saveToPhotos, await library.mayAdd(),
             let asset = try? database.asset(assetId), let name = asset.localFile
         else { return }
         saving += 1
         defer { saving -= 1 }
-        let paired = asset.pairedVideoFile.map { files.original($0) }
+        let originalURL = files.original(name)
+        var fileToSave = originalURL
+        var paired = asset.pairedVideoFile.map { files.original($0) }
+        var temporaryCrop: URL?
+        if !asset.isVideo, let edit = asset.edit, !edit.isEmpty {
+            let ext = originalURL.pathExtension.lowercased() == "heic" ? "heic" : "jpg"
+            let cropped = FileManager.default.temporaryDirectory
+                .appendingPathComponent("halden-crop-\(asset.id).\(ext)")
+            if (try? EditRenderer.render(originalURL, with: edit, to: cropped)) != nil {
+                fileToSave = cropped
+                temporaryCrop = cropped
+                // A cropped photo doesn't match the full-frame Live Photo movie.
+                paired = nil
+            }
+        }
+        defer { if let temporaryCrop { try? FileManager.default.removeItem(at: temporaryCrop) } }
         guard
             let identifier = try? await library.save(
-                files.original(name), kind: asset.isVideo ? .video : .photo, pairedVideo: paired)
+                fileToSave, kind: asset.isVideo ? .video : .photo, pairedVideo: paired)
         else { return }
         try? link(identifier, to: asset.id)
     }

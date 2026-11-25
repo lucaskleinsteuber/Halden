@@ -77,6 +77,19 @@ public actor Uploader {
         }
     }
 
+    /// The Bayer DNG companion of a RAW+HEIC/JPEG capture, sent after its processed original.
+    public static func enqueueRaw(
+        database: HaldenDatabase, files: FileLocations, assetId: String, fileName: String,
+        mimeType: String = "image/x-adobe-dng"
+    ) throws {
+        let size = try FileManager.default.attributesOfItem(atPath: files.original(fileName).path)[.size] as? Int64 ?? 0
+        let item = UploadItem(
+            assetId: assetId.lowercased(), role: "raw", file: fileName, mimeType: mimeType, size: size,
+            sha256: nil, metadata: nil, uploadId: nil, sent: 0, state: "waiting", attempts: 0, lastError: nil,
+            retryAt: 0, createdAt: Int64(Date().timeIntervalSince1970 * 1000))
+        try database.writer.write { db in try item.insert(db) }
+    }
+
     /// Works through every due upload. Returns how many finished; stops early when the server
     /// can't be reached (the next call continues). `skipping`: uploads the system is sending in
     /// the background right now (by `UploadItem.key`).

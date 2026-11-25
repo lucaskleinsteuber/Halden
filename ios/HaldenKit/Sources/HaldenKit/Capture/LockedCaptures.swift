@@ -14,10 +14,15 @@ public enum LockedCaptures {
         var metadata: UploadMetadata
         /// A Live Photo's video.
         var pairedFile: String?
+        /// A Bayer RAW companion file.
+        var rawFile: String?
+        /// Non-destructive crop/edit (e.g. 16:9 or 1:1 camera aspect ratio).
+        var edit: EditRecipe?
     }
 
     public static func save(
-        photo data: Data, heic: Bool, liveVideo: URL? = nil, metadata: UploadMetadata, into folder: URL
+        photo data: Data, heic: Bool, liveVideo: URL? = nil, rawData: Data? = nil, edit: EditRecipe? = nil,
+        metadata: UploadMetadata, into folder: URL
     ) throws {
         let id = UUID().uuidString.lowercased()
         let file = "\(id).\(heic ? "heic" : "jpg")"
@@ -29,11 +34,17 @@ public enum LockedCaptures {
                 paired = name
             }
         }
+        var raw: String?
+        if let rawData {
+            let name = "\(id).dng"
+            try rawData.write(to: folder.appendingPathComponent(name), options: .atomic)
+            raw = name
+        }
         try describe(
             id,
             Description(
                 kind: "photo", mimeType: heic ? "image/heic" : "image/jpeg", file: file, metadata: metadata,
-                pairedFile: paired),
+                pairedFile: paired, rawFile: raw, edit: edit),
             in: folder)
     }
 
@@ -78,10 +89,23 @@ public enum LockedCaptures {
                             mimeType: "video/quicktime")
                     }
                 }
+                if let raw = description.rawFile {
+                    let rawSource = folder.appendingPathComponent(raw)
+                    if FileManager.default.fileExists(atPath: rawSource.path) {
+                        try FileManager.default.moveItem(at: rawSource, to: files.original(raw))
+                        try Uploader.enqueueRaw(database: database, files: files, assetId: id, fileName: raw)
+                    }
+                }
+                if let edit = description.edit, !edit.isEmpty {
+                    try Actions(database: database).correct(id, AssetCorrection(edit: .set(edit)))
+                }
                 taken += 1
             }
             if let paired = description.pairedFile {
                 try? FileManager.default.removeItem(at: folder.appendingPathComponent(paired))
+            }
+            if let raw = description.rawFile {
+                try? FileManager.default.removeItem(at: folder.appendingPathComponent(raw))
             }
             try? FileManager.default.removeItem(at: source)
             try? FileManager.default.removeItem(at: descriptionURL)

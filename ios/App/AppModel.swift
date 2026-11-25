@@ -119,6 +119,7 @@ final class AppModel {
         camera.keepPhoto = { [weak self] photo, metadata in self?.keep(photo: photo, metadata: metadata) }
         camera.keepVideo = { [weak self] url, metadata in self?.keep(video: url, metadata: metadata) }
         camera.keepManual = { [weak self] manual in self?.update { $0.keptManual = manual } }
+        camera.updateSettings = { [weak self] change in self?.update(change) }
         camera.prepare()
         networkWatcher.changed = { [weak self] situation in
             self?.network = situation
@@ -359,6 +360,19 @@ final class AppModel {
                 try FileManager.default.moveItem(at: movie, to: files.original(videoName))
                 try Uploader.enqueuePairedVideo(
                     database: database, files: files, assetId: id, fileName: videoName, mimeType: "video/quicktime")
+            }
+            // A Bayer DNG companion, sent after the processed photo.
+            if let rawData = photo.rawData {
+                let rawName = "\(id).dng"
+                try rawData.write(
+                    to: files.original(rawName),
+                    options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
+                try Uploader.enqueueRaw(database: database, files: files, assetId: id, fileName: rawName)
+            }
+            // Non-destructive aspect-ratio crop (16:9 or 1:1): Halden keeps the full original and
+            // applies the crop everywhere; Apple Photos receives the cropped copy.
+            if let edit = photo.edit, !edit.isEmpty {
+                try Actions(database: database).correct(id, AssetCorrection(edit: .set(edit)))
             }
         }
     }

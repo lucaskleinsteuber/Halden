@@ -45,17 +45,46 @@ public struct AppSettings: Codable, Sendable, Equatable {
 
     // Camera
     public var photoFormat = PhotoFormat.heic
+    public var photoAspectRatio = PhotoAspectRatio.fourByThree
+    public var photoResolution = PhotoResolution.mp24
+    /// Capture Bayer RAW (DNG) alongside the processed photo, when supported by the camera.
+    public var captureRAW = false
     public var videoResolution = VideoResolution.uhd4K
     public var videoFrameRate = 60
     public var videoHDR = false
+    /// Automatically lower the video frame rate in low light when supported.
+    public var autoLowLightFPS = false
     public var flash = Flash.auto
     public var showGrid = false
+    /// Show the horizon / flat-lay level in the camera.
+    public var showLevel = false
+    /// Mirror front-camera photos to match the preview.
+    public var mirrorFrontCamera = false
+    /// Geometric lens distortion correction on ultra wide / front cameras.
+    public var lensCorrection = true
     /// Photos with a short video before and after, like Apple's camera; on by default there too.
     public var livePhotos = true
     /// Frames a second for slow motion: 120 or 240.
     public var slowMotionRate = 240
     /// Seconds between the pictures of a time-lapse; 0 for automatic (the video stays 20–40 s).
     public var timeLapseInterval = 0.0
+    /// Prioritize faster capture (`photoQualityPrioritization` / Responsive Capture).
+    public var prioritizeFasterShooting = true
+    /// Allow music or podcasts to keep playing while filming.
+    public var allowAudioPlayback = true
+    /// Default main-camera focal length (24 / 28 / 35 mm).
+    public var defaultFocalLength = FocalLength.mm24
+    /// Hold Volume Up to take a burst of photos.
+    public var volumeUpForBurst = true
+    /// Which controls are pinned to the camera's top bar.
+    public var topBarControls = CameraControls.defaultTopBarControls
+    // Preserve Settings
+    public var preserveMode = false
+    public var keptMode: String?
+    public var preserveExposure = false
+    public var keptExposureBias = 0.0
+    public var preserveLivePhoto = true
+    public var preserveResolution = false
     /// Manual camera values stay when the camera closes (else everything goes back to automatic).
     public var keepManualSettings = false
     /// The manual values kept, when they are.
@@ -89,9 +118,15 @@ public struct AppSettings: Codable, Sendable, Equatable {
     public init() {}
 
     enum CodingKeys: String, CodingKey {
-        case uploadOverCellular, videosOnlyOnWiFi, onlyOnHomeNetwork, keepLocalCopies, photoFormat
-        case videoResolution, videoFrameRate, videoHDR, flash, showGrid, livePhotos, slowMotionRate
-        case timeLapseInterval, keepManualSettings, keptManual, tripKilometres, videoCopy, makeSmallCopies
+        case uploadOverCellular, videosOnlyOnWiFi, onlyOnHomeNetwork, keepLocalCopies
+        case photoFormat, photoAspectRatio, photoResolution, captureRAW
+        case videoResolution, videoFrameRate, videoHDR, autoLowLightFPS
+        case flash, showGrid, showLevel, mirrorFrontCamera, lensCorrection
+        case livePhotos, slowMotionRate, timeLapseInterval
+        case prioritizeFasterShooting, allowAudioPlayback, defaultFocalLength, volumeUpForBurst
+        case topBarControls
+        case preserveMode, keptMode, preserveExposure, keptExposureBias, preserveLivePhoto, preserveResolution
+        case keepManualSettings, keptManual, tripKilometres, videoCopy, makeSmallCopies
         case locationAccuracyLimit, inaccurateLocation
         case locateScreenshots, screenshotPlaceMaxMinutes, locateScreenRecordings
         case importFromPhotos, saveToPhotos, syncDeletionsWithPhotos
@@ -109,14 +144,33 @@ public struct AppSettings: Codable, Sendable, Equatable {
         read(.onlyOnHomeNetwork, into: &settings.onlyOnHomeNetwork)
         read(.keepLocalCopies, into: &settings.keepLocalCopies)
         read(.photoFormat, into: &settings.photoFormat)
+        read(.photoAspectRatio, into: &settings.photoAspectRatio)
+        read(.photoResolution, into: &settings.photoResolution)
+        read(.captureRAW, into: &settings.captureRAW)
         read(.videoResolution, into: &settings.videoResolution)
         read(.videoFrameRate, into: &settings.videoFrameRate)
         read(.videoHDR, into: &settings.videoHDR)
+        read(.autoLowLightFPS, into: &settings.autoLowLightFPS)
         read(.flash, into: &settings.flash)
         read(.showGrid, into: &settings.showGrid)
+        read(.showLevel, into: &settings.showLevel)
+        read(.mirrorFrontCamera, into: &settings.mirrorFrontCamera)
+        read(.lensCorrection, into: &settings.lensCorrection)
         read(.livePhotos, into: &settings.livePhotos)
         read(.slowMotionRate, into: &settings.slowMotionRate)
         read(.timeLapseInterval, into: &settings.timeLapseInterval)
+        read(.prioritizeFasterShooting, into: &settings.prioritizeFasterShooting)
+        read(.allowAudioPlayback, into: &settings.allowAudioPlayback)
+        read(.defaultFocalLength, into: &settings.defaultFocalLength)
+        read(.volumeUpForBurst, into: &settings.volumeUpForBurst)
+        read(.topBarControls, into: &settings.topBarControls)
+        settings.topBarControls = CameraControls.sanitizedTopBar(settings.topBarControls)
+        read(.preserveMode, into: &settings.preserveMode)
+        read(.keptMode, into: &settings.keptMode)
+        read(.preserveExposure, into: &settings.preserveExposure)
+        read(.keptExposureBias, into: &settings.keptExposureBias)
+        read(.preserveLivePhoto, into: &settings.preserveLivePhoto)
+        read(.preserveResolution, into: &settings.preserveResolution)
         read(.keepManualSettings, into: &settings.keepManualSettings)
         read(.keptManual, into: &settings.keptManual)
         read(.tripKilometres, into: &settings.tripKilometres)

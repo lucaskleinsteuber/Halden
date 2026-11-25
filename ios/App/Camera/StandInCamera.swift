@@ -10,7 +10,8 @@ import UIKit
 final class StandInCamera: CaptureBackend {
     private(set) var state = CameraState(
         ready: true, side: .back, canFlip: true, presets: [0.5, 1, 2], zoom: 1, zoomRange: 0.5...10,
-        hasFlash: true, hasTorch: true, canLive: true,
+        hasFlash: true, hasTorch: true, canLive: true, canRAW: true,
+        availableResolutions: [.mp12, .mp24, .mp48],
         manualLimits: ManualLimits(shutter: (1.0 / 8000)...1, iso: 50...3200, exposureBias: -8...8))
     private(set) var readings = CameraReadings(shutter: 1.0 / 120, iso: 100, kelvin: 5200, tint: 0, focus: 0.5)
     @ObservationIgnored let previewView: UIView = StandInPreview()
@@ -31,10 +32,15 @@ final class StandInCamera: CaptureBackend {
         try? await Task.sleep(for: .milliseconds(250))
         self.mode = mode
         state.canLive = mode == .photo
+        state.canRAW = mode == .photo
+        state.availableResolutions = [.mp12, .mp24, .mp48]
+        let fpsText = CameraControls.frameRateLabel(video.frameRate)
+        let hdrSuffix = video.hdr ? " · HDR" : ""
+        let autoSuffix = video.autoLowLightFPS ? " · Auto" : ""
         state.videoFormat =
             switch mode {
             case .photo: nil
-            case .video: "\(video.resolution == .uhd4K ? "4K" : "1080p") · \(video.frameRate) fps"
+            case .video: "\(video.resolution == .uhd4K ? "4K" : "1080p") · \(fpsText)\(hdrSuffix)\(autoSuffix)"
             case .slowMotion: "1080p · \(video.slowMotionRate) fps"
             case .timeLapse: video.timeLapseInterval.map { "every \(CameraMode.intervalText($0))" } ?? "Auto"
             }
@@ -92,7 +98,9 @@ final class StandInCamera: CaptureBackend {
         let data = await Task.detached { SampleMedia.photo(seed: seed) }.value
         guard let data else { return nil }
         var photo = TakenPhoto(data: data, heic: false, width: 1600, height: 1200)
-        if request.live {
+        if request.raw {
+            photo.rawData = data
+        } else if request.live {
             let movie = FileManager.default.temporaryDirectory.appendingPathComponent("\(UUID().uuidString).mov")
             if (try? await SampleMedia.video(at: movie, seed: seed, seconds: 1)) != nil { photo.liveVideo = movie }
         }

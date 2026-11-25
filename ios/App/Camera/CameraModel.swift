@@ -39,6 +39,8 @@ final class CameraModel {
     @ObservationIgnored var keepVideo: ((URL, UploadMetadata) -> Void)?
     /// Keeps the manual values for the next time, when that is set (the app saves them).
     @ObservationIgnored var keepManual: ((ManualSettings?) -> Void)?
+    /// Updates persisted settings when Preserve Settings rules apply on close.
+    @ObservationIgnored var updateSettings: (((inout AppSettings) -> Void) -> Void)?
     @ObservationIgnored private var countdownTask: Task<Void, Never>?
     @ObservationIgnored private var video: (request: VideoRequest, place: ClientLocation?)?
     @ObservationIgnored private var applied: CaptureOptions?
@@ -100,12 +102,19 @@ final class CameraModel {
 
     /// At app start, so the picture is there at once when the camera opens.
     func prepare() {
-        let options = CaptureOptions(settings())
+        let current = settings()
+        if current.preserveMode, let kept = current.keptMode, let restored = CameraMode(rawValue: kept) {
+            mode = restored
+        }
+        let options = CaptureOptions(current)
         applied = options
         backend.prepare(mode: mode, options: options)
-        if settings().keepManualSettings, let kept = settings().keptManual {
+        if current.keepManualSettings, let kept = current.keptManual {
             manual = kept
             backend.setManual(kept)
+        } else if current.preserveExposure, current.keptExposureBias != 0 {
+            manual.exposureBias = CameraControls.clampedExposureBias(current.keptExposureBias)
+            backend.setManual(manual)
         }
     }
 
@@ -152,11 +161,23 @@ final class CameraModel {
         cancelCountdown()
         if recording { stopRecording() }
         setTorch(false)
-        // Closed: manual values stay only when that is wanted.
-        if settings().keepManualSettings {
+        let current = settings()
+        let bias = manual.exposureBias
+        let currentMode = mode.rawValue
+        // Closed: preserve only what the user asked to keep.
+        if current.keepManualSettings {
             keepManual?(manual.isAutomatic ? nil : manual)
         } else {
             resetManual()
+            if current.preserveExposure {
+                manual.exposureBias = CameraControls.clampedExposureBias(bias)
+                backend.setManual(manual)
+            }
+        }
+        updateSettings? { s in
+            if s.preserveMode { s.keptMode = currentMode }
+            if s.preserveExposure { s.keptExposureBias = bias }
+            s = CameraControls.resetUnpreserved(in: s)
         }
         location.stop()
         backend.stop()
@@ -211,17 +232,26 @@ final class CameraModel {
         let now = Date()
         let settings = settings()
         let place = place(at: now)
+        let raw = settings.captureRAW && backend.state.canRAW
+        let aspectRatio = settings.photoAspectRatio
         shots += 1
         let request = PhotoRequest(
             format: settings.photoFormat, flash: settings.flash, location: place,
             trueNorth: location.compass?.trueNorth ?? false, takenAt: now,
-            live: settings.livePhotos && backend.state.canLive)
+            live: settings.livePhotos && backend.state.canLive && !raw,
+            resolution: settings.photoResolution, raw: raw,
+            prioritizeFaster: settings.prioritizeFasterShooting)
         Task {
-            guard let photo = await backend.takePhoto(request) else {
+            guard var photo = await backend.takePhoto(request) else {
                 problem = "The photo could not be taken."
                 return
             }
             problem = nil
+            if let crop = aspectRatio.crop(forWidth: photo.width, height: photo.height) {
+                var recipe = EditRecipe()
+                recipe.crop = crop
+                photo.edit = recipe
+            }
             let data = photo.data
             if let small = await Task.detached(operation: { Self.small(data) }).value {
                 withAnimation(.snappy(duration: 0.25)) { lastShot = small }

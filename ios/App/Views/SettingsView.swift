@@ -237,32 +237,68 @@ struct UploadSettings: View {
     }
 }
 
-/// How photos and videos are taken.
+/// How photos and videos are taken, structured like Apple's Settings › Camera.
 struct CameraSettings: View {
     @Environment(AppModel.self) private var app
 
     var body: some View {
         Form {
-            Section("Photos") {
-                Picker(selection: app.setting(\.photoFormat)) {
-                    Text("HEIC").tag(AppSettings.PhotoFormat.heic)
-                    Text("JPEG").tag(AppSettings.PhotoFormat.jpeg)
+            Section {
+                NavigationLink {
+                    PreserveCameraSettingsView()
                 } label: {
-                    Explained("Format", "HEIC is half the size at the same quality; JPEG opens everywhere.")
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Preserve Settings")
+                        Text("Choose which camera modes and adjustments stay when you return.")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
                 }
-                Toggle(isOn: app.setting(\.keepManualSettings)) {
-                    Explained(
-                        "Keep manual values",
-                        "Off: ISO, shutter, white balance and focus go back to automatic when the camera closes.")
+                .accessibilityIdentifier("camera-preserve-settings")
+
+                NavigationLink {
+                    TopBarControlsSettingsView()
+                } label: {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Top Bar Controls")
+                        Text("Choose which buttons sit along the top of the camera.")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
                 }
-                Toggle(isOn: app.setting(\.livePhotos)) {
-                    Explained(
-                        "Live Photos", "With 1.5 seconds of video and sound before and after; also on the camera.")
-                }
-                Toggle(isOn: app.setting(\.showGrid)) {
-                    Explained("Grid", "Lines in thirds over the picture, to line it up.")
-                }
+                .accessibilityIdentifier("camera-top-bar-settings")
             }
+
+            Section("Formats") {
+                Picker(selection: app.setting(\.photoFormat)) {
+                    Text("High Efficiency (HEIC)").tag(AppSettings.PhotoFormat.heic)
+                    Text("Most Compatible (JPEG)").tag(AppSettings.PhotoFormat.jpeg)
+                } label: {
+                    Explained("Photo format", "HEIC is half the size at the same quality; JPEG opens everywhere.")
+                }
+                Picker(selection: app.setting(\.photoResolution)) {
+                    ForEach(PhotoResolution.allCases) { res in
+                        Text(res == .mp48 ? "48 MP (HEIF Max)" : res.label).tag(res)
+                    }
+                } label: {
+                    Explained(
+                        "Photo resolution", "Higher resolutions capture more detail on cameras that support them.")
+                }
+                Picker(selection: app.setting(\.photoAspectRatio)) {
+                    ForEach(PhotoAspectRatio.allCases) { ratio in
+                        Text(ratio.label).tag(ratio)
+                    }
+                } label: {
+                    Explained(
+                        "Aspect ratio",
+                        "16:9 and 1:1 are kept non-destructively in Halden; Apple Photos gets the cropped copy.")
+                }
+                Toggle(isOn: app.setting(\.captureRAW)) {
+                    Explained("RAW (Bayer DNG)", "Keep a RAW file alongside the photo when the camera supports it.")
+                }
+                .accessibilityIdentifier("settings-raw")
+            }
+
             Section {
                 Picker(selection: app.setting(\.videoResolution)) {
                     Text("4K").tag(AppSettings.VideoResolution.uhd4K)
@@ -271,13 +307,19 @@ struct CameraSettings: View {
                     Explained("Size", "4K is sharper and about three times as big.")
                 }
                 Picker(selection: app.setting(\.videoFrameRate)) {
-                    Text("60 fps").tag(60)
-                    Text("30 fps").tag(30)
+                    ForEach(CameraControls.videoFrameRates, id: \.self) { rate in
+                        Text(CameraControls.frameRateLabel(rate)).tag(rate)
+                    }
                 } label: {
-                    Explained("Frame rate", "60 frames a second are smoother in motion.")
+                    Explained("Frame rate", "60 fps is smoother in motion; 24 fps is cinematic; 25 fps is PAL.")
                 }
                 Toggle(isOn: app.setting(\.videoHDR)) {
                     Explained("HDR", "Brighter highlights on HDR screens; looks different elsewhere.")
+                }
+                Toggle(isOn: app.setting(\.autoLowLightFPS)) {
+                    Explained(
+                        "Auto FPS in low light",
+                        "Automatically lowers the frame rate in dark scenes for brighter video.")
                 }
                 Picker(selection: app.setting(\.slowMotionRate)) {
                     Text("240 fps").tag(240)
@@ -293,13 +335,142 @@ struct CameraSettings: View {
                 } label: {
                     Explained("Time-lapse", "Automatic: however long it runs, the video is 20 to 40 seconds.")
                 }
+                Toggle(isOn: app.setting(\.allowAudioPlayback)) {
+                    Explained(
+                        "Allow audio playback",
+                        "Let music or podcasts keep playing while recording video.")
+                }
             } header: {
-                Text("Videos")
+                Text("Record Video")
             } footer: {
-                Text("Also on the camera screen: tap the format at the top in video mode.")
+                Text("Also in the camera: tap the format at the top or open the control drawer.")
+            }
+
+            Section("Shooting") {
+                Picker(selection: app.setting(\.defaultFocalLength)) {
+                    ForEach(FocalLength.allCases) { focal in
+                        Text(focal.label).tag(focal)
+                    }
+                } label: {
+                    Explained("Main camera", "Default focal length on the 1× lens (24, 28 or 35 mm).")
+                }
+                Toggle(isOn: app.setting(\.prioritizeFasterShooting)) {
+                    Explained(
+                        "Prioritize faster shooting",
+                        "Adapt image quality slightly so rapid shutter presses never wait.")
+                }
+                Toggle(isOn: app.setting(\.livePhotos)) {
+                    Explained(
+                        "Live Photos", "With 1.5 seconds of video and sound before and after; also on the camera.")
+                }
+                Toggle(isOn: app.setting(\.volumeUpForBurst)) {
+                    Explained("Volume Up for burst", "Hold Volume Up in photo mode to shoot a burst.")
+                }
+            }
+
+            Section("Composition") {
+                Toggle(isOn: app.setting(\.showGrid)) {
+                    Explained("Grid", "Lines in thirds over the picture, to line it up.")
+                }
+                Toggle(isOn: app.setting(\.showLevel)) {
+                    Explained("Level", "Horizon line and overhead crosshairs when the iPhone is slightly tilted.")
+                }
+                Toggle(isOn: app.setting(\.mirrorFrontCamera)) {
+                    Explained("Mirror front camera", "Save selfies the same way they look in the preview.")
+                }
+                Toggle(isOn: app.setting(\.lensCorrection)) {
+                    Explained("Lens correction", "Straighten optical distortion on ultra-wide and front lenses.")
+                }
             }
         }
         .navigationTitle("Camera")
+    }
+}
+
+/// Which camera modes and adjustments stay when you close and reopen the camera.
+struct PreserveCameraSettingsView: View {
+    @Environment(AppModel.self) private var app
+
+    var body: some View {
+        Form {
+            Section {
+                Toggle(isOn: app.setting(\.preserveMode)) {
+                    Explained("Camera mode", "Remember the last mode (such as Video) instead of resetting to Photo.")
+                }
+                .accessibilityIdentifier("preserve-mode")
+                Toggle(isOn: app.setting(\.preserveExposure)) {
+                    Explained("Exposure adjustment", "Keep the EV offset instead of resetting to 0.")
+                }
+                .accessibilityIdentifier("preserve-exposure")
+                Toggle(isOn: app.setting(\.preserveLivePhoto)) {
+                    Explained("Live Photo", "Remember whether Live Photo is off instead of turning it back on.")
+                }
+                .accessibilityIdentifier("preserve-live")
+                Toggle(isOn: app.setting(\.preserveResolution)) {
+                    Explained("Resolution & RAW", "Keep 48 MP and RAW choices between sessions.")
+                }
+                .accessibilityIdentifier("preserve-resolution")
+                Toggle(isOn: app.setting(\.keepManualSettings)) {
+                    Explained(
+                        "Manual values",
+                        "Off: ISO, shutter, white balance and focus go back to automatic when the camera closes.")
+                }
+                .accessibilityIdentifier("preserve-manual")
+            } footer: {
+                Text(
+                    "Additional options for styles, night mode, portrait zoom and action mode follow as they are added."
+                )
+            }
+        }
+        .navigationTitle("Preserve Settings")
+    }
+}
+
+/// Choose up to four controls pinned to the camera's top bar.
+struct TopBarControlsSettingsView: View {
+    @Environment(AppModel.self) private var app
+
+    var body: some View {
+        Form {
+            Section {
+                ForEach(TopBarControl.allCases) { control in
+                    let selected = app.settings.topBarControls.contains(control)
+                    let atLimit = app.settings.topBarControls.count >= CameraControls.maxTopBarControls && !selected
+                    Toggle(
+                        isOn: Binding(
+                            get: { selected },
+                            set: { on in
+                                app.update { settings in
+                                    var list = CameraControls.sanitizedTopBar(settings.topBarControls)
+                                    if on {
+                                        if !list.contains(control), list.count < CameraControls.maxTopBarControls {
+                                            list.append(control)
+                                        }
+                                    } else if list.count > 1 {
+                                        list.removeAll { $0 == control }
+                                    }
+                                    settings.topBarControls = list
+                                }
+                            })
+                    ) {
+                        Label(control.title, systemImage: control.symbol)
+                    }
+                    .disabled(atLimit || (selected && app.settings.topBarControls.count <= 1))
+                    .accessibilityIdentifier("topbar-\(control.rawValue)")
+                }
+            } footer: {
+                Text(
+                    "Up to \(CameraControls.maxTopBarControls) controls sit in the top bar; every control stays reachable in the camera's expandable drawer."
+                )
+            }
+            Section {
+                Button("Reset to default") {
+                    app.update { $0.topBarControls = CameraControls.defaultTopBarControls }
+                }
+                .accessibilityIdentifier("topbar-reset")
+            }
+        }
+        .navigationTitle("Top Bar Controls")
     }
 }
 
