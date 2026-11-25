@@ -519,6 +519,43 @@ final class HaldenUITests: XCTestCase {
         XCTAssertTrue(app.switches["preserve-action"].waitForExistence(timeout: 5))
     }
 
+    /// Panorama mode: reverse sweep direction by tapping the arrow, toggle vertical orientation,
+    /// and start/stop a panorama capture that stitches cleanly into a photo.
+    @MainActor
+    func testPanoramaModeDirectionOrientationAndCapture() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-ui-testing-signed-in", "-ui-testing-library", "5"]
+        app.launch()
+        XCTAssertTrue(app.buttons["shutter"].waitForExistence(timeout: 30))
+
+        // Navigate photo -> portrait -> panorama.
+        app.buttons["mode-portrait"].tap()
+        XCTAssertTrue(app.buttons["mode-panorama"].waitForExistence(timeout: 5))
+        app.buttons["mode-panorama"].tap()
+        XCTAssertTrue(app.buttons["Start panorama"].waitForExistence(timeout: 5))
+
+        // Tap arrow to reverse horizontal direction (Sweep right -> Sweep left).
+        let arrow = app.buttons["panorama-direction"]
+        XCTAssertTrue(arrow.waitForExistence(timeout: 5))
+        XCTAssertTrue(arrow.label.contains("Sweep right"), arrow.label)
+        arrow.tap()
+        XCTAssertTrue(arrow.label.contains("Sweep left"), arrow.label)
+
+        // Toggle orientation to vertical (Sweep down) and reverse (Sweep up).
+        let orient = app.buttons["panorama-orientation"]
+        XCTAssertTrue(orient.waitForExistence(timeout: 5))
+        orient.tap()
+        XCTAssertTrue(arrow.label.contains("Sweep down"), arrow.label)
+        arrow.tap()
+        XCTAssertTrue(arrow.label.contains("Sweep up"), arrow.label)
+
+        // Start and stop panorama sweep: stitches cleanly and returns shutter to ready.
+        app.buttons["shutter"].tap()
+        XCTAssertTrue(app.buttons["Stop panorama"].waitForExistence(timeout: 5))
+        app.buttons["shutter"].tap()
+        XCTAssertTrue(app.buttons["Start panorama"].waitForExistence(timeout: 15))
+    }
+
     /// Fifty thousand photos scroll without waiting for pictures.
     @MainActor
     func testTheGridScrollsThroughFiftyThousandPhotos() {
@@ -676,6 +713,11 @@ final class HaldenUITests: XCTestCase {
         let shutter = app.buttons["shutter"]
         XCTAssertTrue(shutter.waitForExistence(timeout: 10))
 
+        // Step cleanly across the mode strip (photo -> video -> cinematic -> slowMotion) so each tap is centered on screen.
+        app.buttons["mode-video"].tap()
+        XCTAssertTrue(app.buttons["Record a video"].waitForExistence(timeout: 5))
+        app.buttons["mode-cinematic"].tap()
+        XCTAssertTrue(app.buttons["Record cinematic video"].waitForExistence(timeout: 5))
         app.buttons["mode-slowMotion"].tap()
         XCTAssertTrue(app.buttons["Record slow motion"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.buttons["video-format"].label.hasSuffix("240 fps"), app.buttons["video-format"].label)

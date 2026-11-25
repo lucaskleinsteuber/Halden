@@ -53,7 +53,19 @@ final class LayoutTests: XCTestCase {
         settle()
         shot("camera-controls-photo")
         let drawer = app.descendants(matching: .any)["camera-drawer"]
-        let screenWidth = app.windows.firstMatch.frame.width
+        let window = app.windows.firstMatch
+        let screenWidth = window.frame.width
+        func scrollDrawerTo(_ chip: XCUIElement) {
+            for _ in 0..<6 where chip.frame.maxX > screenWidth - 8 || chip.frame.minX < 8 {
+                let chipY = drawer.frame.maxY - 24
+                let origin = window.coordinate(withNormalizedOffset: .zero)
+                let from = origin.withOffset(
+                    CGVector(dx: chip.frame.minX < 8 ? screenWidth * 0.2 : screenWidth * 0.85, dy: chipY))
+                let to = origin.withOffset(
+                    CGVector(dx: chip.frame.minX < 8 ? screenWidth * 0.85 : screenWidth * 0.2, dy: chipY))
+                from.press(forDuration: 0.02, thenDragTo: to)
+            }
+        }
         for (id, screen) in [
             ("drawer-night", "camera-controls-night"),
             ("drawer-style", "camera-controls-style"),
@@ -61,13 +73,7 @@ final class LayoutTests: XCTestCase {
             ("drawer-exposure", "camera-controls-exposure"),
         ] {
             let chip = app.buttons[id]
-            for _ in 0..<4 where chip.frame.maxX > screenWidth - 8 || chip.frame.minX < 0 {
-                let from = drawer.coordinate(
-                    withNormalizedOffset: CGVector(dx: chip.frame.minX < 0 ? 0.2 : 0.85, dy: 0.9))
-                let to = drawer.coordinate(
-                    withNormalizedOffset: CGVector(dx: chip.frame.minX < 0 ? 0.85 : 0.2, dy: 0.9))
-                from.press(forDuration: 0.02, thenDragTo: to)
-            }
+            scrollDrawerTo(chip)
             chip.tap()
             settle()
             shot(screen)
@@ -85,6 +91,11 @@ final class LayoutTests: XCTestCase {
         shot("camera-controls-portrait")
         app.buttons["camera-controls-toggle"].tap()
         settle()
+        app.buttons["mode-panorama"].tap()
+        settle(1.0)
+        shot("camera-panorama")
+        app.buttons["mode-portrait"].tap()
+        settle(0.6)
         app.buttons["mode-photo"].tap()
         settle()
         for mode in ["video", "cinematic", "slowMotion", "timeLapse"] {
@@ -96,13 +107,7 @@ final class LayoutTests: XCTestCase {
                 settle()
                 shot("camera-controls-video")
                 let scopesChip = app.buttons["drawer-scopes"]
-                for _ in 0..<5 where scopesChip.frame.maxX > screenWidth - 8 || scopesChip.frame.minX < 0 {
-                    let from = drawer.coordinate(
-                        withNormalizedOffset: CGVector(dx: scopesChip.frame.minX < 0 ? 0.2 : 0.85, dy: 0.9))
-                    let to = drawer.coordinate(
-                        withNormalizedOffset: CGVector(dx: scopesChip.frame.minX < 0 ? 0.85 : 0.2, dy: 0.9))
-                    from.press(forDuration: 0.02, thenDragTo: to)
-                }
+                scrollDrawerTo(scopesChip)
                 scopesChip.tap()
                 settle(0.4)
                 app.buttons["drawer-scope-histogram"].tap()

@@ -13,6 +13,10 @@ final class MotionTracker {
     private(set) var reading: LevelReading = .hidden
     private(set) var isOnTripod = ProcessInfo.processInfo.arguments.contains("-ui-testing-tripod")
     private(set) var holdStillOffset: CGPoint = .zero
+    private(set) var panoramaProgress = 0.0
+    private(set) var panoramaOffAxis = 0.0
+    private(set) var panoramaHint: PanoramaHint?
+    private(set) var panoramaCompleted = false
     var showLevel = false {
         didSet {
             if !showLevel {
@@ -26,6 +30,9 @@ final class MotionTracker {
     @ObservationIgnored private let manager = CMMotionManager()
     @ObservationIgnored private var visibility = LevelVisibility()
     @ObservationIgnored private var tripod = TripodDetector()
+    @ObservationIgnored private var panoramaGuide = PanoramaGuide()
+    @ObservationIgnored private var panoramaDirection: PanoramaDirection?
+    @ObservationIgnored private var lastMotionTime: Double?
     @ObservationIgnored private var lastGravity = (x: 0.0, y: -1.0)
     @ObservationIgnored private var holdAnchor: (x: Double, y: Double)?
     @ObservationIgnored private var running = false
@@ -38,6 +45,23 @@ final class MotionTracker {
     func clearHoldStill() {
         holdAnchor = nil
         holdStillOffset = .zero
+    }
+
+    func startPanorama(direction: PanoramaDirection) {
+        panoramaGuide.reset()
+        panoramaDirection = direction
+        panoramaProgress = 0
+        panoramaOffAxis = 0
+        panoramaHint = nil
+        panoramaCompleted = false
+    }
+
+    func stopPanorama() {
+        panoramaDirection = nil
+        panoramaProgress = 0
+        panoramaOffAxis = 0
+        panoramaHint = nil
+        panoramaCompleted = false
     }
 
     func start() {
@@ -79,6 +103,16 @@ final class MotionTracker {
                         gravityX: g.x, gravityY: g.y, anchorX: anchor.x, anchorY: anchor.y)
                     self.holdStillOffset = CGPoint(x: drift.dx, y: drift.dy)
                 }
+                if let dir = self.panoramaDirection {
+                    let dt = self.lastMotionTime.map { min(max(now - $0, 0), 0.2) } ?? (1.0 / 30.0)
+                    let pano = self.panoramaGuide.update(
+                        rotationX: rot.x, rotationY: rot.y, rotationZ: rot.z, dt: dt, direction: dir)
+                    self.panoramaProgress = pano.progress
+                    self.panoramaOffAxis = pano.offAxisNormalized
+                    self.panoramaHint = pano.hint
+                    self.panoramaCompleted = pano.completed
+                }
+                self.lastMotionTime = now
             }
         }
     }

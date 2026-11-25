@@ -10,6 +10,13 @@ part of the first versions.
 
 ### Added
 
+- Panorama mode (`Panorama`, `PanoramaGuide`, `PanoramaStitcher`, `PanoramaOverlay`):
+  - New **Pano** camera mode for horizontal and vertical panoramas with tappable direction arrow
+    reversal, orientation toggle, yellow guide line, and CoreMotion "Move slower." / "Keep arrow
+    on the line." hints.
+  - Captures frames from the video output with exposure and white balance locked on start, aligns
+    with Vision translational registration and gyro hints, feather-blends overlapping strips, and
+    encodes the finished panorama as HEIC.
 - Cinematic Video, Action Mode, video audio controls and Live Histogram/Waveform (`VideoPro`,
   `LiveScopesOverlay`, `CinematicEditorView`):
   - New **Cinematic** video mode using iOS 26 `isCinematicVideoCaptureEnabled`, simulated aperture

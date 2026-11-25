@@ -80,6 +80,16 @@ struct CameraScreen<Gallery: View>: View {
         .onChange(of: camera.isNightCapturing) { _, active in
             if active { motion.anchorHoldStill() } else { motion.clearHoldStill() }
         }
+        .onChange(of: camera.isPanoramaCapturing) { _, active in
+            if active {
+                motion.startPanorama(direction: camera.panoramaDirection)
+            } else {
+                motion.stopPanorama()
+            }
+        }
+        .onChange(of: motion.panoramaCompleted) { _, done in
+            if done && camera.isPanoramaCapturing { camera.stopPanorama() }
+        }
         .onChange(of: state.lensSmudged) { _, smudged in if !smudged { smudgeDismissed = false } }
         .onChange(of: state.side) { _, _ in smudgeDismissed = false }
         .onChange(of: camera.shots) {
@@ -177,7 +187,18 @@ struct CameraScreen<Gallery: View>: View {
         }
         .overlay {
             if state.ready {
-                if camera.isNightCapturing {
+                if camera.mode == .panorama {
+                    PanoramaOverlay(
+                        direction: camera.panoramaDirection,
+                        capturing: camera.isPanoramaCapturing,
+                        stitching: camera.panoramaStitching,
+                        progress: motion.panoramaProgress,
+                        offAxis: motion.panoramaOffAxis,
+                        hint: motion.panoramaHint,
+                        onReverse: { camera.reversePanoramaDirection() },
+                        onToggleOrientation: { camera.togglePanoramaOrientation() }
+                    )
+                } else if camera.isNightCapturing {
                     NightHoldStillOverlay(
                         offset: motion.holdStillOffset, secondsLeft: camera.nightCaptureSecondsLeft)
                 } else if settings.showLevel {
@@ -346,7 +367,7 @@ struct CameraScreen<Gallery: View>: View {
                 }
                 zoomControl.frame(height: 56)
             }
-            if camera.recording || camera.burstCount > 0 {
+            if camera.recording || camera.burstCount > 0 || camera.isPanoramaCapturing {
                 Color.clear.frame(height: Self.modeHeight)
             } else {
                 modeStrip
@@ -695,6 +716,8 @@ struct CameraScreen<Gallery: View>: View {
                     .contentShape(.rect)
             }
             .accessibilityIdentifier("video-format")
+        } else if camera.mode == .panorama {
+            Color.clear
         } else {
             drawerToggleButton
         }
@@ -920,6 +943,11 @@ struct CameraScreen<Gallery: View>: View {
                     Image(systemName: "moon.stars.fill")
                         .font(.title3.bold())
                         .foregroundStyle(.yellow)
+                } else if camera.panoramaStitching {
+                    Circle().fill(.white.opacity(0.22)).frame(width: 64, height: 64)
+                    ProgressView().tint(.yellow)
+                } else if camera.isPanoramaCapturing {
+                    RoundedRectangle(cornerRadius: 6).fill(.white).frame(width: 30, height: 30)
                 } else if camera.burstCount > 0 {
                     Circle().fill(.yellow).frame(width: 64, height: 64)
                     Text("\(camera.burstCount)")
@@ -940,7 +968,9 @@ struct CameraScreen<Gallery: View>: View {
         .accessibilityLabel(
             camera.countdown != nil
                 ? "Stop the self-timer"
-                : camera.recording ? "Stop recording" : camera.mode.shutterLabel
+                : camera.isPanoramaCapturing
+                    ? "Stop panorama"
+                    : camera.recording ? "Stop recording" : camera.mode.shutterLabel
         )
         .accessibilityIdentifier("shutter")
     }
@@ -1041,12 +1071,13 @@ extension CameraScreen where Gallery == EmptyView {
 
 extension CameraMode {
     /// The order on the screen, as in Apple's camera (`video` stays immediately left of `photo`).
-    static let strip: [CameraMode] = [.timeLapse, .slowMotion, .cinematic, .video, .photo, .portrait]
+    static let strip: [CameraMode] = [.timeLapse, .slowMotion, .cinematic, .video, .photo, .portrait, .panorama]
 
     var title: String {
         switch self {
         case .photo: "Photo"
         case .portrait: "Portrait"
+        case .panorama: "Pano"
         case .video: "Video"
         case .cinematic: "Cinematic"
         case .slowMotion: "Slo-mo"
@@ -1058,6 +1089,7 @@ extension CameraMode {
         switch self {
         case .photo: "Take a photo"
         case .portrait: "Take a portrait"
+        case .panorama: "Start panorama"
         case .video: "Record a video"
         case .cinematic: "Record cinematic video"
         case .slowMotion: "Record slow motion"

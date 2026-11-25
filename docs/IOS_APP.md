@@ -75,6 +75,18 @@ the design comes after that. What works today is described below.
   (`isGeometricDistortionCorrectionEnabled`), hardware lens-smudge detection hints
   (`cameraLensSmudgeDetectionStatus`, dismissible banner), and optional camera-lens
   (`primaryConstituentDeviceSwitchingBehavior`) and white-balance locks while recording video.
+- **Panorama** (`Panorama`, `PanoramaGuide`, `PanoramaStitcher`, `PanoramaOverlay`):
+  - Dedicated **Pano** camera mode supporting horizontal (`leftToRight` / `rightToLeft`) and
+    vertical (`bottomToTop` / `topToBottom`) sweeps. Tap the arrow on the guide strip to reverse
+    direction, or tap the orientation pill to switch between Horizontal and Vertical.
+  - CoreMotion guidance (`PanoramaGuide`) tracks sweep progress and off-axis tilt, displaying
+    "Move slower." when panning too quickly and "Keep arrow on the line." when drifting off the
+    yellow guide line.
+  - Captures frames from the video output (`AVCaptureVideoDataOutput`) with exposure and white
+    balance locked for uniform brightness/colour across the sweep, aligns consecutive frames with
+    Vision translational registration (`VNTranslationalImageRegistrationRequest`) and gyroscope
+    priors, blends overlapping strips with smooth linear alpha feathering, crops minor wiggle edges,
+    and saves the finished panorama as HEIC.
 - **Cinematic Video, Action Mode, Audio & Live Scopes** (`VideoPro`, `LiveScopesOverlay`,
   `CinematicEditorView`):
   - **Cinematic Video**: dedicated **Cinematic** mode using iOS 26

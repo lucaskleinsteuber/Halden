@@ -209,6 +209,19 @@ final class DeviceCamera: CaptureBackend {
         return url
     }
 
+    func startPanorama(direction: PanoramaDirection) -> Bool {
+        guard state.ready else { return false }
+        let angle = captureAngle
+        core.run { $0.startPanorama(direction: direction, angle: angle) }
+        return true
+    }
+
+    func stopPanorama(request: PhotoRequest) async -> TakenPhoto? {
+        await withCheckedContinuation { continuation in
+            core.run { $0.stopPanorama(request: request) { continuation.resume(returning: $0) } }
+        }
+    }
+
     /// A time-lapse whose first stretches were taken more often: played faster, so the whole
     /// video runs at one speed (written anew, with the same place and time).
     private static func evenOut(_ url: URL, _ plan: TimeLapsePlan) async -> URL? {
@@ -329,6 +342,9 @@ final class CaptureCore: NSObject, @unchecked Sendable {
     private let subjectRelay = SubjectMetadataRelay()
     private let timeLapse = TimeLapseRecorder()
     private var timeLapsing = false
+    private let panoramaCollector = PanoramaCollector()
+    private var panoramaCapturing = false
+    private var lockedForPanorama = false
     /// Values set by hand, applied to every camera and mode.
     private var manual = ManualSettings()
     private var input: AVCaptureDeviceInput?
@@ -468,6 +484,11 @@ final class CaptureCore: NSObject, @unchecked Sendable {
             timeLapsing = false
             timeLapse.finish { _, _ in }
         }
+        if panoramaCapturing {
+            panoramaCapturing = false
+            panoramaCollector.cancel()
+            unlockAfterPanorama()
+        }
         unlockAfterRecording()
         if session.isRunning { session.stopRunning() }
     }
@@ -495,7 +516,7 @@ final class CaptureCore: NSObject, @unchecked Sendable {
     }
 
     private var wantsScopes: Bool {
-        mode != .timeLapse && (video?.showHistogram == true || video?.showWaveform == true)
+        mode != .timeLapse && mode != .panorama && (video?.showHistogram == true || video?.showWaveform == true)
     }
 
     private var needsMetalPreview: Bool {
@@ -665,7 +686,25 @@ final class CaptureCore: NSObject, @unchecked Sendable {
                         (mode == .video && video?.actionMode == true) ? .cinematicExtendedEnhanced : .auto
                 }
             }
+        case .panorama:
+            photoOutput.isLivePhotoCaptureEnabled = false
+            frameOutput.setSampleBufferDelegate(panoramaCollector, queue: panoramaCollector.queue)
+            use([frameOutput])
+            if let audioInput {
+                session.removeInput(audioInput)
+                self.audioInput = nil
+            }
+            applyVideoFormat(sizes: [(1920, 1080)], rate: 30, hdr: false, autoLowLightFPS: false, on: device)
+            state.videoFormat = nil
+            if let connection = frameOutput.connection(with: .video) {
+                if connection.isVideoRotationAngleSupported(90) { connection.videoRotationAngle = 90 }
+                applyMirroring(on: connection, mirror: side == .front)
+                if connection.isVideoStabilizationSupported {
+                    connection.preferredVideoStabilizationMode = .auto
+                }
+            }
         case .timeLapse:
+            frameOutput.setSampleBufferDelegate(timeLapse, queue: timeLapse.queue)
             use([frameOutput])
             if let audioInput {
                 session.removeInput(audioInput)
@@ -1264,6 +1303,119 @@ final class CaptureCore: NSObject, @unchecked Sendable {
             done(url, nil)
         }
         if movieOutput.isRecording { movieOutput.stopRecording() }
+    }
+
+    func startPanorama(direction: PanoramaDirection, angle: CGFloat) {
+        guard mode == .panorama, session.isRunning, !panoramaCapturing,
+            let connection = frameOutput.connection(with: .video)
+        else { return }
+        if connection.isVideoRotationAngleSupported(angle) { connection.videoRotationAngle = angle }
+        applyMirroring(on: connection, mirror: video?.mirrorFrontCamera == true)
+        if let device { lockForPanorama(on: device) }
+        panoramaCapturing = true
+        panoramaCollector.begin(direction: direction)
+    }
+
+    func stopPanorama(request: PhotoRequest, done: @escaping @Sendable (TakenPhoto?) -> Void) {
+        unlockAfterPanorama()
+        guard panoramaCapturing else { return done(nil) }
+        panoramaCapturing = false
+        let preferHEIC = request.format == .heic
+        panoramaCollector.finish { frames, direction in
+            DispatchQueue.global(qos: .userInitiated).async {
+                let images = frames.map { CIImage(cgImage: $0) }
+                guard
+                    let stitched = PanoramaStitcher.stitch(
+                        frames: images, direction: direction, preferHEIC: preferHEIC)
+                else {
+                    done(nil)
+                    return
+                }
+                done(
+                    TakenPhoto(
+                        data: stitched.data, heic: stitched.heic, width: stitched.width, height: stitched.height))
+            }
+        }
+    }
+
+    /// Locks exposure and white balance when a panorama sweep starts so brightness and colour
+    /// stay uniform across the stitched frames.
+    private func lockForPanorama(on device: AVCaptureDevice) {
+        guard (try? device.lockForConfiguration()) != nil else { return }
+        defer { device.unlockForConfiguration() }
+        if device.isExposureModeSupported(.locked) { device.exposureMode = .locked }
+        if device.isWhiteBalanceModeSupported(.locked) {
+            var gains = device.deviceWhiteBalanceGains
+            let most = device.maxWhiteBalanceGain
+            gains.redGain = min(max(gains.redGain, 1), most)
+            gains.greenGain = min(max(gains.greenGain, 1), most)
+            gains.blueGain = min(max(gains.blueGain, 1), most)
+            device.setWhiteBalanceModeLocked(with: gains)
+        }
+        lockedForPanorama = true
+    }
+
+    private func unlockAfterPanorama() {
+        guard lockedForPanorama else { return }
+        lockedForPanorama = false
+        guard let device, (try? device.lockForConfiguration()) != nil else { return }
+        defer { device.unlockForConfiguration() }
+        if !manual.exposureIsManual, device.isExposureModeSupported(.continuousAutoExposure) {
+            device.exposureMode = .continuousAutoExposure
+        }
+        if manual.whiteBalance == nil, device.isWhiteBalanceModeSupported(.continuousAutoWhiteBalance) {
+            device.whiteBalanceMode = .continuousAutoWhiteBalance
+        }
+    }
+}
+
+/// Collects video-output frames during a Panorama sweep on a serial queue, keeping up to 24
+/// well-spaced `CGImage` frames so pixel-buffer pools stay free.
+final class PanoramaCollector: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate, @unchecked Sendable {
+    let queue = DispatchQueue(label: "halden.panorama", qos: .userInitiated)
+    private let ciContext = CIContext(options: [.cacheIntermediates: false])
+    private var active = false
+    private var direction = PanoramaDirection.leftToRight
+    private var frames: [CGImage] = []
+    private var lastCaptureTime: Double = 0
+
+    func begin(direction: PanoramaDirection) {
+        queue.async {
+            self.direction = direction
+            self.frames = []
+            self.lastCaptureTime = 0
+            self.active = true
+        }
+    }
+
+    func cancel() {
+        queue.async {
+            self.active = false
+            self.frames = []
+        }
+    }
+
+    func finish(_ done: @escaping @Sendable ([CGImage], PanoramaDirection) -> Void) {
+        queue.async {
+            self.active = false
+            let collected = self.frames
+            let dir = self.direction
+            self.frames = []
+            done(collected, dir)
+        }
+    }
+
+    func captureOutput(
+        _ output: AVCaptureOutput, didOutput sampleBuffer: CMSampleBuffer, from connection: AVCaptureConnection
+    ) {
+        guard active, frames.count < 24, let buffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
+        let now = ProcessInfo.processInfo.systemUptime
+        guard now - lastCaptureTime >= 0.16 else { return }
+        lastCaptureTime = now
+        let ci = CIImage(cvPixelBuffer: buffer)
+        if let cg = ciContext.createCGImage(ci, from: ci.extent) {
+            frames.append(cg)
+        }
     }
 }
 

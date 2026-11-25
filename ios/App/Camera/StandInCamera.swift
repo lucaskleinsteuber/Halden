@@ -32,6 +32,7 @@ final class StandInCamera: CaptureBackend {
     @ObservationIgnored private var paused = false
     @ObservationIgnored private var quickTaking = false
     @ObservationIgnored private var mode = CameraMode.photo
+    @ObservationIgnored private var panoramaDirection: PanoramaDirection?
     @ObservationIgnored private var gliding: Task<Void, Never>?
 
     func prepare(mode: CameraMode, options video: CaptureOptions) {
@@ -75,7 +76,7 @@ final class StandInCamera: CaptureBackend {
         let autoSuffix = video.autoLowLightFPS ? " · Auto" : ""
         state.videoFormat =
             switch mode {
-            case .photo, .portrait: nil
+            case .photo, .portrait, .panorama: nil
             case .video:
                 "\(video.resolution == .uhd4K ? "4K" : "1080p") · \(fpsText)\(hdrSuffix)\(autoSuffix)\(video.actionMode ? " · Action" : "")"
             case .cinematic: "Cinematic · \(CinematicRules.formatAperture(video.cinematicAperture))"
@@ -215,6 +216,72 @@ final class StandInCamera: CaptureBackend {
         } catch {
             return nil
         }
+    }
+
+    func startPanorama(direction: PanoramaDirection) -> Bool {
+        guard mode == .panorama, panoramaDirection == nil else { return false }
+        panoramaDirection = direction
+        return true
+    }
+
+    func stopPanorama(request: PhotoRequest) async -> TakenPhoto? {
+        guard let direction = panoramaDirection else { return nil }
+        panoramaDirection = nil
+        let preferHEIC = request.format == .heic
+        return await Task.detached(priority: .userInitiated) {
+            let sceneW = direction.isVertical ? 320 : 960
+            let sceneH = direction.isVertical ? 960 : 320
+            var bytes = [UInt8](repeating: 255, count: sceneW * sceneH * 4)
+            var rng: UInt64 = 0x517C_C1B7_2722_0A95
+            for y in 0..<sceneH {
+                for x in 0..<sceneW {
+                    let idx = (y * sceneW + x) * 4
+                    bytes[idx] = UInt8(60 + (x * 110) / sceneW)
+                    bytes[idx + 1] = UInt8(85 + (y * 90) / sceneH)
+                    bytes[idx + 2] = UInt8(140 - (x * 40) / sceneW)
+                }
+            }
+            for _ in 0..<70 {
+                rng = rng &* 6_364_136_223_846_793_005 &+ 1_442_695_040_888_963_407
+                let rw = 16 + Int((rng >> 32) % 36)
+                let rh = 16 + Int((rng >> 40) % 36)
+                rng = rng &* 6_364_136_223_846_793_005 &+ 1_442_695_040_888_963_407
+                let rx = Int((rng >> 32) % UInt64(max(1, sceneW - rw)))
+                let ry = Int((rng >> 40) % UInt64(max(1, sceneH - rh)))
+                let r = UInt8(40 + (rng >> 16) % 200)
+                let g = UInt8(40 + (rng >> 24) % 200)
+                let b = UInt8(40 + (rng >> 8) % 200)
+                for y in ry..<(ry + rh) {
+                    for x in rx..<(rx + rw) {
+                        let idx = (y * sceneW + x) * 4
+                        bytes[idx] = r
+                        bytes[idx + 1] = g
+                        bytes[idx + 2] = b
+                    }
+                }
+            }
+            let scene = CIImage(
+                bitmapData: Data(bytes), bytesPerRow: sceneW * 4,
+                size: CGSize(width: sceneW, height: sceneH), format: .RGBA8,
+                colorSpace: CGColorSpaceCreateDeviceRGB())
+            var tiles: [CIImage] = []
+            for i in 0..<4 {
+                if direction.isVertical {
+                    let y = i * 160
+                    tiles.append(scene.cropped(to: CGRect(x: 0, y: y, width: 320, height: 420)))
+                } else {
+                    let x = i * 160
+                    tiles.append(scene.cropped(to: CGRect(x: x, y: 0, width: 420, height: 320)))
+                }
+            }
+            let ordered = (direction == .rightToLeft || direction == .topToBottom) ? Array(tiles.reversed()) : tiles
+            guard
+                let stitched = PanoramaStitcher.stitch(
+                    frames: ordered, direction: direction, preferHEIC: preferHEIC)
+            else { return nil }
+            return TakenPhoto(
+                data: stitched.data, heic: stitched.heic, width: stitched.width, height: stitched.height)
+        }.value
     }
 }
 

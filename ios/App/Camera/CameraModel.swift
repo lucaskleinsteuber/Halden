@@ -32,6 +32,12 @@ final class CameraModel {
     private(set) var nightCaptureProgress: Double?
     /// Remaining estimated seconds during a Night Mode capture.
     private(set) var nightCaptureSecondsLeft: Int?
+    /// Current Panorama sweep direction (horizontal / vertical, reversible).
+    var panoramaDirection = PanoramaDirection.leftToRight
+    /// True while sweeping a Panorama capture.
+    private(set) var isPanoramaCapturing = false
+    /// True while stitching collected Panorama frames into HEIC.
+    private(set) var panoramaStitching = false
     private(set) var torch = false
     private(set) var problem: String?
     /// Goes up with every photo taken, for the flash on the screen.
@@ -208,6 +214,7 @@ final class CameraModel {
     func disappear() {
         cancelCountdown()
         stopBurst()
+        if isPanoramaCapturing { stopPanorama() }
         if recording { stopRecording() }
         setTorch(false)
         let current = settings()
@@ -233,7 +240,7 @@ final class CameraModel {
     }
 
     func switchTo(_ mode: CameraMode) {
-        guard mode != self.mode, !recording else { return }
+        guard mode != self.mode, !recording, !isPanoramaCapturing, !panoramaStitching else { return }
         cancelCountdown()
         setTorch(false)
         self.mode = mode
@@ -248,16 +255,69 @@ final class CameraModel {
         backend.setTorch(on)
     }
 
-    /// The big button: a photo (after the self-timer), or start and stop a video.
+    /// The big button: a photo (after the self-timer), panorama start/stop, or start and stop a video.
     func shutter() {
-        if isNightCapturing { return }
+        if isNightCapturing || panoramaStitching { return }
         if countdown != nil { return cancelCountdown() }
         if burstTask != nil { return stopBurst() }
+        if isPanoramaCapturing { return stopPanorama() }
         if recording { return stopRecording() }
+        if mode == .panorama { return startPanorama() }
         let action: () -> Void =
             mode.records ? { [weak self] in self?.startRecording() } : { [weak self] in self?.takePhoto() }
         guard timer > 0 else { return action() }
         runCountdown(seconds: timer, then: action)
+    }
+
+    func reversePanoramaDirection() {
+        guard !isPanoramaCapturing, !panoramaStitching else { return }
+        panoramaDirection = panoramaDirection.reversed
+    }
+
+    func togglePanoramaOrientation() {
+        guard !isPanoramaCapturing, !panoramaStitching else { return }
+        panoramaDirection = panoramaDirection.toggledOrientation
+    }
+
+    private func startPanorama() {
+        guard mode == .panorama, !isPanoramaCapturing, !panoramaStitching else { return }
+        guard backend.startPanorama(direction: panoramaDirection) else {
+            problem = "Panorama could not be started."
+            return
+        }
+        problem = nil
+        isPanoramaCapturing = true
+    }
+
+    func stopPanorama() {
+        guard isPanoramaCapturing else { return }
+        isPanoramaCapturing = false
+        panoramaStitching = true
+        let now = Date()
+        let currentSettings = settings()
+        let place = place(at: now)
+        let request = PhotoRequest(
+            format: currentSettings.photoFormat, flash: .off, location: place,
+            trueNorth: location.compass?.trueNorth ?? false, takenAt: now,
+            live: false, resolution: .mp12, raw: false, prioritizeFaster: true,
+            mirrorFrontCamera: currentSettings.mirrorFrontCamera)
+        Task {
+            defer { panoramaStitching = false }
+            guard let photo = await backend.stopPanorama(request: request) else {
+                problem = "Panorama could not be stitched."
+                return
+            }
+            shots += 1
+            problem = nil
+            let data = photo.data
+            if let small = await Task.detached(operation: { Self.small(data) }).value {
+                withAnimation(.snappy(duration: 0.25)) { lastShot = small }
+            }
+            var metadata = Self.metadata(at: now, place: place)
+            metadata.width = photo.width
+            metadata.height = photo.height
+            keepPhoto?(photo, metadata)
+        }
     }
 
     /// Triggered by Siri / Shortcuts App Intents: switches mode and camera side if needed, then

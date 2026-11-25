@@ -3,9 +3,9 @@ import HaldenKit
 import UIKit
 
 enum CameraMode: String, CaseIterable, Sendable {
-    case photo, portrait, video, cinematic, slowMotion, timeLapse
+    case photo, portrait, panorama, video, cinematic, slowMotion, timeLapse
 
-    /// Everything except still modes (photo, portrait) is recorded with start/stop.
+    /// Everything except still/panorama modes is recorded as video with start/stop.
     var records: Bool { self == .video || self == .cinematic || self == .slowMotion || self == .timeLapse }
 
     /// Still-photo capture modes (4:3 / 1:1 / 16:9 viewfinder).
@@ -213,4 +213,8 @@ protocol CaptureBackend: AnyObject {
     func resumeRecording()
     /// The finished video file, or `nil` when nothing usable was recorded.
     func stopRecording() async -> URL?
+    /// Starts collecting frames for a Panorama (locks exposure and white balance).
+    func startPanorama(direction: PanoramaDirection) -> Bool
+    /// Stops Panorama capture, unlocks AE/AWB, and stitches frames into a HEIC photo.
+    func stopPanorama(request: PhotoRequest) async -> TakenPhoto?
 }
