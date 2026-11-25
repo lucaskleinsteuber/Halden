@@ -231,6 +231,8 @@ mod upgrade_tests {
              INSERT INTO album_assets (album_id, asset_id, added_at) VALUES ('al1', 'a1', 1)",
             // 10
             "UPDATE assets SET edit_json = '{\"version\":1,\"exposure\":0.5}' WHERE id = 'a1'",
+            // 11: the photo's original file (from level 3) is still there afterwards.
+            "SELECT 1",
         ];
         for statement in &statements[..level.min(statements.len())] {
             sqlx::raw_sql(*statement)

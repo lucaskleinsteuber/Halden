@@ -54,6 +54,8 @@ pub enum UploadRole {
     PairedVideo,
     /// The RAW of a RAW+HEIC pair.
     Raw,
+    /// A smaller copy of a video, to play on the go.
+    Stream,
 }
 
 impl UploadRole {
@@ -62,6 +64,7 @@ impl UploadRole {
             Self::Original => "original",
             Self::PairedVideo => "paired_video",
             Self::Raw => "raw",
+            Self::Stream => "stream",
         }
     }
 
@@ -69,6 +72,7 @@ impl UploadRole {
         match text {
             "paired_video" => Self::PairedVideo,
             "raw" => Self::Raw,
+            "stream" => Self::Stream,
             _ => Self::Original,
         }
     }
@@ -271,6 +275,8 @@ pub struct Uploads {
     placing: Arc<tokio::sync::Mutex<()>>,
     /// The server makes thumbnails the phone didn't send after this long.
     thumbnail_delay_ms: i64,
+    /// Small copies of big videos are wanted.
+    stream_versions: bool,
     /// Wakes the background workers when a finished upload queued work for them.
     wake: Arc<tokio::sync::Notify>,
     /// Copy finished uploads to the mirror.
@@ -299,6 +305,7 @@ impl Uploads {
             slots: Mutex::new(HashMap::new()),
             placing,
             thumbnail_delay_ms: i64::from(config.jobs.thumbnail_delay_minutes) * 60_000,
+            stream_versions: config.jobs.stream_versions,
             wake,
             mirror: config.mirror.path.is_some(),
             activity,
@@ -434,6 +441,11 @@ impl Uploads {
             }
             (UploadRole::Raw, MediaKind::Video) => {
                 return Err(UploadError::Conflict("A RAW file must be a photo.".into()));
+            }
+            (UploadRole::Stream, MediaKind::Photo) => {
+                return Err(UploadError::Conflict(
+                    "A small copy to stream must be a video.".into(),
+                ));
             }
             _ => {}
         }

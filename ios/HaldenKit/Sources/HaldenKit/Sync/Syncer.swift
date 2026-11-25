@@ -83,6 +83,7 @@ public actor Syncer {
         local.captureMode = asset.captureMode ?? local.captureMode
         local.playback = asset.playback
         local.edit = asset.edit
+        local.streamSha256 = asset.file("stream")?.sha256 ?? local.streamSha256
         try local.save(db)
     }
 }

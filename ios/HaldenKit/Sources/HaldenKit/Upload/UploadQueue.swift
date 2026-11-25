@@ -42,7 +42,7 @@ extension HaldenDatabase {
                                  max(state = 'failed') AS failed,
                                  sum(CASE WHEN state = 'done' THEN size ELSE sent END) AS sent,
                                  sum(size) AS size
-                          FROM upload WHERE createdAt >= ? GROUP BY assetId)
+                          FROM upload WHERE createdAt >= ? AND role <> 'stream' GROUP BY assetId)
                     """, arguments: [start])
             return UploadSummary(
                 done: row?["done"] ?? 0, total: row?["total"] ?? 0, failed: row?["failed"] ?? 0,

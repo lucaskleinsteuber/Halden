@@ -200,6 +200,20 @@ struct UploadSettings: View {
                 Toggle(isOn: app.setting(\.videosOnlyOnWiFi)) {
                     Explained("Videos only on Wi-Fi", "Videos are big; they wait for Wi-Fi. Also in Low Data Mode.")
                 }
+                Toggle(isOn: app.setting(\.makeSmallCopies)) {
+                    Explained(
+                        "Make small copies of videos",
+                        "This iPhone makes the 720p copies to play on the go; off: the server makes them.")
+                }
+                Picker(selection: app.setting(\.videoCopy)) {
+                    Text("Automatic").tag(AppSettings.VideoCopy.automatic)
+                    Text("Small copy").tag(AppSettings.VideoCopy.small)
+                    Text("Original").tag(AppSettings.VideoCopy.original)
+                } label: {
+                    Explained(
+                        "Videos from the server",
+                        "Automatic: the small copy on cellular and away from home, the original at home.")
+                }
                 .disabled(!app.settings.uploadOverCellular)
                 Toggle(isOn: app.setting(\.onlyOnHomeNetwork)) {
                     Explained(

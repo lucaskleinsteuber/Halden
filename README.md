@@ -168,6 +168,9 @@ tombstone_days = 90          # devices learn about deletions within this time
 workers = 1                  # background jobs at once (lowest priority)
 thumbnail_delay_minutes = 10 # make thumbnails the phone didn't send after this long
 external_timeout_minutes = 30
+stream_versions = true       # a small copy of big videos to play on the go
+stream_height = 720          # its shorter side
+stream_kbps = 3000           # its video bit rate
 
 [backup]
 keep = 14                    # database backups kept

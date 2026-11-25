@@ -384,7 +384,7 @@ async fn transcode(
         .ok_or("converting the photo crashed")?
 }
 
-fn hash_and_flush(path: &Path) -> std::io::Result<([u8; 32], u64)> {
+pub(super) fn hash_and_flush(path: &Path) -> std::io::Result<([u8; 32], u64)> {
     use std::io::Read;
     let mut file = std::fs::File::open(path)?;
     let mut hasher = Sha256::new();
@@ -402,7 +402,7 @@ fn hash_and_flush(path: &Path) -> std::io::Result<([u8; 32], u64)> {
     Ok((hasher.finalize().into(), size))
 }
 
-async fn place(temporary: &Path, destination: &Path) -> std::io::Result<()> {
+pub(super) async fn place(temporary: &Path, destination: &Path) -> std::io::Result<()> {
     let (temporary, destination) = (temporary.to_path_buf(), destination.to_path_buf());
     tokio::task::spawn_blocking(move || {
         let folder = destination.parent().unwrap_or(Path::new("/")).to_path_buf();

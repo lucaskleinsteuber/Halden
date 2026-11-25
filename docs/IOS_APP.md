@@ -99,6 +99,12 @@ the design comes after that. What works today is described below.
   applies the edit itself when it shows the photo (grid, full screen, zoomed in) or plays the
   video (`AVVideoComposition`), so nothing has to be uploaded again and nothing can get out of
   step. Shared "as edited", written anew in full size with the original's metadata.
+- **Small copies of videos** (`SmallVideos`): after a big video is on the server, the iPhone
+  makes a 720p copy (H.264, about 3 Mbit/s, the sound as it was) with its video encoder, while
+  the battery allows (charging or more than a third left, no Low Power Mode), and sends it as
+  the asset's `stream`; otherwise the server makes it. A video that isn't on this iPhone plays
+  from the server as the small copy on cellular, in Low Data Mode and away from home, as the
+  original at home (Settings › Uploads: automatic, always small, always original).
 - **Map** (Photos › Map): every photo with a place, grouped (`MapClusters`): the visible part
   of the map on a grid fixed to the earth, in steps of two, so groups don't jump while the map
   moves and split in four when zooming in; each group shows its newest photo and how many there

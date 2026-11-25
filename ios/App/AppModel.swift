@@ -405,6 +405,11 @@ final class AppModel {
                         settings: self?.settings ?? AppSettings())
                     : nil
                 await uploader.drain(permit: permit, skipping: await self?.background.running() ?? [])
+                if self?.settings.makeSmallCopies == true,
+                    await Self.makeSmallCopies(database: database, files: files) > 0
+                {
+                    await uploader.drain(permit: permit, skipping: await self?.background.running() ?? [])
+                }
                 if self?.settings.keepLocalCopies == false {
                     _ = try? LocalCopies.remove(database: database, files: files)
                 }
@@ -552,7 +557,56 @@ final class AppModel {
 
     /// The video to play: on this iPhone, else streamed from the server.
     func playable(_ asset: LocalAsset) -> AVURLAsset? {
-        media.localOriginal(of: asset).map { AVURLAsset(url: $0) } ?? stream(asset)
+        if let local = media.localOriginal(of: asset) { return AVURLAsset(url: local) }
+        return StreamLoader.asset(id: asset.id, role: playsSmall(asset) ? "stream" : "original", client: client)
+    }
+
+    /// The small copy plays when there is one and it is wanted: always, or (automatic) on
+    /// cellular, in Low Data Mode and away from home.
+    func playsSmall(_ asset: LocalAsset) -> Bool {
+        guard asset.streamSha256 != nil else { return false }
+        switch settings.videoCopy {
+        case .small: return true
+        case .original: return false
+        case .automatic: return network.expensive || network.constrained || network.kind == .cellular || !atHome
+        }
+    }
+
+    /// Makes the small copies of big videos that are on the server and still here, a few at a
+    /// time, while the battery allows (charging, or more than a third left, no Low Power Mode).
+    private static func makeSmallCopies(database: HaldenDatabase, files: FileLocations) async -> Int {
+        let allowed = await MainActor.run { () -> Bool in
+            UIDevice.current.isBatteryMonitoringEnabled = true
+            let state = UIDevice.current.batteryState
+            let level = UIDevice.current.batteryLevel
+            return !ProcessInfo.processInfo.isLowPowerModeEnabled
+                && (state == .charging || state == .full || state == .unknown || level > 0.33)
+        }
+        guard allowed, let videos = try? database.videosWithoutSmallCopy(files: files) else { return 0 }
+        var made = 0
+        for video in videos {
+            guard let name = video.localFile else { continue }
+            let source = files.original(name)
+            let bytes = (try? FileManager.default.attributesOfItem(atPath: source.path)[.size] as? Int64) ?? 0
+            if SmallVideos.smallAlready(
+                width: video.width, height: video.height, bytes: bytes, durationMs: video.durationMs)
+            {
+                try? database.noSmallCopy(video.id)
+                continue
+            }
+            let small = "\(video.id)-small.mp4"
+            do {
+                try await SmallVideos.make(from: source, to: files.original(small))
+                try Uploader.enqueueSmallCopy(database: database, files: files, assetId: video.id, fileName: small)
+                made += 1
+            } catch {
+                // The server makes it instead.
+                try? FileManager.default.removeItem(at: files.original(small))
+                try? database.noSmallCopy(video.id)
+            }
+            if Task.isCancelled { break }
+        }
+        return made
     }
 
     /// The slow part a slow-motion video starts with.

@@ -187,6 +187,13 @@ pub struct JobsConfig {
     pub thumbnail_delay_minutes: u32,
     /// An external tool (ffmpeg, libheif) is stopped after this many minutes.
     pub external_timeout_minutes: u32,
+    /// A smaller copy of every big video, to play on the go (the phone sends its own, or the
+    /// server makes it with ffmpeg).
+    pub stream_versions: bool,
+    /// The shorter side of the small copy, in pixels.
+    pub stream_height: u32,
+    /// Its video bit rate, in kbit/s.
+    pub stream_kbps: u32,
 }
 
 impl Default for JobsConfig {
@@ -195,6 +202,9 @@ impl Default for JobsConfig {
             workers: 1,
             thumbnail_delay_minutes: 10,
             external_timeout_minutes: 30,
+            stream_versions: true,
+            stream_height: 720,
+            stream_kbps: 3000,
         }
     }
 }

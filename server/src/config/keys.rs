@@ -204,6 +204,24 @@ pub const KEYS: &[Key] = &[
         "ffmpeg and libheif are stopped after this many minutes.",
     ),
     key(
+        "jobs.stream_versions",
+        Bool,
+        Owner,
+        "A smaller copy of every big video, to play on the go.",
+    ),
+    key(
+        "jobs.stream_height",
+        Number,
+        Owner,
+        "The small copy's shorter side, in pixels.",
+    ),
+    key(
+        "jobs.stream_kbps",
+        Number,
+        Owner,
+        "The small copy's video bit rate, in kbit/s.",
+    ),
+    key(
         "backup.keep",
         Number,
         Owner,

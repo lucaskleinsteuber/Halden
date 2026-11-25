@@ -4,6 +4,22 @@ Notable changes to Halden. Newest first. Dates are day.month.year.
 
 There are no version numbers yet; entries are grouped by date until the first release.
 
+## 25.11.2026
+
+### Added
+
+- Small copies of big videos to play on the go: made on the iPhone (720p H.264) and sent as the
+  asset's `stream` (a new upload role), or made by the server with ffmpeg when the phone
+  hasn't (`[jobs] stream_versions`, `stream_height`, `stream_kbps`); the app plays them on
+  cellular and away from home.
+
+### Fixed
+
+- Server: the list of allowed file roles is made anew (migration 11), so new roles can be
+  stored.
+- UI tests in the CI: the camera no longer asks for the place in UI-test mode, and system
+  questions are answered only while they are there.
+
 ## 24.11.2026
 
 ### Added

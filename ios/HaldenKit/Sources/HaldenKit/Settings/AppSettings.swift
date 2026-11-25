@@ -18,6 +18,14 @@ public struct AppSettings: Codable, Sendable, Equatable {
     }
 
     /// What happens to a place measured less precisely than `locationAccuracyLimit`.
+    /// Which copy of a video plays when it isn't on this iPhone.
+    public enum VideoCopy: String, Codable, Sendable, CaseIterable {
+        /// The small copy on cellular and away from home, the original at home.
+        case automatic
+        case small
+        case original
+    }
+
     public enum InaccurateLocation: String, Codable, Sendable, CaseIterable {
         /// Kept, with its accuracy, so the app can show it as imprecise.
         case mark
@@ -54,6 +62,10 @@ public struct AppSettings: Codable, Sendable, Equatable {
     public var keptManual: ManualSettings?
     /// Photos farther from home than this make a trip.
     public var tripKilometres = 50.0
+    /// Which copy of a video plays from the server.
+    public var videoCopy = VideoCopy.automatic
+    /// This iPhone makes the small copies of its videos (else the server does).
+    public var makeSmallCopies = true
 
     // Place
     public var locationAccuracyLimit = 50.0
@@ -72,7 +84,8 @@ public struct AppSettings: Codable, Sendable, Equatable {
     enum CodingKeys: String, CodingKey {
         case uploadOverCellular, videosOnlyOnWiFi, onlyOnHomeNetwork, keepLocalCopies, photoFormat
         case videoResolution, videoFrameRate, videoHDR, flash, showGrid, livePhotos, slowMotionRate
-        case timeLapseInterval, keepManualSettings, keptManual, tripKilometres, locationAccuracyLimit
+        case timeLapseInterval, keepManualSettings, keptManual, tripKilometres, videoCopy, makeSmallCopies
+        case locationAccuracyLimit
         case inaccurateLocation, importFromPhotos, saveToPhotos, syncDeletionsWithPhotos
     }
 
@@ -99,6 +112,8 @@ public struct AppSettings: Codable, Sendable, Equatable {
         read(.keepManualSettings, into: &settings.keepManualSettings)
         read(.keptManual, into: &settings.keptManual)
         read(.tripKilometres, into: &settings.tripKilometres)
+        read(.videoCopy, into: &settings.videoCopy)
+        read(.makeSmallCopies, into: &settings.makeSmallCopies)
         read(.locationAccuracyLimit, into: &settings.locationAccuracyLimit)
         read(.inaccurateLocation, into: &settings.inaccurateLocation)
         read(.importFromPhotos, into: &settings.importFromPhotos)

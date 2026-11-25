@@ -14,6 +14,7 @@ pub const ROLES: &[&str] = &[
     "converted",
     "paired_video",
     "raw",
+    "stream",
 ];
 
 /// An asset as devices see it: the *effective* metadata (corrections where there are any, the

@@ -370,6 +370,17 @@ async fn record(
         if copy_wanted {
             jobs::enqueue(&mut tx, JobKind::Convert, &row.asset_id, &user.id, 0).await?;
         }
+        // A small copy to stream: made here only if the phone hasn't sent one by then.
+        if media.kind == MediaKind::Video && uploads.stream_versions {
+            jobs::enqueue(
+                &mut tx,
+                JobKind::Stream,
+                &row.asset_id,
+                &user.id,
+                uploads.thumbnail_delay_ms,
+            )
+            .await?;
+        }
     }
     if uploads.mirror {
         jobs::enqueue(&mut tx, JobKind::Mirror, &row.asset_id, &user.id, 0).await?;

@@ -443,6 +443,41 @@ struct EndToEndTests {
         #expect(try other.asset(id)?.playback == nil)
     }
 
+    /// A video's small copy, made here, goes up after the original as its `stream`; the sync
+    /// tells every phone it is there.
+    @Test func aSmallCopyReachesTheServer() async throws {
+        let server = try RealServer()
+        let info = try await server.ready()
+        let (connection, token) = try await Connector.login(
+            address: "127.0.0.1", port: server.port, fingerprint: info.fingerprint,
+            username: "lucas", password: RealServer.password, device: device)
+        let client = APIClient(
+            base: APIClient.base(address: "127.0.0.1", port: server.port)!, trust: .pinned(connection.fingerprint),
+            token: token)
+        let database = try HaldenDatabase()
+        try database.save(
+            server: StoredServer(serverId: connection.serverId, connection: connection, syncSince: 0, backup: nil))
+        let root = server.folder.appendingPathComponent("phone")
+        let files = try FileLocations(root: root, caches: root.appendingPathComponent("caches"))
+        let id = UUID().uuidString.lowercased()
+        try await SampleMedia.video(at: files.original("v.mov"), seed: 12, seconds: 2)
+        try Uploader.enqueue(
+            database: database, files: files, assetId: id, fileName: "v.mov", kind: "video",
+            mimeType: "video/quicktime", metadata: UploadMetadata(takenAt: 1_795_443_730_000, durationMs: 2000))
+        let uploader = Uploader(database: database, files: files, client: client)
+        #expect(await uploader.drain() == 1)
+        try await Syncer(database: database, client: client).run()
+        #expect(try database.videosWithoutSmallCopy(files: files).map(\.id) == [id])
+
+        try await SmallVideos.make(from: files.original("v.mov"), to: files.original("v-small.mp4"), shorterSide: 180)
+        try Uploader.enqueueSmallCopy(database: database, files: files, assetId: id, fileName: "v-small.mp4")
+        #expect(await uploader.drain() == 1)
+        #expect(try await client.asset(id).file("stream")?.mimeType == "video/mp4")
+        try await Syncer(database: database, client: client).run()
+        #expect(try database.asset(id)?.streamSha256 != nil)
+        #expect(try database.videosWithoutSmallCopy(files: files).isEmpty)
+    }
+
     /// An edit reaches the server as what was set and comes to another phone; back to the
     /// original, it is gone everywhere.
     @Test func editsReachTheServerAndOtherPhones() async throws {

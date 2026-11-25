@@ -8,6 +8,7 @@
 
 pub mod convert;
 mod lowprio;
+pub mod stream;
 pub mod thumbnail;
 pub mod tools;
 
@@ -33,6 +34,7 @@ pub enum JobKind {
     Thumbnail,
     Convert,
     Mirror,
+    Stream,
 }
 
 impl JobKind {
@@ -41,6 +43,7 @@ impl JobKind {
             Self::Thumbnail => "thumbnail",
             Self::Convert => "convert",
             Self::Mirror => "mirror",
+            Self::Stream => "stream",
         }
     }
 
@@ -49,6 +52,7 @@ impl JobKind {
             "thumbnail" => Some(Self::Thumbnail),
             "convert" => Some(Self::Convert),
             "mirror" => Some(Self::Mirror),
+            "stream" => Some(Self::Stream),
             _ => None,
         }
     }
@@ -133,6 +137,9 @@ pub struct JobContext {
     pub mirror: Option<PathBuf>,
     /// Work on other threads registers here, so a stopping server can wait for it.
     pub activity: crate::activity::Activity,
+    /// The small copies of videos: shorter side and bit rate (kbit/s).
+    pub stream_height: u32,
+    pub stream_kbps: u32,
 }
 
 impl JobContext {
@@ -192,6 +199,8 @@ impl Workers {
             incoming: config.incoming_dir(),
             mirror: config.mirror.path.clone(),
             activity,
+            stream_height: config.jobs.stream_height.clamp(144, 2160),
+            stream_kbps: config.jobs.stream_kbps.clamp(300, 50_000),
         });
         let tasks = (0..workers)
             .map(|_| tokio::spawn(work(context.clone(), wake.clone())))
@@ -261,6 +270,7 @@ async fn work(ctx: Arc<JobContext>, wake: Arc<Notify>) {
             Some(JobKind::Thumbnail) => thumbnail::run(&ctx, &job).await,
             Some(JobKind::Convert) => convert::run(&ctx, &job).await,
             Some(JobKind::Mirror) => crate::backup::mirror::mirror_asset(&ctx, &job.asset_id).await,
+            Some(JobKind::Stream) => stream::run(&ctx, &job).await,
             None => Err(format!("unknown job kind {}", job.kind)),
         };
         if let Err(error) = finish(&ctx.db, &job, result).await {

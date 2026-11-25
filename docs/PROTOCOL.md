@@ -276,8 +276,8 @@ taken (`[storage] path_template`). Two photos from the same second get `_2`, `_3
 ```
 
 - `assetId`: a UUID the device gives the photo when it is taken. It makes every retry safe.
-- `role`: `original` (default), `paired_video` (Live Photo video) or `raw`. The original has to be
-  there first.
+- `role`: `original` (default), `paired_video` (Live Photo video), `raw` or `stream` (a video's
+  small copy, see below). The original has to be there first.
 - `mimeType`: `image/heic`, `image/heif`, `image/jpeg`, `image/png`, `image/tiff`, `image/webp`,
   `image/gif`, `image/avif`, `image/x-adobe-dng`, `image/x-canon-cr3`, `image/x-fuji-raf`,
   `video/quicktime`, `video/mp4`, `video/x-matroska`, `video/webm`. Anything else: `415`.
@@ -600,6 +600,15 @@ The phone makes thumbnails and previews and sends them. If it hasn't after
 edge, JPEG) in the background: JPEG, PNG, TIFF, WebP and GIF directly, HEIC/HEIF/AVIF with
 libheif (`heif-dec`), videos with `ffmpeg`. A thumbnail the phone sent is never replaced by one
 the server made. The new files show up through `/sync`.
+
+## Small copies of videos
+
+A video bigger than 720p or than about 4.5 Mbit/s gets a small copy to play on the go and in
+shared links: role `stream`, H.264 and AAC in MP4, the shorter side `[jobs] stream_height` (720)
+at `[jobs] stream_kbps` (3000), ready to play while it loads. The phone sends its own like any
+other file (`POST /uploads` with `"role": "stream"`, after the original; only for videos); if it
+hasn't after `[jobs] thumbnail_delay_minutes`, the server makes it with ffmpeg at the lowest
+priority. A copy that is there is never replaced. `[jobs] stream_versions = false` turns it off.
 
 ## Accounts (owners only)
 
