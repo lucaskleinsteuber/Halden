@@ -289,8 +289,14 @@ final class CaptureCore: NSObject, @unchecked Sendable {
     private let frameOutput = AVCaptureVideoDataOutput()
     /// Custom Metal preview output: attached only when a style, filter, portrait or scopes need GPU rendering.
     private let previewOutput = AVCaptureVideoDataOutput()
+    /// Depth map stream for live Portrait bokeh preview.
+    private let depthOutput = AVCaptureDepthDataOutput()
+    /// People, faces, dogs & cats detection for automatic depth capture in Photo mode.
+    private let metadataOutput = AVCaptureMetadataOutput()
+    private var depthSynchronizer: AVCaptureDataOutputSynchronizer?
     private let metalView: MetalPreviewView
     private let previewRelay: PreviewFrameRelay
+    private let subjectRelay = SubjectMetadataRelay()
     private let timeLapse = TimeLapseRecorder()
     private var timeLapsing = false
     /// Values set by hand, applied to every camera and mode.
@@ -320,6 +326,15 @@ final class CaptureCore: NSObject, @unchecked Sendable {
         previewOutput.alwaysDiscardsLateVideoFrames = true
         previewOutput.videoSettings = [kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA]
         previewOutput.setSampleBufferDelegate(previewRelay, queue: previewRelay.queue)
+        depthOutput.isFilteringEnabled = true
+        subjectRelay.onDetect = { [weak self] detected in
+            self?.run { core in
+                guard core.state.subjectDetected != detected else { return }
+                core.state.subjectDetected = detected
+                core.publish(device: nil)
+            }
+        }
+        metadataOutput.setMetadataObjectsDelegate(subjectRelay, queue: subjectRelay.queue)
         observers.append(
             NotificationCenter.default.addObserver(
                 forName: AVCaptureSession.runtimeErrorNotification, object: session, queue: nil
@@ -432,7 +447,10 @@ final class CaptureCore: NSObject, @unchecked Sendable {
     /// Metal rendering) is attached, while in video mode Live Photos are off so `movieOutput` and
     /// `photoOutput` coexist for photo-while-recording.
     private func use(_ outputs: [AVCaptureOutput]) {
-        for candidate in [photoOutput, movieOutput, frameOutput, previewOutput] as [AVCaptureOutput] {
+        depthSynchronizer = nil
+        for candidate in [photoOutput, movieOutput, frameOutput, previewOutput, depthOutput, metadataOutput]
+            as [AVCaptureOutput]
+        {
             if !outputs.contains(where: { $0 === candidate }), session.outputs.contains(candidate) {
                 session.removeOutput(candidate)
             }
@@ -443,20 +461,28 @@ final class CaptureCore: NSObject, @unchecked Sendable {
     }
 
     private var needsMetalPreview: Bool {
-        guard mode == .photo else { return false }
-        return LookRenderer.needsCustomPreview(style: video?.style, filter: video?.filter)
+        guard mode.isStill else { return false }
+        return LookRenderer.needsCustomPreview(
+            style: video?.style, filter: video?.filter, isPortrait: mode == .portrait)
     }
 
     /// Photo: the photo output in the chosen resolution and prioritization (no movie output so
-    /// Live Photos work). Video: movie + photo output (Live Photos off) for photo-while-recording.
-    /// Slow motion: movie output. Time-lapse: video data output, without sound.
+    /// Live Photos work), plus metadata detection for automatic depth on people/pets.
+    /// Portrait: photo + Metal preview (+ synchronized depth when supported).
+    /// Video: movie + photo output (Live Photos off) for photo-while-recording.
     private func apply(mode: CameraMode, on device: AVCaptureDevice) {
-        session.automaticallyConfiguresCaptureDeviceForWideColor = mode == .photo
+        session.automaticallyConfiguresCaptureDeviceForWideColor = mode.isStill
         configureAudioSession(allowPlayback: video?.allowAudioPlayback == true, needsAudio: mode != .timeLapse)
-        metalView.configure(style: video?.style, filter: video?.filter)
+        metalView.configure(
+            style: mode.isStill ? video?.style : nil, filter: mode.isStill ? video?.filter : nil,
+            portraitAperture: mode == .portrait ? (video?.portraitAperture ?? PortraitMath.defaultAperture) : nil,
+            portraitLighting: mode == .portrait ? video?.portraitLighting : nil)
         switch mode {
         case .photo:
-            use(needsMetalPreview ? [photoOutput, previewOutput] : [photoOutput])
+            var outputs: [AVCaptureOutput] = [photoOutput, metadataOutput]
+            if needsMetalPreview { outputs.append(previewOutput) }
+            use(outputs)
+            configureSubjectMetadata()
             if let connection = previewOutput.connection(with: .video) {
                 if connection.isVideoRotationAngleSupported(90) { connection.videoRotationAngle = 90 }
                 applyMirroring(on: connection, mirror: side == .front)
@@ -484,8 +510,42 @@ final class CaptureCore: NSObject, @unchecked Sendable {
             if photoOutput.isResponsiveCaptureSupported {
                 photoOutput.isResponsiveCaptureEnabled = faster
             }
+            photoOutput.isDepthDataDeliveryEnabled = !raw && photoOutput.isDepthDataDeliverySupported
+            photoOutput.isPortraitEffectsMatteDeliveryEnabled =
+                photoOutput.isDepthDataDeliveryEnabled && photoOutput.isPortraitEffectsMatteDeliverySupported
             photoOutput.isLivePhotoCaptureEnabled = live && photoOutput.isLivePhotoCaptureSupported
             if photoOutput.isLivePhotoCaptureEnabled { photoOutput.isLivePhotoAutoTrimmingEnabled = true }
+            state.videoFormat = nil
+        case .portrait:
+            var outputs: [AVCaptureOutput] = [photoOutput, previewOutput, metadataOutput]
+            let canStreamDepth = !device.activeFormat.supportedDepthDataFormats.isEmpty
+            if canStreamDepth { outputs.append(depthOutput) }
+            use(outputs)
+            configureSubjectMetadata()
+            if let audioInput {
+                session.removeInput(audioInput)
+                self.audioInput = nil
+            }
+            if session.canSetSessionPreset(.photo) { session.sessionPreset = .photo }
+            photoOutput.isLivePhotoCaptureEnabled = false
+            photoOutput.isDepthDataDeliveryEnabled = photoOutput.isDepthDataDeliverySupported
+            photoOutput.isPortraitEffectsMatteDeliveryEnabled =
+                photoOutput.isDepthDataDeliveryEnabled && photoOutput.isPortraitEffectsMatteDeliverySupported
+            if let connection = previewOutput.connection(with: .video) {
+                if connection.isVideoRotationAngleSupported(90) { connection.videoRotationAngle = 90 }
+                applyMirroring(on: connection, mirror: side == .front)
+            }
+            if canStreamDepth, session.outputs.contains(depthOutput),
+                let depthConnection = depthOutput.connection(with: .depthData)
+            {
+                if depthConnection.isVideoRotationAngleSupported(90) { depthConnection.videoRotationAngle = 90 }
+                if depthConnection.isVideoMirroringSupported { depthConnection.isVideoMirrored = side == .front }
+                let sync = AVCaptureDataOutputSynchronizer(dataOutputs: [previewOutput, depthOutput])
+                sync.setDelegate(previewRelay, queue: previewRelay.queue)
+                depthSynchronizer = sync
+            } else {
+                previewOutput.setSampleBufferDelegate(previewRelay, queue: previewRelay.queue)
+            }
             state.videoFormat = nil
         case .video, .slowMotion:
             // Disable Live Photos before adding `movieOutput`, then keep `photoOutput` attached in
@@ -537,6 +597,15 @@ final class CaptureCore: NSObject, @unchecked Sendable {
             }
         }
         applyComposition(on: device)
+    }
+
+    /// Watches people, faces, dogs and cats in photo/portrait mode so depth data can be captured automatically.
+    private func configureSubjectMetadata() {
+        guard session.outputs.contains(metadataOutput) else { return }
+        let wanted: [AVMetadataObject.ObjectType] = [.face, .humanBody, .dogBody, .catBody]
+        let available = Set(metadataOutput.availableMetadataObjectTypes)
+        let types = wanted.filter { available.contains($0) }
+        metadataOutput.metadataObjectTypes = types
     }
 
     /// Geometric distortion correction and lens smudge detection (where supported by hardware).
@@ -746,6 +815,10 @@ final class CaptureCore: NSObject, @unchecked Sendable {
         }
         described.availableResolutions = PhotoResolution.available(for: dims)
         described.customPreviewActive = needsMetalPreview && session.outputs.contains(previewOutput)
+        described.canDepth = photoOutput.isDepthDataDeliverySupported
+        described.subjectDetected = state.subjectDetected
+        described.portraitHint =
+            mode == .portrait ? PortraitMath.hint(distanceMeters: nil, iso: Double(device.iso)) : nil
         described.manualLimits = limits(of: device)
         described.focusLocked = state.focusLocked
         described.videoFormat = state.videoFormat
@@ -854,7 +927,7 @@ final class CaptureCore: NSObject, @unchecked Sendable {
     }
 
     func takePhoto(_ request: PhotoRequest, angle: CGFloat, done: @escaping @Sendable (TakenPhoto?) -> Void) {
-        guard mode == .photo, session.isRunning, let connection = photoOutput.connection(with: .video) else {
+        guard mode.isStill, session.isRunning, let connection = photoOutput.connection(with: .video) else {
             return done(nil)
         }
         if connection.isVideoRotationAngleSupported(angle) { connection.videoRotationAngle = angle }
@@ -880,6 +953,12 @@ final class CaptureCore: NSObject, @unchecked Sendable {
             case .off: .off
             }
         if photoOutput.supportedFlashModes.contains(flash) { settings.flashMode = flash }
+        if request.captureDepth, rawFormat == nil, photoOutput.isDepthDataDeliveryEnabled {
+            settings.isDepthDataDeliveryEnabled = true
+            if request.capturePortraitMatte, photoOutput.isPortraitEffectsMatteDeliveryEnabled {
+                settings.isPortraitEffectsMatteDeliveryEnabled = true
+            }
+        }
         if request.live, rawFormat == nil, photoOutput.isLivePhotoCaptureEnabled {
             settings.livePhotoMovieFileURL = FileManager.default.temporaryDirectory
                 .appendingPathComponent("\(UUID().uuidString).mov")

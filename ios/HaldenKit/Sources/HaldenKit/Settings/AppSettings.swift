@@ -86,10 +86,15 @@ public struct AppSettings: Codable, Sendable, Equatable {
     public var photographicStyle: PhotographicStyle?
     /// Active camera filter (`nil` = original).
     public var photoFilter: PhotoFilter?
+    /// Portrait mode depth-of-field f-stop (1.4…16).
+    public var portraitAperture = PortraitMath.defaultAperture
+    /// Portrait mode lighting style.
+    public var portraitLighting = PortraitLighting.natural
     // Preserve Settings
     public var preserveMode = false
     public var keptMode: String?
     public var preserveStyle = false
+    public var preservePortraitZoom = false
     public var preserveExposure = false
     public var keptExposureBias = 0.0
     public var preserveLivePhoto = true
@@ -133,9 +138,9 @@ public struct AppSettings: Codable, Sendable, Equatable {
         case flash, showGrid, showLevel, mirrorFrontCamera, lensCorrection
         case livePhotos, slowMotionRate, timeLapseInterval
         case prioritizeFasterShooting, allowAudioPlayback, defaultFocalLength, volumeUpForBurst
-        case topBarControls, photographicStyle, photoFilter
-        case preserveMode, keptMode, preserveStyle, preserveExposure, keptExposureBias, preserveLivePhoto,
-            preserveResolution
+        case topBarControls, photographicStyle, photoFilter, portraitAperture, portraitLighting
+        case preserveMode, keptMode, preserveStyle, preservePortraitZoom, preserveExposure, keptExposureBias,
+            preserveLivePhoto, preserveResolution
         case keepManualSettings, keptManual, tripKilometres, videoCopy, makeSmallCopies
         case locationAccuracyLimit, inaccurateLocation
         case locateScreenshots, screenshotPlaceMaxMinutes, locateScreenRecordings
@@ -179,9 +184,12 @@ public struct AppSettings: Codable, Sendable, Equatable {
         settings.topBarControls = CameraControls.sanitizedTopBar(settings.topBarControls)
         read(.photographicStyle, into: &settings.photographicStyle)
         read(.photoFilter, into: &settings.photoFilter)
+        read(.portraitAperture, into: &settings.portraitAperture)
+        read(.portraitLighting, into: &settings.portraitLighting)
         read(.preserveMode, into: &settings.preserveMode)
         read(.keptMode, into: &settings.keptMode)
         read(.preserveStyle, into: &settings.preserveStyle)
+        read(.preservePortraitZoom, into: &settings.preservePortraitZoom)
         read(.preserveExposure, into: &settings.preserveExposure)
         read(.keptExposureBias, into: &settings.keptExposureBias)
         read(.preserveLivePhoto, into: &settings.preserveLivePhoto)

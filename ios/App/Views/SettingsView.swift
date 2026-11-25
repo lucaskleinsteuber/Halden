@@ -420,6 +420,12 @@ struct PreserveCameraSettingsView: View {
                         "Keep your chosen Photographic Style and filter when you reopen the camera.")
                 }
                 .accessibilityIdentifier("preserve-style")
+                Toggle(isOn: app.setting(\.preservePortraitZoom)) {
+                    Explained(
+                        "Portrait depth & lighting",
+                        "Remember your Portrait f-stop and lighting choice between sessions.")
+                }
+                .accessibilityIdentifier("preserve-portrait")
                 Toggle(isOn: app.setting(\.preserveExposure)) {
                     Explained("Exposure adjustment", "Keep the EV offset instead of resetting to 0.")
                 }

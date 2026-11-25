@@ -404,18 +404,24 @@ final class CameraModel {
         let now = Date()
         let settings = settings()
         let place = place(at: now)
-        let raw = settings.captureRAW && backend.state.canRAW
+        let isPortrait = mode == .portrait
+        let raw = !isPortrait && settings.captureRAW && backend.state.canRAW
+        let autoDepth = mode == .photo && backend.state.subjectDetected && backend.state.canDepth && !raw
         let aspectRatio = settings.photoAspectRatio
         let style = settings.photographicStyle
         let filter = settings.photoFilter
+        let aperture = isPortrait ? settings.portraitAperture : nil
+        let lighting = isPortrait ? settings.portraitLighting : nil
         shots += 1
         let request = PhotoRequest(
             format: settings.photoFormat, flash: settings.flash, location: place,
             trueNorth: location.compass?.trueNorth ?? false, takenAt: now,
-            live: settings.livePhotos && backend.state.canLive && !raw,
+            live: !isPortrait && settings.livePhotos && backend.state.canLive && !raw,
             resolution: settings.photoResolution, raw: raw,
             prioritizeFaster: settings.prioritizeFasterShooting,
-            mirrorFrontCamera: settings.mirrorFrontCamera)
+            mirrorFrontCamera: settings.mirrorFrontCamera,
+            captureDepth: isPortrait || autoDepth,
+            capturePortraitMatte: isPortrait)
         Task {
             guard var photo = await backend.takePhoto(request) else {
                 problem = "The photo could not be taken."
@@ -423,7 +429,8 @@ final class CameraModel {
             }
             problem = nil
             photo.edit = Self.captureEdit(
-                aspectRatio: aspectRatio, width: photo.width, height: photo.height, style: style, filter: filter)
+                aspectRatio: aspectRatio, width: photo.width, height: photo.height,
+                style: style, filter: filter, portraitAperture: aperture, portraitLighting: lighting)
             let data = photo.data
             if let small = await Task.detached(operation: { Self.small(data) }).value {
                 withAnimation(.snappy(duration: 0.25)) { lastShot = small }
@@ -435,14 +442,17 @@ final class CameraModel {
         }
     }
 
-    /// Combines non-destructive aspect crop, Photographic Style and Filter into one v2 edit recipe.
+    /// Combines non-destructive aspect crop, Photographic Style, Filter and Portrait settings into one v2 edit recipe.
     static func captureEdit(
-        aspectRatio: PhotoAspectRatio, width: Int, height: Int, style: PhotographicStyle?, filter: PhotoFilter?
+        aspectRatio: PhotoAspectRatio, width: Int, height: Int, style: PhotographicStyle?, filter: PhotoFilter?,
+        portraitAperture: Double? = nil, portraitLighting: PortraitLighting? = nil
     ) -> EditRecipe? {
         var recipe = EditRecipe()
         recipe.crop = aspectRatio.crop(forWidth: width, height: height)
         if let style = style?.fitted, !style.isDefault { recipe.style = style }
         recipe.filter = filter
+        if let portraitAperture { recipe.portraitAperture = PortraitMath.clampedAperture(portraitAperture) }
+        if let portraitLighting, portraitLighting != .natural { recipe.portraitLighting = portraitLighting }
         return recipe.isEmpty ? nil : recipe.fitted
     }
 

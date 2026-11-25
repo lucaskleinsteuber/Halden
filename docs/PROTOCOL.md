@@ -426,6 +426,8 @@ and never changes the file. `null` goes back to the original. Version 1 fields: 
 `trimStartMs`, `trimEndMs`. Version 2 adds:
 - `style`: optional photographic style object `{ "preset": "amber", "tone": 0.25, "color": 0.4, "palette": 0.7 }` (`preset` 1–32 bytes, `tone` and `color` in `-1…1`, `palette` in `0…1`).
 - `filter`: optional filter name (`vivid`, `vividWarm`, `vividCool`, `dramatic`, `dramaticWarm`, `dramaticCool`, `mono`, `silvertone`, `noir`; 1–32 bytes).
+- `portraitAperture`: optional depth-of-field f-stop (`1.4…16.0`) for Portrait photos or photos with embedded depth.
+- `portraitLighting`: optional Portrait Lighting effect (`studio`, `contour`, `stage`, `stageMono`, `highKeyMono`).
 
 The asset object carries it as `edit`. `restore: ["takenAt", "location"]`
 drops corrections and shows the originals again. Answers with the asset.

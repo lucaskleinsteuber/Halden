@@ -14,6 +14,8 @@ final class StandInCamera: CaptureBackend {
         hasFlash: true, hasTorch: true, canLive: true, canRAW: true,
         availableResolutions: [.mp12, .mp24, .mp48],
         lensSmudged: ProcessInfo.processInfo.arguments.contains("-ui-testing-smudge"),
+        canDepth: true,
+        subjectDetected: ProcessInfo.processInfo.arguments.contains("-ui-testing-subject"),
         manualLimits: ManualLimits(shutter: (1.0 / 8000)...1, iso: 50...3200, exposureBias: -8...8))
     private(set) var readings = CameraReadings(shutter: 1.0 / 120, iso: 100, kelvin: 5200, tint: 0, focus: 0.5)
     @ObservationIgnored private let standInPreview = StandInPreview()
@@ -34,9 +36,15 @@ final class StandInCamera: CaptureBackend {
     }
 
     private func updatePreviewLook(mode: CameraMode, options video: CaptureOptions) {
-        let custom = mode == .photo && LookRenderer.needsCustomPreview(style: video.style, filter: video.filter)
+        let custom =
+            mode.isStill
+            && LookRenderer.needsCustomPreview(
+                style: video.style, filter: video.filter, isPortrait: mode == .portrait)
         state.customPreviewActive = custom
-        standInPreview.applyLook(style: mode == .photo ? video.style : nil, filter: mode == .photo ? video.filter : nil)
+        standInPreview.applyLook(
+            style: mode.isStill ? video.style : nil, filter: mode.isStill ? video.filter : nil,
+            portraitAperture: mode == .portrait ? video.portraitAperture : nil,
+            portraitLighting: mode == .portrait ? video.portraitLighting : nil)
     }
 
     func start() {}
@@ -49,13 +57,17 @@ final class StandInCamera: CaptureBackend {
         updatePreviewLook(mode: mode, options: video)
         state.canLive = mode == .photo
         state.canRAW = mode == .photo
+        state.canDepth = mode.isStill
+        state.portraitHint =
+            mode == .portrait && ProcessInfo.processInfo.arguments.contains("-ui-testing-portrait-hint")
+            ? .moveFartherAway : nil
         state.availableResolutions = [.mp12, .mp24, .mp48]
         let fpsText = CameraControls.frameRateLabel(video.frameRate)
         let hdrSuffix = video.hdr ? " · HDR" : ""
         let autoSuffix = video.autoLowLightFPS ? " · Auto" : ""
         state.videoFormat =
             switch mode {
-            case .photo: nil
+            case .photo, .portrait: nil
             case .video: "\(video.resolution == .uhd4K ? "4K" : "1080p") · \(fpsText)\(hdrSuffix)\(autoSuffix)"
             case .slowMotion: "1080p · \(video.slowMotionRate) fps"
             case .timeLapse: video.timeLapseInterval.map { "every \(CameraMode.intervalText($0))" } ?? "Auto"
@@ -109,7 +121,7 @@ final class StandInCamera: CaptureBackend {
     }
 
     func takePhoto(_ request: PhotoRequest) async -> TakenPhoto? {
-        guard mode == .photo else { return nil }
+        guard mode.isStill else { return nil }
         let seed = nextSeed()
         let data = await Task.detached { SampleMedia.photo(seed: seed) }.value
         guard let data else { return nil }
@@ -207,8 +219,12 @@ final class StandInPreview: UIView {
 
     required init?(coder: NSCoder) { fatalError("not used") }
 
-    func applyLook(style: PhotographicStyle?, filter: PhotoFilter?) {
-        guard LookRenderer.needsCustomPreview(style: style, filter: filter) else {
+    func applyLook(
+        style: PhotographicStyle?, filter: PhotoFilter?,
+        portraitAperture: Double? = nil, portraitLighting: PortraitLighting? = nil
+    ) {
+        let isPortrait = portraitAperture != nil || (portraitLighting != nil && portraitLighting != .natural)
+        guard LookRenderer.needsCustomPreview(style: style, filter: filter, isPortrait: isPortrait) else {
             lookImageView.isHidden = true
             lookImageView.image = nil
             return
@@ -223,7 +239,10 @@ final class StandInPreview: UIView {
                     cgGradient, start: .zero, end: CGPoint(x: 0, y: 320), options: [])
             }
         }
-        if let ci = CIImage(image: base) {
+        if var ci = CIImage(image: base) {
+            if isPortrait {
+                ci = PortraitRenderer.apply(to: ci, aperture: portraitAperture, lighting: portraitLighting)
+            }
             let styled = LookRenderer.apply(style: style, filter: filter, to: ci)
             if let cg = Self.ciContext.createCGImage(styled, from: styled.extent) {
                 lookImageView.image = UIImage(cgImage: cg)

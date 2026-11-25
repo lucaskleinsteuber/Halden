@@ -6,7 +6,8 @@ import SwiftUI
 /// Future stages add Night, Photographic Styles, Portrait, Action and Audio items here.
 struct CameraDrawer: View {
     enum Panel: Hashable {
-        case style, filter, exposure, aspectRatio, timer, resolution, videoFrameRate, timeLapseInterval
+        case aperture, lighting, style, filter, exposure, aspectRatio, timer, resolution, videoFrameRate,
+            timeLapseInterval
     }
 
     let camera: CameraModel
@@ -26,6 +27,8 @@ struct CameraDrawer: View {
                 HStack(spacing: 6) {
                     if camera.mode == .photo {
                         photoButtons
+                    } else if camera.mode == .portrait {
+                        portraitButtons
                     } else if camera.mode == .video {
                         videoButtons
                     } else if camera.mode == .slowMotion {
@@ -155,6 +158,70 @@ struct CameraDrawer: View {
         }
     }
 
+    // MARK: Portrait controls
+
+    @ViewBuilder private var portraitButtons: some View {
+        drawerChip(
+            symbol: "f.cursive", text: PortraitMath.formatAperture(settings.portraitAperture),
+            active: expanded == .aperture || abs(settings.portraitAperture - PortraitMath.defaultAperture) > 0.05,
+            label: "Depth \(PortraitMath.formatAperture(settings.portraitAperture))", id: "drawer-aperture"
+        ) {
+            expanded = expanded == .aperture ? nil : .aperture
+        }
+
+        drawerChip(
+            symbol: settings.portraitLighting.symbol, text: settings.portraitLighting.title.uppercased(),
+            active: settings.portraitLighting != .natural || expanded == .lighting,
+            label: "Lighting \(settings.portraitLighting.title)", id: "drawer-lighting"
+        ) {
+            expanded = expanded == .lighting ? nil : .lighting
+        }
+
+        let hasStyle = settings.photographicStyle.map { !$0.isDefault } ?? false
+        drawerChip(
+            symbol: "wand.and.stars",
+            text: hasStyle ? (settings.photographicStyle?.preset.title.uppercased() ?? "STYLE") : "STYLE",
+            active: hasStyle || expanded == .style,
+            label: hasStyle
+                ? "Photographic style \(settings.photographicStyle?.preset.title ?? "")" : "Photographic style",
+            id: "drawer-style"
+        ) {
+            expanded = expanded == .style ? nil : .style
+        }
+
+        drawerChip(
+            symbol: "camera.filters",
+            text: settings.photoFilter?.title.uppercased() ?? "FILTER",
+            active: settings.photoFilter != nil || expanded == .filter,
+            label: settings.photoFilter.map { "Filter \($0.title)" } ?? "Filter off",
+            id: "drawer-filter"
+        ) {
+            expanded = expanded == .filter ? nil : .filter
+        }
+
+        drawerChip(
+            symbol: flashSymbol, text: settings.flash.rawValue.uppercased(), active: settings.flash == .on,
+            label: "Flash \(settings.flash.rawValue)", id: "drawer-flash"
+        ) {
+            let next: AppSettings.Flash =
+                switch settings.flash {
+                case .auto: .on
+                case .on: .off
+                case .off: .auto
+                }
+            update { $0.flash = next }
+        }
+        .disabled(!state.hasFlash)
+
+        drawerChip(
+            symbol: "timer", text: camera.timer == 0 ? "OFF" : "\(camera.timer)s",
+            active: camera.timer > 0 || expanded == .timer,
+            label: camera.timer == 0 ? "Timer off" : "Timer \(camera.timer) seconds", id: "drawer-timer"
+        ) {
+            expanded = expanded == .timer ? nil : .timer
+        }
+    }
+
     // MARK: Video controls
 
     @ViewBuilder private var videoButtons: some View {
@@ -222,6 +289,43 @@ struct CameraDrawer: View {
     @ViewBuilder private func detailBar(for panel: Panel) -> some View {
         Group {
             switch panel {
+            case .aperture:
+                HStack(spacing: 10) {
+                    Text(PortraitMath.formatAperture(settings.portraitAperture))
+                        .font(.caption.bold().monospacedDigit())
+                        .foregroundStyle(.yellow)
+                        .frame(minWidth: 44, alignment: .leading)
+                    Slider(
+                        value: Binding(
+                            get: { settings.portraitAperture },
+                            set: { value in
+                                update { $0.portraitAperture = PortraitMath.clampedAperture(value) }
+                                camera.settingsChanged()
+                            }),
+                        in: PortraitMath.apertureRange
+                    )
+                    .tint(.yellow)
+                    .accessibilityLabel("Portrait depth f-stop")
+                    .accessibilityIdentifier("drawer-aperture-slider")
+                }
+                .frame(minHeight: 44)
+                .padding(.horizontal, 12)
+                .background(.black.opacity(0.65), in: .rect(cornerRadius: 12))
+                .padding(.horizontal, 12)
+
+            case .lighting:
+                optionRow {
+                    ForEach(PortraitLighting.allCases) { light in
+                        optionPill(
+                            light.title, selected: settings.portraitLighting == light,
+                            id: "drawer-light-\(light.rawValue)"
+                        ) {
+                            update { $0.portraitLighting = light }
+                            camera.settingsChanged()
+                        }
+                    }
+                }
+
             case .style:
                 StylePadView(
                     style: Binding(

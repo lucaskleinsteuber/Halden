@@ -10,6 +10,14 @@ part of the first versions.
 
 ### Added
 
+- Portrait mode, Portrait Lighting and automatic depth in Photo mode (`Portrait`,
+  `PortraitRenderer`):
+  - New **Portrait** camera mode with live bokeh preview via the Metal viewfinder, depth &
+    Portrait Effects Matte capture, distance/light hints, adjustable `f/1.4–f/16` depth of field,
+    and 6 Portrait Lighting styles (Natural, Studio, Contour, Stage, Stage Mono, High-Key Mono)
+    editable non-destructively afterwards in Edit › Looks.
+  - Automatic depth capture in Photo mode whenever people, dogs or cats are detected via
+    `AVCaptureMetadataOutput`, plus Preserve Settings support (`preservePortraitZoom`).
 - Photographic Styles, Filters and demand-driven Metal viewfinder (`MetalPreviewView`,
   `PhotoLooks`, `StylePadView`, `FilterStripView`):
   - Custom Core Image + Metal (`MTKView`) viewfinder runs only when a style, filter (or later

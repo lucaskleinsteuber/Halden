@@ -75,6 +75,19 @@ the design comes after that. What works today is described below.
   (`isGeometricDistortionCorrectionEnabled`), hardware lens-smudge detection hints
   (`cameraLensSmudgeDetectionStatus`, dismissible banner), and optional camera-lens
   (`primaryConstituentDeviceSwitchingBehavior`) and white-balance locks while recording video.
+- **Portrait mode & automatic depth** (`Portrait`, `PortraitMath`, `PortraitRenderer`):
+  - Dedicated **Portrait** camera mode with live blurred background preview through the Metal
+    viewfinder (`AVCaptureDepthDataOutput` + `AVCaptureDataOutputSynchronizer` when supported,
+    with face/matte fallback), depth & Portrait Effects Matte delivery
+    (`isDepthDataDeliveryEnabled`, `isPortraitEffectsMatteDeliveryEnabled`), and distance /
+    low-light hints ("Move farther away", "Place subject within 2.5 m", "More light required").
+  - Adjustable depth of field (`f/1.4–f/16`, `CIDepthBlurEffect`) and six Portrait Lighting
+    effects (Natural, Studio, Contour, Stage, Stage Mono, High-Key Mono) built from the matte
+    and Vision face detection; both are stored non-destructively in `EditRecipe` and editable
+    later in `EditView` › Looks.
+  - Automatic depth in **Photo** mode: when `AVCaptureMetadataOutput` detects a person, face,
+    dog or cat, Halden displays an `f` badge and captures depth data automatically so the photo
+    can be turned into a Portrait afterwards.
 - **Photographic Styles, Filters & Metal viewfinder** (`PhotoLooks`, `LookRenderer`,
   `MetalPreviewView`, `StylePadView`):
   - **Custom Metal viewfinder**: when a non-default Photographic Style or Filter (or later

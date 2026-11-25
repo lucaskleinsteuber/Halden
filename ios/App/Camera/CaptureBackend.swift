@@ -3,10 +3,13 @@ import HaldenKit
 import UIKit
 
 enum CameraMode: String, CaseIterable, Sendable {
-    case photo, video, slowMotion, timeLapse
+    case photo, portrait, video, slowMotion, timeLapse
 
-    /// Everything but photos is recorded with the shutter started and stopped.
-    var records: Bool { self != .photo }
+    /// Everything except still modes (photo, portrait) is recorded with start/stop.
+    var records: Bool { self == .video || self == .slowMotion || self == .timeLapse }
+
+    /// Still-photo capture modes (4:3 / 1:1 / 16:9 viewfinder).
+    var isStill: Bool { self == .photo || self == .portrait }
 
     /// What the server calls videos taken this way.
     var captureMode: String? {
@@ -39,6 +42,8 @@ struct CaptureOptions: Equatable, Sendable {
     var lockVideoWhiteBalance: Bool
     var style: PhotographicStyle?
     var filter: PhotoFilter?
+    var portraitAperture: Double
+    var portraitLighting: PortraitLighting
     var slowMotionRate: Int
     /// Seconds between pictures of a time-lapse; `nil` for automatic.
     var timeLapseInterval: Double?
@@ -59,6 +64,8 @@ struct CaptureOptions: Equatable, Sendable {
         lockVideoWhiteBalance = settings.lockVideoWhiteBalance
         style = settings.photographicStyle
         filter = settings.photoFilter
+        portraitAperture = settings.portraitAperture
+        portraitLighting = settings.portraitLighting
         slowMotionRate = settings.slowMotionRate
         timeLapseInterval = settings.timeLapseInterval > 0 ? settings.timeLapseInterval : nil
     }
@@ -87,6 +94,12 @@ struct CameraState: Equatable, Sendable {
     var lensSmudged = false
     /// True when the custom Metal + Core Image viewfinder is active instead of the system layer.
     var customPreviewActive = false
+    /// True when the active camera supports depth data delivery (for Portrait & auto-depth).
+    var canDepth = false
+    /// True when a person, dog or cat is detected in photo mode (auto-depth enabled).
+    var subjectDetected = false
+    /// Live distance / lighting guidance in Portrait mode.
+    var portraitHint: PortraitHint?
     /// What can be set by hand on this camera now; `nil` when nothing.
     var manualLimits: ManualLimits?
     /// The video format actually used (the wished one may not exist on this camera).
@@ -124,6 +137,10 @@ struct PhotoRequest: Sendable {
     var prioritizeFaster = true
     /// Mirror front-camera photos so they match the preview.
     var mirrorFrontCamera = false
+    /// Include depth data (Portrait mode or automatic person/pet detection in Photo mode).
+    var captureDepth = false
+    /// Include Portrait Effects Matte when supported (Portrait mode).
+    var capturePortraitMatte = false
 }
 
 struct VideoRequest: Sendable {

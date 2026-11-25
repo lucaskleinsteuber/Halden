@@ -260,6 +260,10 @@ public enum CameraControls {
             next.photographicStyle = nil
             next.photoFilter = nil
         }
+        if !settings.preservePortraitZoom {
+            next.portraitAperture = PortraitMath.defaultAperture
+            next.portraitLighting = .natural
+        }
         if !settings.preserveExposure { next.keptExposureBias = 0 }
         if !settings.preserveLivePhoto { next.livePhotos = true }
         if !settings.preserveResolution {

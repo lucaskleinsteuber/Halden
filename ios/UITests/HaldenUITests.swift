@@ -394,6 +394,41 @@ final class HaldenUITests: XCTestCase {
         XCTAssertTrue(app.switches["preserve-style"].waitForExistence(timeout: 5))
     }
 
+    /// Portrait mode exposes f-stop depth slider, Portrait Lighting styles and hints, and Photo
+    /// mode shows the automatic depth indicator when a person or pet is detected.
+    @MainActor
+    func testPortraitModeApertureLightingAndAutoDepth() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-ui-testing-signed-in", "-ui-testing-subject", "-ui-testing-portrait-hint"]
+        app.launch()
+        // Auto-depth indicator appears in Photo mode when a subject is detected.
+        XCTAssertTrue(app.descendants(matching: .any)["portrait-auto-depth"].waitForExistence(timeout: 10))
+
+        // Switch to Portrait mode: hint appears and drawer offers aperture + lighting controls.
+        app.buttons["mode-portrait"].tap()
+        XCTAssertTrue(app.buttons["Take a portrait"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["portrait-hint"].waitForExistence(timeout: 5))
+        app.buttons["camera-controls-toggle"].tap()
+        XCTAssertTrue(app.buttons["drawer-aperture"].waitForExistence(timeout: 5))
+        app.buttons["drawer-aperture"].tap()
+        let fSlider = app.sliders["drawer-aperture-slider"]
+        XCTAssertTrue(fSlider.waitForExistence(timeout: 5))
+        fSlider.adjust(toNormalizedSliderPosition: 0.2)
+
+        app.buttons["drawer-lighting"].tap()
+        app.buttons["drawer-light-stage"].tap()
+        XCTAssertEqual(app.buttons["drawer-lighting"].label, "Lighting Stage")
+        app.buttons["drawer-light-natural"].tap()
+        app.buttons["camera-controls-toggle"].tap()
+
+        // Preserve Settings includes Portrait depth & lighting.
+        let tabs = Tabs(app)
+        tabs.buttons["Settings"].tap()
+        app.buttons["camera-settings"].tap()
+        app.buttons["camera-preserve-settings"].tap()
+        XCTAssertTrue(app.switches["preserve-portrait"].waitForExistence(timeout: 5))
+    }
+
     /// Fifty thousand photos scroll without waiting for pictures.
     @MainActor
     func testTheGridScrollsThroughFiftyThousandPhotos() {

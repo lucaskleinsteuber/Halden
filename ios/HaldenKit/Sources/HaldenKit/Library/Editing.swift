@@ -27,6 +27,8 @@ public struct EditRecipe: Codable, Sendable, Hashable {
         var tint: Double = 0
         var style: PhotographicStyle? = nil
         var filter: PhotoFilter? = nil
+        var portraitAperture: Double? = nil
+        var portraitLighting: PortraitLighting? = nil
         var quarterTurns: Int = 0
         var straighten: Double = 0
         var crop: Crop? = nil
@@ -35,7 +37,7 @@ public struct EditRecipe: Codable, Sendable, Hashable {
 
         enum CodingKeys: String, CodingKey {
             case version, exposure, brightness, contrast, highlights, shadows, saturation, vibrance, warmth, tint
-            case style, filter
+            case style, filter, portraitAperture, portraitLighting
             case quarterTurns, straighten, crop, trimStartMs, trimEndMs
         }
 
@@ -60,6 +62,8 @@ public struct EditRecipe: Codable, Sendable, Hashable {
             read(.tint, &tint)
             style = try? container.decodeIfPresent(PhotographicStyle.self, forKey: .style)
             filter = try? container.decodeIfPresent(PhotoFilter.self, forKey: .filter)
+            portraitAperture = try? container.decodeIfPresent(Double.self, forKey: .portraitAperture)
+            portraitLighting = try? container.decodeIfPresent(PortraitLighting.self, forKey: .portraitLighting)
             read(.quarterTurns, &quarterTurns)
             read(.straighten, &straighten)
             crop = try? container.decodeIfPresent(Crop.self, forKey: .crop)
@@ -132,6 +136,19 @@ public struct EditRecipe: Codable, Sendable, Hashable {
     public var filter: PhotoFilter? {
         get { box.values.filter }
         set { change { $0.filter = newValue } }
+    }
+    /// Portrait depth-of-field f-stop (1.4…16), when captured as or converted to Portrait.
+    public var portraitAperture: Double? {
+        get { box.values.portraitAperture }
+        set { change { $0.portraitAperture = newValue } }
+    }
+    /// Portrait lighting effect (`natural` collapses to `nil`).
+    public var portraitLighting: PortraitLighting? {
+        get { box.values.portraitLighting }
+        set { change { $0.portraitLighting = newValue } }
+    }
+    public var hasPortraitEdit: Bool {
+        portraitAperture != nil || (portraitLighting != nil && portraitLighting != .natural)
     }
     // Shape: quarter turns clockwise, straightening in degrees (-45…45), and the part kept
     // (0…1 of the turned and straightened picture).
@@ -211,11 +228,12 @@ public struct EditRecipe: Codable, Sendable, Hashable {
         return copy
     }
 
-    /// Changes the light, colour, photographic style or filter (not the shape).
+    /// Changes the light, colour, photographic style, filter or portrait depth/lighting (not the shape).
     public var changesColour: Bool {
         [exposure, brightness, contrast, highlights, shadows, saturation, vibrance, warmth, tint].contains { $0 != 0 }
             || (style.map { !$0.isDefault } ?? false)
             || filter != nil
+            || hasPortraitEdit
     }
 
     /// Everything within its range.
@@ -236,6 +254,8 @@ public struct EditRecipe: Codable, Sendable, Hashable {
         } else {
             fitted.style = nil
         }
+        fitted.portraitAperture = portraitAperture.map(PortraitMath.clampedAperture)
+        fitted.portraitLighting = portraitLighting == .natural ? nil : portraitLighting
         fitted.quarterTurns = ((quarterTurns % 4) + 4) % 4
         fitted.straighten = clamp(straighten, 45)
         fitted.crop = crop?.fitted
@@ -245,10 +265,18 @@ public struct EditRecipe: Codable, Sendable, Hashable {
 
 /// Applies an edit with Core Image: the same on every device, at any size.
 public enum EditRenderer {
-    /// The edited picture.
-    public static func apply(_ recipe: EditRecipe, to image: CIImage) -> CIImage {
+    /// The edited picture (using embedded depth & portrait effects matte when passed).
+    public static func apply(
+        _ recipe: EditRecipe, to image: CIImage, depthMap: CIImage? = nil, matte: CIImage? = nil
+    ) -> CIImage {
         let recipe = recipe.fitted
-        var output = LookRenderer.apply(style: recipe.style, filter: nil, to: image)
+        var output =
+            recipe.hasPortraitEdit
+            ? PortraitRenderer.apply(
+                to: image, depthMap: depthMap, matte: matte,
+                aperture: recipe.portraitAperture, lighting: recipe.portraitLighting)
+            : image
+        output = LookRenderer.apply(style: recipe.style, filter: nil, to: output)
         if recipe.exposure != 0 {
             let filter = CIFilter.exposureAdjust()
             filter.inputImage = output
@@ -346,7 +374,9 @@ public enum EditRenderer {
         guard let source = CGImageSourceCreateWithURL(original as CFURL, nil),
             let image = CIImage(contentsOf: original, options: [.applyOrientationProperty: true])
         else { throw CocoaError(.fileReadCorruptFile) }
-        let edited = apply(recipe, to: image)
+        let aux: (depth: CIImage?, matte: CIImage?) =
+            recipe.hasPortraitEdit ? PortraitRenderer.extractAuxiliary(from: original) : (nil, nil)
+        let edited = apply(recipe, to: image, depthMap: aux.depth, matte: aux.matte)
         guard let cgImage = context.createCGImage(edited, from: edited.extent) else {
             throw CocoaError(.fileWriteUnknown)
         }

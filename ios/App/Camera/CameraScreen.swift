@@ -94,9 +94,9 @@ struct CameraScreen<Gallery: View>: View {
     /// The picture as it will be taken: 4:3, 1:1 or 16:9 for photos, 16:9 in the middle for
     /// videos (like Apple's camera, the controls lie over it).
     @ViewBuilder private var viewfinder: some View {
-        let photo = camera.mode == .photo
-        let ratio = photo ? settings.photoAspectRatio.portraitRatio : (9.0 / 16.0)
-        let fullFrame = !photo || settings.photoAspectRatio == .sixteenByNine
+        let still = camera.mode.isStill
+        let ratio = still ? settings.photoAspectRatio.portraitRatio : (9.0 / 16.0)
+        let fullFrame = !still || settings.photoAspectRatio == .sixteenByNine
         Group {
             if state.ready {
                 CameraPreviewHost(
@@ -206,7 +206,7 @@ struct CameraScreen<Gallery: View>: View {
         GeometryReader { geometry in
             let below = geometry.size.height - Self.topBarHeight - geometry.size.width * 4 / 3
             let rest = max(below - Self.modeHeight - Self.shutterHeight, Self.bottomGap)
-            controlStack.padding(.bottom, rest)
+            controlStack.frame(width: geometry.size.width).padding(.bottom, rest)
         }
     }
 
@@ -230,6 +230,26 @@ struct CameraScreen<Gallery: View>: View {
                 }
                 .padding(.top, 8)
                 .accessibilityIdentifier("lens-smudge-hint")
+            }
+            if camera.mode == .portrait, let hint = state.portraitHint {
+                Text(hint.rawValue)
+                    .font(.caption.bold())
+                    .foregroundStyle(.black)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 6)
+                    .background(.yellow, in: .capsule)
+                    .padding(.top, 8)
+                    .accessibilityIdentifier("portrait-hint")
+            } else if camera.mode == .photo && state.subjectDetected && state.canDepth {
+                Label("Depth", systemImage: "f.cursive.circle.fill")
+                    .font(.caption2.bold())
+                    .foregroundStyle(.yellow)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 4)
+                    .background(.black.opacity(0.6), in: .capsule)
+                    .padding(.top, 8)
+                    .accessibilityLabel("Automatic portrait depth active")
+                    .accessibilityIdentifier("portrait-auto-depth")
             }
             Spacer(minLength: 0)
             if let problem = camera.problem {
@@ -295,7 +315,7 @@ struct CameraScreen<Gallery: View>: View {
 
     private var visibleTopControls: [TopBarControl] {
         let configured = CameraControls.sanitizedTopBar(settings.topBarControls)
-        return camera.mode == .photo ? configured : configured.filter { !$0.photoOnly }
+        return camera.mode.isStill ? configured : configured.filter { !$0.photoOnly }
     }
 
     private var topBar: some View {
@@ -428,9 +448,9 @@ struct CameraScreen<Gallery: View>: View {
         }
     }
 
-    /// Flash for photos, the light for videos.
+    /// Flash for photos and portraits, the light for videos.
     @ViewBuilder private var lightButton: some View {
-        if camera.mode == .photo {
+        if camera.mode.isStill {
             Button {
                 let next: AppSettings.Flash =
                     switch settings.flash {
@@ -715,27 +735,31 @@ struct CameraScreen<Gallery: View>: View {
         let chosen = Double(modes.firstIndex(of: camera.mode) ?? 0)
         let middle = Double(modes.count - 1) / 2
         let width = 86.0
-        return HStack(spacing: 0) {
-            ForEach(modes, id: \.self) { mode in
-                Button {
-                    camera.switchTo(mode)
-                } label: {
-                    Text(mode.title.uppercased())
-                        .font(.footnote.weight(.semibold))
-                        .foregroundStyle(mode == camera.mode ? .yellow : .white)
-                        .frame(width: width, height: 44)
-                        .contentShape(.rect)
+        return Color.clear
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .overlay {
+                HStack(spacing: 0) {
+                    ForEach(modes, id: \.self) { mode in
+                        Button {
+                            camera.switchTo(mode)
+                        } label: {
+                            Text(mode.title.uppercased())
+                                .font(.footnote.weight(.semibold))
+                                .foregroundStyle(mode == camera.mode ? .yellow : .white)
+                                .frame(width: width, height: 44)
+                                .contentShape(.rect)
+                        }
+                        .disabled(camera.recording)
+                        .accessibilityAddTraits(mode == camera.mode ? .isSelected : [])
+                        .accessibilityIdentifier("mode-\(mode.rawValue)")
+                    }
                 }
-                .disabled(camera.recording)
-                .accessibilityAddTraits(mode == camera.mode ? .isSelected : [])
-                .accessibilityIdentifier("mode-\(mode.rawValue)")
+                .offset(x: (middle - chosen) * width)
+                .animation(.snappy(duration: 0.3), value: camera.mode)
             }
-        }
-        .offset(x: (middle - chosen) * width)
-        .animation(.snappy(duration: 0.3), value: camera.mode)
-        .frame(maxWidth: .infinity)
-        .opacity(camera.recording || camera.burstCount > 0 ? 0 : 1)
-        .accessibilityHidden(camera.recording || camera.burstCount > 0)
+            .clipped()
+            .opacity(camera.recording || camera.burstCount > 0 ? 0 : 1)
+            .accessibilityHidden(camera.recording || camera.burstCount > 0)
     }
 
     private var shutterRow: some View {
@@ -930,11 +954,12 @@ extension CameraScreen where Gallery == EmptyView {
 
 extension CameraMode {
     /// The order on the screen, as in Apple's camera.
-    static let strip: [CameraMode] = [.timeLapse, .slowMotion, .video, .photo]
+    static let strip: [CameraMode] = [.timeLapse, .slowMotion, .video, .photo, .portrait]
 
     var title: String {
         switch self {
         case .photo: "Photo"
+        case .portrait: "Portrait"
         case .video: "Video"
         case .slowMotion: "Slo-mo"
         case .timeLapse: "Time-lapse"
@@ -944,6 +969,7 @@ extension CameraMode {
     var shutterLabel: String {
         switch self {
         case .photo: "Take a photo"
+        case .portrait: "Take a portrait"
         case .video: "Record a video"
         case .slowMotion: "Record slow motion"
         case .timeLapse: "Record a time-lapse"

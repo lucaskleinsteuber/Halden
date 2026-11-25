@@ -15,6 +15,8 @@ final class MetalPreviewView: MTKView, MTKViewDelegate {
     private var latestImage: CIImage?
     private var activeStyle: PhotographicStyle?
     private var activeFilter: PhotoFilter?
+    private var portraitAperture: Double?
+    private var portraitLighting: PortraitLighting?
     private var extraTransform: (@Sendable (CIImage) -> CIImage)?
     private var frameObserver: (@Sendable (CIImage) -> Void)?
 
@@ -39,26 +41,36 @@ final class MetalPreviewView: MTKView, MTKViewDelegate {
 
     required init(coder: NSCoder) { fatalError("not used") }
 
-    /// Updates the live Core Image look parameters (thread-safe; called from main or camera queue).
+    /// Updates the live Core Image look & portrait parameters (thread-safe).
     nonisolated func configure(
         style: PhotographicStyle?, filter: PhotoFilter?,
+        portraitAperture: Double? = nil, portraitLighting: PortraitLighting? = nil,
         extraTransform: (@Sendable (CIImage) -> CIImage)? = nil,
         frameObserver: (@Sendable (CIImage) -> Void)? = nil
     ) {
         lock.withLock {
             activeStyle = style
             activeFilter = filter
+            self.portraitAperture = portraitAperture
+            self.portraitLighting = portraitLighting
             self.extraTransform = extraTransform
             self.frameObserver = frameObserver
         }
     }
 
-    /// Feeds a new camera pixel buffer from `AVCaptureVideoDataOutput` and renders immediately.
-    nonisolated func enqueue(pixelBuffer: CVPixelBuffer, orientation: CGImagePropertyOrientation = .up) {
+    /// Feeds a new camera pixel buffer (plus optional live depth data in Portrait mode) and renders.
+    nonisolated func enqueue(
+        pixelBuffer: CVPixelBuffer, depthData: AVDepthData? = nil,
+        orientation: CGImagePropertyOrientation = .up
+    ) {
         var image = CIImage(cvPixelBuffer: pixelBuffer)
         if orientation != .up { image = image.oriented(orientation) }
-        let (style, filter, extra, observer) = lock.withLock {
-            (activeStyle, activeFilter, extraTransform, frameObserver)
+        let (style, filter, aperture, lighting, extra, observer) = lock.withLock {
+            (activeStyle, activeFilter, portraitAperture, portraitLighting, extraTransform, frameObserver)
+        }
+        if aperture != nil || (lighting != nil && lighting != .natural) {
+            let depthCI = depthData.map { CIImage(cvPixelBuffer: $0.depthDataMap) }
+            image = PortraitRenderer.apply(to: image, depthMap: depthCI, aperture: aperture, lighting: lighting)
         }
         if let extra { image = extra(image) }
         image = LookRenderer.apply(style: style, filter: filter, to: image)
@@ -125,8 +137,11 @@ final class PreviewContainerView: UIView {
     }
 }
 
-/// Receives camera video frames on a dedicated serial queue and hands them to `MetalPreviewView`.
-final class PreviewFrameRelay: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate, @unchecked Sendable {
+/// Receives camera video (and optional synchronized depth) frames on a dedicated serial queue and
+/// hands them to `MetalPreviewView`.
+final class PreviewFrameRelay: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate,
+    AVCaptureDataOutputSynchronizerDelegate, @unchecked Sendable
+{
     let queue = DispatchQueue(label: "halden.preview.frames", qos: .userInteractive)
     private let metalView: MetalPreviewView
 
@@ -139,5 +154,47 @@ final class PreviewFrameRelay: NSObject, AVCaptureVideoDataOutputSampleBufferDel
     ) {
         guard let buffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
         metalView.enqueue(pixelBuffer: buffer)
+    }
+
+    func dataOutputSynchronizer(
+        _ synchronizer: AVCaptureDataOutputSynchronizer,
+        didOutput synchronizedDataCollection: AVCaptureSynchronizedDataCollection
+    ) {
+        var pixelBuffer: CVPixelBuffer?
+        var depthData: AVDepthData?
+        for output in synchronizer.dataOutputs {
+            if let video = synchronizedDataCollection.synchronizedData(for: output)
+                as? AVCaptureSynchronizedSampleBufferData,
+                !video.sampleBufferWasDropped,
+                let buffer = CMSampleBufferGetImageBuffer(video.sampleBuffer)
+            {
+                pixelBuffer = buffer
+            } else if let depth = synchronizedDataCollection.synchronizedData(for: output)
+                as? AVCaptureSynchronizedDepthData,
+                !depth.depthDataWasDropped
+            {
+                depthData = depth.depthData
+            }
+        }
+        guard let pixelBuffer else { return }
+        metalView.enqueue(pixelBuffer: pixelBuffer, depthData: depthData)
+    }
+}
+
+/// Watches people, faces, dogs and cats in photo/portrait mode for automatic depth delivery.
+final class SubjectMetadataRelay: NSObject, AVCaptureMetadataOutputObjectsDelegate, @unchecked Sendable {
+    let queue = DispatchQueue(label: "halden.metadata.subjects", qos: .utility)
+    var onDetect: (@Sendable (Bool) -> Void)?
+    private var lastDetected = false
+
+    func metadataOutput(
+        _ output: AVCaptureMetadataOutput, didOutput metadataObjects: [AVMetadataObject],
+        from connection: AVCaptureConnection
+    ) {
+        let detected = !metadataObjects.isEmpty
+        if detected != lastDetected {
+            lastDetected = detected
+            onDetect?(detected)
+        }
     }
 }

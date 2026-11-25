@@ -22,6 +22,8 @@ struct EditView: View {
     @State private var recipe: EditRecipe
     @State private var tool = Tool.light
     @State private var base: CIImage?
+    @State private var depthMap: CIImage?
+    @State private var portraitMatte: CIImage?
     @State private var shown: CGImage?
     @State private var problem: String?
     @State private var aspect: Double?
@@ -163,6 +165,7 @@ struct EditView: View {
                             filter: Binding(
                                 get: { recipe.filter },
                                 set: { recipe.filter = $0 }))
+                        portraitEditControls
                     }
                 case .shape:
                     HStack {
@@ -188,6 +191,62 @@ struct EditView: View {
         }
         .foregroundStyle(.white)
         .tint(.yellow)
+    }
+
+    @ViewBuilder private var portraitEditControls: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text("Portrait Depth").font(.footnote.weight(.semibold))
+                Spacer()
+                if let aperture = recipe.portraitAperture {
+                    Text(PortraitMath.formatAperture(aperture))
+                        .font(.footnote.bold().monospacedDigit())
+                        .foregroundStyle(.yellow)
+                    Button("Off") {
+                        recipe.portraitAperture = nil
+                        recipe.portraitLighting = nil
+                    }
+                    .font(.caption.bold())
+                    .frame(minWidth: 44, minHeight: 44)
+                    .accessibilityIdentifier("edit-portrait-off")
+                } else {
+                    Button("Enable") {
+                        recipe.portraitAperture = PortraitMath.defaultAperture
+                    }
+                    .font(.caption.bold())
+                    .frame(minWidth: 44, minHeight: 44)
+                    .accessibilityIdentifier("edit-portrait-enable")
+                }
+            }
+            if recipe.portraitAperture != nil || depthMap != nil {
+                Slider(
+                    value: Binding(
+                        get: { recipe.portraitAperture ?? PortraitMath.defaultAperture },
+                        set: { recipe.portraitAperture = PortraitMath.clampedAperture($0) }),
+                    in: PortraitMath.apertureRange
+                )
+                .accessibilityIdentifier("edit-portrait-aperture")
+
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 6) {
+                        ForEach(PortraitLighting.allCases) { light in
+                            let selected = (recipe.portraitLighting ?? .natural) == light
+                            Button {
+                                recipe.portraitLighting = light == .natural ? nil : light
+                            } label: {
+                                Label(light.title, systemImage: light.symbol)
+                                    .font(.caption.bold())
+                                    .foregroundStyle(selected ? .black : .white)
+                                    .padding(.horizontal, 10)
+                                    .frame(minWidth: 44, minHeight: 44)
+                                    .background(selected ? Color.yellow : Color.white.opacity(0.14), in: .capsule)
+                            }
+                            .accessibilityIdentifier("edit-portrait-light-\(light.rawValue)")
+                        }
+                    }
+                }
+            }
+        }
     }
 
     private var aspectName: String {
@@ -272,6 +331,9 @@ struct EditView: View {
             let decoded = await Task.detached(operation: { ImagePipeline.decode(original, pixels: edge) }).value
         {
             base = CIImage(cgImage: decoded.cgImage)
+            let aux = await Task.detached { PortraitRenderer.extractAuxiliary(from: original) }.value
+            depthMap = aux.depth
+            portraitMatte = aux.matte
         }
         if base == nil { problem = "The photo isn't here and the server can't be reached." }
         await render()
@@ -280,8 +342,10 @@ struct EditView: View {
     private func render() async {
         guard let base else { return }
         let recipe = rendering
+        let depth = depthMap
+        let matte = portraitMatte
         let image = await Task.detached(priority: .userInitiated) { () -> CGImage? in
-            let edited = EditRenderer.apply(recipe, to: base)
+            let edited = EditRenderer.apply(recipe, to: base, depthMap: depth, matte: matte)
             return EditContext.shared.createCGImage(edited, from: edited.extent)
         }.value
         if let image, !Task.isCancelled { shown = image }
