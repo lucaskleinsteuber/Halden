@@ -1,0 +1,56 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <defs><clipPath id="icon"><rect width="1024" height="1024" rx="230"/></clipPath>
+  <radialGradient id="bg" cx="0.5" cy="0.35" r="0.8"><stop offset="0" stop-color="#FFFFFF"/><stop offset="1" stop-color="#ECEEF2"/></radialGradient></defs>
+  <g clip-path="url(#icon)">
+    <rect width="1024" height="1024" fill="url(#bg)"/>
+    
+  <defs>
+    <radialGradient id="g0" gradientUnits="userSpaceOnUse" cx="512.0" cy="512.0" r="392">
+      <stop offset="0.25" stop-color="#FFA41B"/>
+      <stop offset="1" stop-color="#FFE066"/>
+    </radialGradient>
+  </defs>
+  <path d="M 512.0,408.0 L 602.1,460.0 Q 718.4,588.0 887.4,624.8 A 392 392 0 0 0 797.4,243.2 Q 681.0,371.3 512.0,408.0 Z" fill="url(#g0)"/>
+
+  <defs>
+    <radialGradient id="g1" gradientUnits="userSpaceOnUse" cx="512.0" cy="512.0" r="392">
+      <stop offset="0.25" stop-color="#FF4A3D"/>
+      <stop offset="1" stop-color="#FF9E80"/>
+    </radialGradient>
+  </defs>
+  <path d="M 602.1,460.0 L 602.1,564.0 Q 549.3,728.8 602.1,893.5 A 392 392 0 0 0 887.4,624.8 Q 718.4,588.0 602.1,460.0 Z" fill="url(#g1)"/>
+
+  <defs>
+    <radialGradient id="g2" gradientUnits="userSpaceOnUse" cx="512.0" cy="512.0" r="392">
+      <stop offset="0.25" stop-color="#E8337A"/>
+      <stop offset="1" stop-color="#FF9CC2"/>
+    </radialGradient>
+  </defs>
+  <path d="M 602.1,564.0 L 512.0,616.0 Q 343.0,652.7 226.6,780.8 A 392 392 0 0 0 602.1,893.5 Q 549.3,728.8 602.1,564.0 Z" fill="url(#g2)"/>
+
+  <defs>
+    <radialGradient id="g3" gradientUnits="userSpaceOnUse" cx="512.0" cy="512.0" r="392">
+      <stop offset="0.25" stop-color="#8A4DF0"/>
+      <stop offset="1" stop-color="#C9A6FF"/>
+    </radialGradient>
+  </defs>
+  <path d="M 512.0,616.0 L 421.9,564.0 Q 305.6,436.0 136.6,399.2 A 392 392 0 0 0 226.6,780.8 Q 343.0,652.7 512.0,616.0 Z" fill="url(#g3)"/>
+
+  <defs>
+    <radialGradient id="g4" gradientUnits="userSpaceOnUse" cx="512.0" cy="512.0" r="392">
+      <stop offset="0.25" stop-color="#1484FF"/>
+      <stop offset="1" stop-color="#94D7FF"/>
+    </radialGradient>
+  </defs>
+  <path d="M 421.9,564.0 L 421.9,460.0 Q 474.7,295.2 421.9,130.5 A 392 392 0 0 0 136.6,399.2 Q 305.6,436.0 421.9,564.0 Z" fill="url(#g4)"/>
+
+  <defs>
+    <radialGradient id="g5" gradientUnits="userSpaceOnUse" cx="512.0" cy="512.0" r="392">
+      <stop offset="0.25" stop-color="#25BE4B"/>
+      <stop offset="1" stop-color="#A3F2AE"/>
+    </radialGradient>
+  </defs>
+  <path d="M 421.9,460.0 L 512.0,408.0 Q 681.0,371.3 797.4,243.2 A 392 392 0 0 0 421.9,130.5 Q 474.7,295.2 421.9,460.0 Z" fill="url(#g5)"/>
+
+  </g>
+</svg>

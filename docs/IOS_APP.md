@@ -14,6 +14,7 @@ the design comes after that. What works today is described below.
 | `ios/Widgets` | Widget extension: the Live Activity for uploads and the camera control. |
 | `ios/LockedCamera` | The camera on a locked iPhone (LockedCameraCapture extension). |
 | `ios/UITests` | The screens in the simulator. |
+| `ios/Icon` | `make_icon.py` makes the app icon (`App/AppIcon.icon`, Icon Composer's layered format) and a flat `preview.svg`. |
 | `ios/project.yml` | Describes the Xcode project; `ios/generate.sh` (XcodeGen) makes `Halden.xcodeproj` from it. Both are committed. |
 
 ## How it works

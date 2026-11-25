@@ -8,6 +8,9 @@ There are no version numbers yet; entries are grouped by date until the first re
 
 ### Added
 
+- iPhone app icon: six curved aperture blades in the colours of a photo library around an open
+  hexagon, as layers in Icon Composer's format (`ios/App/AppIcon.icon`), so iOS adds the Liquid
+  Glass edges and the dark, tinted and clear looks itself; made by `ios/Icon/make_icon.py`.
 - Shared links: photos or an album as a web page for people without Halden, with an end, a
   password and originals only if allowed; made, listed and withdrawn on the iPhone. The server
   serves the page on a listener of its own that knows nothing else (`[share] enabled`, `listen`,
