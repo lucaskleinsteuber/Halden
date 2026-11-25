@@ -9,6 +9,7 @@ mod error;
 mod extract;
 mod library;
 mod manage;
+mod shares;
 mod uploads;
 
 use std::{path::PathBuf, sync::Arc, time::Duration};
@@ -218,6 +219,8 @@ pub fn router(state: AppState) -> Router {
             get(library::suggestion),
         )
         .route("/api/v1/sync", get(library::changes))
+        .route("/api/v1/shares", get(shares::list).post(shares::create))
+        .route("/api/v1/shares/{id}", delete(shares::revoke))
         .route("/api/v1/albums", get(albums::list).post(albums::create))
         .route(
             "/api/v1/albums/{id}",

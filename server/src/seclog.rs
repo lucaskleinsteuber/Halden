@@ -37,6 +37,7 @@ pub enum Event {
     SettingsChanged,
     ServerRestarted,
     UpdateRequested,
+    ShareWrongPassword,
 }
 
 impl Event {
@@ -67,6 +68,7 @@ impl Event {
             Self::SettingsChanged => "settings_changed",
             Self::ServerRestarted => "server_restarted",
             Self::UpdateRequested => "update_requested",
+            Self::ShareWrongPassword => "share_wrong_password",
         }
     }
 }

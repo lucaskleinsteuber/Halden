@@ -35,6 +35,7 @@ pub struct Config {
     pub backup: BackupConfig,
     pub mirror: MirrorConfig,
     pub update: UpdateConfig,
+    pub share: ShareConfig,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -250,6 +251,29 @@ impl Default for UpdateConfig {
     }
 }
 
+/// Shared links (see `crate::share` and `docs/SHARING.md`).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct ShareConfig {
+    /// Shared links can be opened: their page is served on `listen`.
+    pub enabled: bool,
+    /// Where the page is served: plain HTTP, for a tunnel or proxy on this computer that brings
+    /// the certificate (Tailscale Funnel, Cloudflare Tunnel, Caddy).
+    pub listen: std::net::SocketAddr,
+    /// The address people open, as the tunnel or proxy makes it reachable (`https://…`).
+    pub public_url: String,
+}
+
+impl Default for ShareConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            listen: std::net::SocketAddr::from(([127, 0, 0, 1], 47131)),
+            public_url: String::new(),
+        }
+    }
+}
+
 /// The computer's host name without a domain, or "Halden" when the host name is empty or a
 /// machine-made id (some containers and VMs are named like `946e80f9-0794-…`).
 pub fn default_server_name() -> String {
@@ -311,6 +335,16 @@ impl Config {
         }
         if self.tls.cert_file.is_some() != self.tls.key_file.is_some() {
             bail!("tls.cert_file and tls.key_file must be set together");
+        }
+        let public = self.share.public_url.trim();
+        if !public.is_empty() && !public.starts_with("https://") && !public.starts_with("http://") {
+            bail!("share.public_url must start with https:// (or http://)");
+        }
+        if self.share.enabled
+            && self.share.listen.port() != 0
+            && self.share.listen.port() == self.server.port
+        {
+            bail!("share.listen must use another port than server.port");
         }
         Ok(())
     }

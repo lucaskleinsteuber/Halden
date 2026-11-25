@@ -29,6 +29,7 @@ struct PhotosView: View {
     @State private var note: String?
     @State private var section = Section.library
     @State private var addingToAlbum: ChosenPhotos?
+    @State private var linking: ChosenPhotos?
 
     var body: some View {
         NavigationStack(path: $path) {
@@ -59,6 +60,9 @@ struct PhotosView: View {
             }
             .sheet(item: $addingToAlbum, onDismiss: { selection = nil }) { chosen in
                 AlbumPicker(assetIds: chosen.ids)
+            }
+            .sheet(item: $linking, onDismiss: { selection = nil }) { chosen in
+                NewLinkView(assetIds: chosen.ids)
             }
             .navigationDestination(for: Route.self) { route in
                 switch route {
@@ -126,15 +130,19 @@ struct PhotosView: View {
             }
             if let selection {
                 ToolbarItem(placement: .bottomBar) {
-                    Button("Remove from iPhone") {
+                    Button {
                         let removed = app.removeFromPhone(Array(selection))
                         note =
                             removed == selection.count
                             ? "Removed from this iPhone; still on the server."
                             : "\(removed) of \(selection.count) removed. The others aren't safely on the server yet."
                         self.selection = []
+                    } label: {
+                        Image(systemName: "iphone.slash")
                     }
                     .disabled(app.removableFromPhone(Array(selection)) == 0)
+                    .accessibilityLabel("Remove from this iPhone")
+                    .accessibilityIdentifier("remove-chosen")
                 }
                 ToolbarSpacer(.flexible, placement: .bottomBar)
                 ToolbarItem(placement: .bottomBar) {
@@ -149,9 +157,25 @@ struct PhotosView: View {
                 }
                 ToolbarSpacer(.flexible, placement: .bottomBar)
                 ToolbarItem(placement: .bottomBar) {
-                    Button("Delete", role: .destructive) { confirmDelete = true }
-                        .disabled(selection.isEmpty)
-                        .accessibilityIdentifier("delete-chosen")
+                    Button {
+                        linking = ChosenPhotos(ids: Array(selection))
+                    } label: {
+                        Image(systemName: "link")
+                    }
+                    .disabled(selection.isEmpty)
+                    .accessibilityLabel("Share a link to \(selection.count)")
+                    .accessibilityIdentifier("link-chosen")
+                }
+                ToolbarSpacer(.flexible, placement: .bottomBar)
+                ToolbarItem(placement: .bottomBar) {
+                    Button(role: .destructive) {
+                        confirmDelete = true
+                    } label: {
+                        Image(systemName: "trash")
+                    }
+                    .disabled(selection.isEmpty)
+                    .accessibilityLabel("Delete \(selection.count) everywhere")
+                    .accessibilityIdentifier("delete-chosen")
                 }
             }
         }

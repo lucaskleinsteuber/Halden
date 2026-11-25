@@ -141,6 +141,12 @@ thumbnails and small copies of videos follow in the background.
 `--dry-run` only counts. Stopped halfway, the same command goes on where it stopped (a journal
 in the data folder remembers what went in).
 
+### Shared links
+
+Photos or an album as a web page for people without Halden, with an end and a password if
+wanted. The page needs a way onto the internet with a real certificate (Tailscale Funnel is the
+easiest); see [docs/SHARING.md](docs/SHARING.md).
+
 ### Commands
 
 | Command | What it does |
@@ -195,6 +201,11 @@ external_timeout_minutes = 30
 stream_versions = true       # a small copy of big videos to play on the go
 stream_height = 720          # its shorter side
 stream_kbps = 3000           # its video bit rate
+
+[share]
+enabled = false              # shared links can be opened (docs/SHARING.md)
+listen = "127.0.0.1:47131"   # their page, for a tunnel or proxy on this computer
+public_url = ""              # the address people open (https://…)
 
 [backup]
 keep = 14                    # database backups kept

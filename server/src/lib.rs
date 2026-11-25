@@ -24,6 +24,7 @@ pub mod net;
 pub mod seclog;
 pub mod server;
 pub mod setup;
+pub mod share;
 pub mod tls;
 pub mod update;
 pub mod upload;

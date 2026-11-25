@@ -8,6 +8,10 @@ There are no version numbers yet; entries are grouped by date until the first re
 
 ### Added
 
+- Shared links: photos or an album as a web page for people without Halden, with an end, a
+  password and originals only if allowed; made, listed and withdrawn on the iPhone. The server
+  serves the page on a listener of its own that knows nothing else (`[share] enabled`, `listen`,
+  `public_url`), for Tailscale Funnel, a Cloudflare Tunnel or Caddy (`docs/SHARING.md`).
 - Server: `halden import takeout` (Google Photos from Google Takeout, ZIP files or folders, all
   parts at once) and `halden import immich` (an Immich account by API key). The import goes
   through the running server as a device of its own, so duplicates stay single; what Google or
@@ -18,6 +22,11 @@ There are no version numbers yet; entries are grouped by date until the first re
   asset's `stream` (a new upload role), or made by the server with ffmpeg when the phone
   hasn't (`[jobs] stream_versions`, `stream_height`, `stream_kbps`); the app plays them on
   cellular and away from home.
+
+### Changed
+
+- iPhone: a new album for chosen photos is named right in the album list (no extra question on
+  top, which didn't always close); the buttons for chosen photos are icons, so all four fit.
 
 ### Fixed
 

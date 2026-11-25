@@ -137,6 +137,9 @@ pub struct RunningServer {
     workers: jobs::Workers,
     activity: Activity,
     bonjour: Option<crate::bonjour::Announcement>,
+    /// The page of shared links, when they are on (`[share] enabled`).
+    pub share_addr: Option<SocketAddr>,
+    sharing: Option<(oneshot::Sender<()>, JoinHandle<io::Result<()>>)>,
     db: db::Db,
     _lock: crate::fsutil::DataLock,
 }
@@ -152,6 +155,10 @@ impl RunningServer {
             let _ = tokio::task::spawn_blocking(move || announcement.stop()).await;
         }
         self.handle.graceful_shutdown(Some(grace));
+        if let Some((stop, task)) = self.sharing.take() {
+            let _ = stop.send(());
+            let _ = tokio::time::timeout(grace, task).await;
+        }
         let mut background = vec![self.tidying, self.backing_up];
         background.extend(self.checking_updates);
         for task in &background {
@@ -279,6 +286,12 @@ async fn start_inner(
         .handle(handle.clone());
     tune_http(&mut server);
     let task = tokio::spawn(async move { server.serve(app).await });
+    let (share_addr, sharing) = if config.share.enabled {
+        let (addr, stop, task) = serve_shares(config, pool.clone(), again).await?;
+        (Some(addr), Some((stop, task)))
+    } else {
+        (None, None)
+    };
     let pool_for_stop = pool.clone();
     let tidying = tokio::spawn(keep_tidy(pool.clone(), config.clone(), uploads));
     let backing_up = tokio::spawn(keep_backed_up(pool, config.clone(), backup_status, wake));
@@ -309,9 +322,56 @@ async fn start_inner(
         workers,
         activity,
         bonjour,
+        share_addr,
+        sharing,
         db: pool_for_stop,
         _lock: lock,
     })
+}
+
+/// The page of shared links on its own listener (plain HTTP, see `crate::share`). Started again
+/// in this process, it waits a moment for the one before to let go of the port.
+async fn serve_shares(
+    config: &Config,
+    pool: db::Db,
+    again: bool,
+) -> Result<(SocketAddr, oneshot::Sender<()>, JoinHandle<io::Result<()>>)> {
+    let address = config.share.listen;
+    let tries = if again { 100 } else { 1 };
+    let mut listener = None;
+    for attempt in 0..tries {
+        match tokio::net::TcpListener::bind(address).await {
+            Ok(bound) => {
+                listener = Some(bound);
+                break;
+            }
+            Err(error) if attempt + 1 == tries => {
+                return Err(error).with_context(|| {
+                    format!("could not open {address} for shared links (share.listen)")
+                });
+            }
+            Err(_) => tokio::time::sleep(Duration::from_millis(100)).await,
+        }
+    }
+    let listener = listener.context("no listener for shared links")?;
+    let addr = listener.local_addr()?;
+    let app = crate::share::page::router(
+        pool,
+        config.storage.library_dir.clone(),
+        config.derived_dir(),
+        config.server.name.clone(),
+    )
+    .into_make_service_with_connect_info::<SocketAddr>();
+    let (stop, stopped) = oneshot::channel::<()>();
+    let task = tokio::spawn(async move {
+        axum::serve(listener, app)
+            .with_graceful_shutdown(async {
+                let _ = stopped.await;
+            })
+            .await
+    });
+    tracing::info!(%addr, "shared links are served");
+    Ok((addr, stop, task))
 }
 
 /// What the supervised server currently is.

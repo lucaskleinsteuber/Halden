@@ -87,6 +87,24 @@ struct AdminTests {
         #expect(try await client.accounts().contains { $0.username == "anna" } == false)
     }
 
+    /// A link to an album: made, listed, withdrawn. Without a public address it has no URL yet.
+    @Test func sharedLinksAreMadeAndWithdrawn() async throws {
+        let server = try RealServer()
+        let client = try await signedIn(server)
+        let album = try await client.createAlbum(id: UUID().uuidString.lowercased(), name: "Rome")
+        let link = try await client.share(
+            NewLink(albumId: album.id, expiresAt: NewLink.ending(afterDays: 7), password: "harbour"))
+        #expect(link.hasPassword && !link.allowOriginals && link.url == nil)
+        #expect(link.token.count >= 22)
+        let links = try await client.sharedLinks()
+        #expect(links.shares.map(\.id) == [link.id] && links.reachable == false)
+        try await client.withdraw(link.id)
+        #expect(try await client.sharedLinks().shares.isEmpty)
+        await #expect(throws: APIError.self) {
+            _ = try await client.share(NewLink(assetIds: []))
+        }
+    }
+
     @Test func jsonValuesGoBothWays() throws {
         let values: [JSONValue] = [
             .number(30), .number(1.5), .bool(true), .string("x"), .array([.string("10.0.0.0/8")]), .null,

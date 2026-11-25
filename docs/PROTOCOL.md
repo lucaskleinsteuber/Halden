@@ -535,6 +535,31 @@ deleted for good, they leave every album.
 
 Other accounts' albums answer `404`.
 
+## Shared links
+
+Photos or an album as a web page for people without Halden (see `docs/SHARING.md`).
+
+```json
+{ "id": "…", "token": "Lw3…", "title": "Rome" | null, "albumId": "…" | null, "assetIds": [...],
+  "expiresAt": 1795443730000 | null, "hasPassword": false, "allowOriginals": false, "views": 3,
+  "createdAt": …, "url": "https://photos.example.com/s/Lw3…" | null }
+```
+
+- `GET /shares`: `{"shares": [...], "reachable": true}`: the own links still open; `reachable`
+  says whether they can be opened from the internet (`[share] enabled` and `public_url`).
+- `POST /shares` `{"assetIds": [...] | "albumId": "…", "title", "expiresAt" (in the future,
+  within ten years; missing: never), "password", "allowOriginals"}`: `201` with the link. Only
+  own photos and albums (`422` otherwise); at most 5000 photos (share an album instead). `url`
+  is `null` while `public_url` isn't set.
+- `DELETE /shares/{id}`: the link ends now (`204`).
+
+On the public listener (`[share] listen`, plain HTTP for a tunnel or proxy), only these exist:
+`GET /s/{token}` (the page; with a password a form that `POST`s it and sets a cookie for this
+link), `GET /s/{token}/{assetId}/thumbnail|preview|video|original` (video: the small copy, or
+the original when allowed; original: only when allowed). An ended or withdrawn link answers
+`410`, anything else `404`; every answer has a strict Content-Security-Policy, `no-referrer`
+and `noindex`.
+
 ## Sync
 
 ### `GET /sync?since=0&limit=1000`

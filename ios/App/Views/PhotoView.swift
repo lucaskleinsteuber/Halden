@@ -16,6 +16,7 @@ struct PhotoView: View {
     @State private var editingSlowMotion = false
     @State private var addingToAlbum: ChosenPhotos?
     @State private var editing = false
+    @State private var linking: ChosenPhotos?
     @Environment(\.dismiss) private var dismiss
 
     init(start: String, assets: [LocalAsset]) {
@@ -46,6 +47,8 @@ struct PhotoView: View {
                             Button("As played, slowed down") { share(.asPlayed) }
                         }
                         Divider()
+                        Button("Share a link…", systemImage: "link") { linking = ChosenPhotos(ids: [current]) }
+                            .accessibilityIdentifier("share-link")
                         Button("Add to album…", systemImage: "rectangle.stack.badge.plus") {
                             addingToAlbum = ChosenPhotos(ids: [current])
                         }
@@ -120,6 +123,7 @@ struct PhotoView: View {
             }
             .sheet(isPresented: $showInfo) { InfoView(id: current) }
             .sheet(item: $addingToAlbum) { chosen in AlbumPicker(assetIds: chosen.ids) }
+            .sheet(item: $linking) { chosen in NewLinkView(assetIds: chosen.ids) }
             .fullScreenCover(isPresented: $editing) {
                 if let asset { EditView(asset: asset) }
             }

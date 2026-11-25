@@ -48,6 +48,7 @@ struct SettingsView: View {
                         value: app.settings.keepLocalCopies ? "keep copies" : "server only", id: "storage-settings"
                     ) { StorageSettings() }
                     page("Formats", "doc.badge.gearshape", id: "formats") { FormatsView() }
+                    page("Shared links", "link", id: "shared-links") { SharedLinksView() }
                     page("Trash", "trash", value: "\(app.trashDays) days", id: "trash-settings") { TrashView() }
                 }
                 if app.isOwner {

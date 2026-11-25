@@ -105,6 +105,11 @@ the design comes after that. What works today is described below.
   the asset's `stream`; otherwise the server makes it. A video that isn't on this iPhone plays
   from the server as the small copy on cellular, in Low Data Mode and away from home, as the
   original at home (Settings › Uploads: automatic, always small, always original).
+- **Shared links** (a photo's share menu, the chosen photos, an album's menu; Settings ›
+  Shared links): a web page for people without Halden, working for a day, a week, a month or
+  always, with a password if wanted, originals only if allowed. The list shows how often each was
+  opened; a swipe withdraws one. While the server isn't on the internet (`docs/SHARING.md`),
+  the app says so.
 - **Map** (Photos › Map): every photo with a place, grouped (`MapClusters`): the visible part
   of the map on a grid fixed to the earth, in steps of two, so groups don't jump while the map
   moves and split in four when zooming in; each group shows its newest photo and how many there

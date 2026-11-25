@@ -475,6 +475,23 @@ final class AppModel {
         }
     }
 
+    // MARK: Shared links
+
+    func share(_ link: NewLink) async throws -> SharedLink {
+        guard let client else { throw APIError.unreachable("not connected") }
+        return try await client.share(link)
+    }
+
+    func sharedLinks() async throws -> SharedLinks {
+        guard let client else { throw APIError.unreachable("not connected") }
+        return try await client.sharedLinks()
+    }
+
+    func withdraw(_ id: String) async throws {
+        guard let client else { throw APIError.unreachable("not connected") }
+        try await client.withdraw(id)
+    }
+
     // MARK: Editing
 
     /// The edit (or `nil`: back to the original); shown at once, sent when the server can be reached.

@@ -139,6 +139,7 @@ struct AlbumView: View {
     @State private var renaming = false
     @State private var newName = ""
     @State private var confirmDelete = false
+    @State private var linking = false
 
     private var album: LocalAlbum? { app.albums.first { $0.id == id }?.album }
 
@@ -176,6 +177,8 @@ struct AlbumView: View {
                         renaming = true
                     }
                     .accessibilityIdentifier("rename-album")
+                    Button("Share a link…", systemImage: "link") { linking = true }
+                        .accessibilityIdentifier("share-album")
                     Button("Delete album", systemImage: "trash", role: .destructive) { confirmDelete = true }
                         .accessibilityIdentifier("delete-album")
                 } label: {
@@ -220,6 +223,7 @@ struct AlbumView: View {
         } message: {
             Text("The photos stay in your library.")
         }
+        .sheet(isPresented: $linking) { NewLinkView(assetIds: [], albumId: id, title: album?.name) }
         .task(id: "\(app.libraryVersion) \(app.albums.first { $0.id == id }.map { "\($0.count)" } ?? "")") {
             photos = app.photos(inAlbum: id)
             loaded += 1
@@ -232,19 +236,23 @@ struct AlbumPicker: View {
     @Environment(AppModel.self) private var app
     @Environment(\.dismiss) private var dismiss
     let assetIds: [String]
-    @State private var naming = false
     @State private var newName = ""
 
     var body: some View {
         NavigationStack {
             List {
-                Button {
-                    newName = ""
-                    naming = true
-                } label: {
-                    Label("New album…", systemImage: "plus")
+                // A new album right here (no extra question on top of this sheet).
+                Section {
+                    HStack {
+                        TextField("New album", text: $newName)
+                            .submitLabel(.done)
+                            .onSubmit(makeAlbum)
+                            .accessibilityIdentifier("new-album-name")
+                        Button("Make", action: makeAlbum)
+                            .disabled(newName.trimmingCharacters(in: .whitespaces).isEmpty)
+                            .accessibilityIdentifier("make-album")
+                    }
                 }
-                .accessibilityIdentifier("picker-new-album")
                 ForEach(app.albums) { summary in
                     Button {
                         app.addToAlbum(summary.id, assetIds)
@@ -260,18 +268,13 @@ struct AlbumPicker: View {
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
             }
-            .alert("New album", isPresented: $naming) {
-                TextField("Name", text: $newName).accessibilityIdentifier("album-name")
-                Button("Make") {
-                    let name = newName.trimmingCharacters(in: .whitespaces)
-                    if !name.isEmpty {
-                        app.createAlbum(named: name, with: assetIds)
-                        dismiss()
-                    }
-                }
-                .accessibilityIdentifier("make-album")
-                Button("Cancel", role: .cancel) {}
-            }
         }
+    }
+
+    private func makeAlbum() {
+        let name = newName.trimmingCharacters(in: .whitespaces)
+        guard !name.isEmpty else { return }
+        app.createAlbum(named: name, with: assetIds)
+        dismiss()
     }
 }

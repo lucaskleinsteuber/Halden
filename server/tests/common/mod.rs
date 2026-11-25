@@ -188,15 +188,23 @@ pub struct TestServer {
 }
 
 enum Running {
-    Plain(RunningServer),
+    Plain(Box<RunningServer>),
     Supervised(Supervisor),
 }
 
 impl TestServer {
     async fn shutdown(self) {
         match self.running {
-            Running::Plain(server) => server.shutdown().await.unwrap(),
+            Running::Plain(server) => (*server).shutdown().await.unwrap(),
             Running::Supervised(supervisor) => supervisor.stop().await.unwrap(),
+        }
+    }
+
+    /// Where the page of shared links is served, when they are on.
+    pub fn share_addr(&self) -> Option<SocketAddr> {
+        match &self.running {
+            Running::Plain(server) => server.share_addr,
+            Running::Supervised(_) => None,
         }
     }
 
@@ -235,7 +243,7 @@ impl Api {
             server: TestServer {
                 addr: server.addr,
                 fingerprint: server.fingerprint,
-                running: Running::Plain(server),
+                running: Running::Plain(Box::new(server)),
             },
             config,
             config_path: dir.path().join("config.toml"),
@@ -253,7 +261,7 @@ impl Api {
             server: TestServer {
                 addr: server.addr,
                 fingerprint: server.fingerprint,
-                running: Running::Plain(server),
+                running: Running::Plain(Box::new(server)),
             },
             config,
             config_path: dir.path().join("config.toml"),

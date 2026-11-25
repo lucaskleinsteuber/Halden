@@ -245,6 +245,24 @@ pub const KEYS: &[Key] = &[
         Password,
         "Also offer test versions (pre-releases).",
     ),
+    key(
+        "share.enabled",
+        Bool,
+        Password,
+        "Shared links can be opened (their page is served on share.listen).",
+    ),
+    key(
+        "share.listen",
+        Text,
+        Password,
+        "Where the page of shared links is served, for a tunnel or proxy on this computer.",
+    ),
+    key(
+        "share.public_url",
+        Text,
+        Password,
+        "The address people open shared links at (https://…), as the tunnel or proxy makes it.",
+    ),
 ];
 
 /// The setting called `name`, if there is one.

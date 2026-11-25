@@ -325,11 +325,11 @@ final class HaldenUITests: XCTestCase {
         grid.cells.element(boundBy: 0).tap()
         grid.cells.element(boundBy: 1).tap()
         app.buttons["add-to-album"].tap()
-        app.buttons["picker-new-album"].tap()
-        let name = app.alerts.firstMatch.textFields.firstMatch
+        let name = app.textFields["new-album-name"]
         XCTAssertTrue(name.waitForExistence(timeout: 5))
+        name.tap()
         name.typeText("Harbour walk")
-        app.alerts.firstMatch.buttons["Make"].firstMatch.tap()
+        app.buttons["make-album"].tap()
 
         XCTAssertTrue(app.navigationBars["Add 2 to album"].waitForNonExistence(timeout: 15), "the sheet closed")
         let albums = app.segmentedControls["photos-section"].buttons["Albums"]
@@ -405,6 +405,52 @@ final class HaldenUITests: XCTestCase {
         app.buttons["info"].tap()
         XCTAssertTrue(app.buttons["correct"].waitForExistence(timeout: 10))
         XCTAssertFalse(app.descendants(matching: .any)["info-edited"].exists, "back to the original")
+    }
+
+    /// A link to a photo: made (the test server isn't on the internet, so it says so), listed in
+    /// the settings, withdrawn.
+    @MainActor
+    func testSharingALink() throws {
+        let environment = ProcessInfo.processInfo.environment
+        guard let server = environment["HALDEN_TEST_SERVER"], let password = environment["HALDEN_TEST_PASSWORD"]
+        else {
+            throw XCTSkip("no server: run ios/ui-tests.sh")
+        }
+        allowLocation()
+        let app = XCUIApplication()
+        app.launchArguments = ["-ui-testing", "-ui-testing-sign-in"]
+        app.launchEnvironment = ["HALDEN_TEST_SERVER": server, "HALDEN_TEST_PASSWORD": password]
+        app.launch()
+        let tabs = app.tabBars.firstMatch
+        XCTAssertTrue(tabs.waitForExistence(timeout: 60), "signed in")
+        tabs.buttons["Camera"].tap()
+        XCTAssertTrue(app.buttons["shutter"].waitForExistence(timeout: 10))
+        app.buttons["shutter"].tap()
+        tabs.buttons["Photos"].tap()
+        let newest = app.collectionViews["library-grid"].cells.firstMatch
+        XCTAssertTrue(newest.waitForExistence(timeout: 30))
+        expectation(for: NSPredicate(format: "label ENDSWITH 'backed up'"), evaluatedWith: newest)
+        waitForExpectations(timeout: 60)
+        newest.tap()
+
+        app.buttons["share"].tap()
+        app.buttons["share-link"].firstMatch.tap()
+        XCTAssertTrue(app.buttons["make-link"].waitForExistence(timeout: 5))
+        app.buttons["make-link"].tap()
+        XCTAssertTrue(
+            app.descendants(matching: .any)["link-not-reachable"].waitForExistence(timeout: 10),
+            "made, but the server isn't on the internet")
+        app.buttons["Done"].firstMatch.tap()
+        // Back from full screen, where there is no tab bar.
+        app.navigationBars.buttons.firstMatch.tap()
+
+        tabs.buttons["Settings"].tap()
+        app.buttons["shared-links"].tap()
+        let link = app.descendants(matching: .any).matching(identifier: "shared-link").firstMatch
+        XCTAssertTrue(link.waitForExistence(timeout: 10), "listed")
+        link.swipeLeft()
+        app.buttons["Withdraw"].firstMatch.tap()
+        XCTAssertTrue(link.waitForNonExistence(timeout: 10), "withdrawn")
     }
 
     /// A correction shows at once and reaches the server, which keeps it next to the original.
