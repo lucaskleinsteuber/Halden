@@ -71,8 +71,8 @@ pub async fn run(config_path: &Path, args: UpdateArgs) -> Result<()> {
     }
 
     let source = Source::official();
-    let found = match update::check(&source, config.update.beta).await {
-        Ok(found) => found,
+    let checked = match update::check(&source, config.update.beta).await {
+        Ok(checked) => checked,
         Err(error) => {
             install::report(
                 &config,
@@ -84,9 +84,18 @@ pub async fn run(config_path: &Path, args: UpdateArgs) -> Result<()> {
             return Err(error);
         }
     };
-    install::checked(&config, found.as_ref());
-    let Some(found) = found else {
+    install::checked(&config, &checked);
+    // With test versions off, say when one is waiting: while Halden is 0.x every release is one.
+    let test_hint = checked.test_version.as_ref().map(|test| {
+        format!(
+            "Test version {test} is available too. To get test versions: sudo halden update --beta on"
+        )
+    });
+    let Some(found) = checked.found else {
         println!("Halden {VERSION} is the newest version.");
+        if let Some(hint) = test_hint {
+            println!("{hint}");
+        }
         return Ok(());
     };
     println!(
@@ -99,6 +108,9 @@ pub async fn run(config_path: &Path, args: UpdateArgs) -> Result<()> {
         },
         found.notes_url
     );
+    if let Some(hint) = test_hint {
+        println!("{hint}");
+    }
     if args.check {
         return Ok(());
     }

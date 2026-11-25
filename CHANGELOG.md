@@ -2,12 +2,23 @@
 
 Notable changes to Halden. Newest first. Dates are day.month.year.
 
-There are no version numbers yet; entries are grouped by date until the first release.
+The server and the iPhone app have version numbers of their own (semantic versioning), both
+from 0.1.0 on 25.11.2026; a heading names the versions released that day. Everything before is
+part of the first versions.
 
-## 25.11.2026
+## 25.11.2026 – Server 0.1.0
 
 ### Added
 
+- Version numbers: the server and the iPhone app count on their own, both from 0.1.0. Server
+  0.1.0 is the first release: signed with the owner's key (now built into the program and
+  `get-halden.sh`) and, like every 0.x version, a pre-release on GitHub.
+- Test versions made visible: with them off, `halden update`, `halden status` and the app's
+  Update page say when a newer test version is waiting and how to get it
+  (`sudo halden update --beta on`); the app has a switch "Install test versions" for it
+  (`GET /admin/update` now carries `beta` and `testVersion`).
+- `get-halden.sh --beta` installs the newest test version (`… | sudo bash -s -- --beta`); without
+  it, it says when there are only test versions.
 - iPhone app icon: six curved aperture blades in the colours of a photo library around an open
   hexagon, as layers in Icon Composer's format (`ios/App/AppIcon.icon`), so iOS adds the Liquid
   Glass edges and the dark, tinted and clear looks itself; made by `ios/Icon/make_icon.py`.
@@ -28,6 +39,10 @@ There are no version numbers yet; entries are grouped by date until the first re
 
 ### Changed
 
+- Releases: the release workflow and `scripts/publish-release.sh` publish every 0.x version (and
+  every test version) as a pre-release; the Docker image is tagged `latest` only for stable
+  releases. `publish-release.sh` takes the signing key's password from the Mac's Keychain.
+- The app shows its build number next to its version (Settings).
 - iPhone: less memory with a big library (172 instead of 207 MB peak while scrolling through
   50,000 photos in the simulator): an edit recipe costs a pointer per photo until a photo has
   one, and trips are looked for only while the albums are shown.

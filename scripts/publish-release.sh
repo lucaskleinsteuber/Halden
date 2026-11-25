@@ -30,14 +30,25 @@ gh release download "$tag" --pattern 'SHA256SUMS' --pattern 'halden-*.tar.gz' --
 (cd "$work" && shasum -a 256 -c SHA256SUMS) || fail "A package doesn't match SHA256SUMS; nothing was signed."
 [ "$(wc -l < "$work/SHA256SUMS")" -ge 2 ] || fail "Expected packages for x86_64 and aarch64."
 
-echo "Signing (minisign asks for the key's password)..."
-minisign -S -s "$secret_key" -m "$work/SHA256SUMS" -x "$work/SHA256SUMS.minisig" \
-  -t "Halden server $version"
+# The key's password comes from the Mac's Keychain when it is there (docs/UPDATE_SIGNING.md);
+# otherwise minisign asks for it.
+keychain_item="Halden release signing key"
+if security find-generic-password -a halden -s "$keychain_item" >/dev/null 2>&1; then
+  echo "Signing (password from the Keychain)..."
+  security find-generic-password -a halden -s "$keychain_item" -w \
+    | minisign -S -s "$secret_key" -m "$work/SHA256SUMS" -x "$work/SHA256SUMS.minisig" \
+      -t "Halden server $version" >/dev/null
+else
+  echo "Signing (minisign asks for the key's password)..."
+  minisign -S -s "$secret_key" -m "$work/SHA256SUMS" -x "$work/SHA256SUMS.minisig" \
+    -t "Halden server $version"
+fi
 minisign -V -P "$public_key" -m "$work/SHA256SUMS" -x "$work/SHA256SUMS.minisig" >/dev/null \
   || fail "The signature doesn't match the program's key; nothing was published."
 
 gh release upload "$tag" "$work/SHA256SUMS.minisig" --clobber
 flags=(--draft=false)
-case "$version" in *-*) flags+=(--prerelease) ;; *) flags+=(--latest) ;; esac
+# Test versions, and every version while Halden is 0.x, are pre-releases.
+case "$version" in 0.*|*-*) flags+=(--prerelease) ;; *) flags+=(--latest) ;; esac
 gh release edit "$tag" "${flags[@]}"
 echo "Halden $version is published. Servers find it within a day; the Docker image is being built."

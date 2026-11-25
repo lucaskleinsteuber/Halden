@@ -564,6 +564,8 @@ pub struct UpdateInfo {
     #[serde(flatten)]
     status: update::UpdateStatus,
     in_docker: bool,
+    /// Test versions (pre-releases) are offered too (`update.beta`).
+    beta: bool,
     /// Whether "Install" in the app can work here.
     can_install: bool,
     /// Why not, when it can't.
@@ -590,6 +592,7 @@ fn update_info(state: &AppState) -> UpdateInfo {
         running: VERSION,
         status: update::status::read(state.config()),
         in_docker: in_docker(),
+        beta: state.config().update.beta,
         can_install: hint.is_none(),
         install_hint: hint,
     }
@@ -617,8 +620,8 @@ pub async fn check_for_update(
     .await
     .unwrap_or_else(|_| Err(anyhow::anyhow!("GitHub did not answer in time")));
     match checked {
-        Ok(found) => {
-            update::install::checked(&config, found.as_ref());
+        Ok(checked) => {
+            update::install::checked(&config, &checked);
         }
         Err(error) => update::install::report(
             &config,

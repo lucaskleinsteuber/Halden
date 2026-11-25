@@ -5,7 +5,10 @@
 #
 # It finds the newest stable server release for this computer on GitHub, checks the download
 # against the release's SHA256SUMS and its minisign signature, and runs the package's installer
-# (install.sh), which asks the setup questions on a new installation.
+# (install.sh), which asks the setup questions on a new installation. Test versions
+# (pre-releases; while Halden is 0.x, every release) only when asked for:
+#
+#   curl -fsSL https://raw.githubusercontent.com/lucaskleinsteuber/Halden/main/packaging/linux/get-halden.sh | sudo bash -s -- --beta
 #
 # Everything runs inside main, called on the last line: a download that breaks off midway does
 # not parse, so no half of the script runs as root.
@@ -16,7 +19,7 @@ repository=lucaskleinsteuber/Halden
 releases="https://api.github.com/repos/$repository/releases?per_page=100"
 # The owner's minisign key, the same as in the program (server/src/update/mod.rs). Every release
 # must be signed with it. Empty until the first release: then nothing can be installed this way.
-signing_public_key=""
+signing_public_key="RWTs0qnx3DCwBdiw9Jmq5FYharADL9IMQE026EHwOd0aftNjjIDxoIoo"
 # Tests point these at a stand-in for GitHub and sign with their own key.
 if [ -n "${HALDEN_RELEASES_URL:-}" ]; then
   releases=$HALDEN_RELEASES_URL
@@ -24,6 +27,14 @@ if [ -n "${HALDEN_RELEASES_URL:-}" ]; then
 fi
 
 fail() { echo "$*" >&2; exit 1; }
+
+beta=false
+for option in "$@"; do
+  case "$option" in
+    --beta) beta=true ;;
+    *) fail "Unknown option $option (there is only --beta, for test versions)." ;;
+  esac
+done
 
 # Succeeds when $2 is a minisign signature of $1 made with signing_public_key, checked with
 # openssl so that no further program is needed. Only the prehashed form that minisign writes is
@@ -71,18 +82,24 @@ trap 'rm -rf "$work"' EXIT
 echo "Looking for the newest Halden server..."
 curl -fsSL --retry 3 -H 'Accept: application/vnd.github+json' "$releases" -o "$work/releases.json" \
   || fail "GitHub could not be reached. Check the internet connection and try again."
-# The newest stable release (GitHub lists newest first) with a package for this computer, a
-# checksum list and its signature.
-newest=$(jq -r --arg arch "$arch" '
-  [ .[] | select((.draft | not) and (.prerelease | not) and (.tag_name | startswith("server-v")))
+# The newest stable release (GitHub lists newest first; with --beta also test versions) with a
+# package for this computer, a checksum list and its signature.
+newest=$(jq -r --arg arch "$arch" --argjson beta "$beta" '
+  [ .[] | select((.draft | not) and ($beta or (.prerelease | not)) and (.tag_name | startswith("server-v")))
     | (.tag_name | ltrimstr("server-v")) as $version
-    | select($version | test("^[0-9]+\\.[0-9]+\\.[0-9]+$"))
+    | select($version | test(if $beta then "^[0-9]+\\.[0-9]+\\.[0-9]+(-[0-9A-Za-z.-]+)?$" else "^[0-9]+\\.[0-9]+\\.[0-9]+$" end))
     | ("halden-" + $version + "-" + $arch + "-linux.tar.gz") as $name
     | [ $version, $name,
         (first(.assets[] | select(.name == $name) | .browser_download_url) // ""),
         (first(.assets[] | select(.name == "SHA256SUMS") | .browser_download_url) // ""),
         (first(.assets[] | select(.name == "SHA256SUMS.minisig") | .browser_download_url) // "") ]
     | select(.[2] != "" and .[3] != "") ] | first // empty | join("\t")' "$work/releases.json")
+if [ -z "$newest" ] && [ "$beta" = false ] \
+  && jq -e '[ .[] | select((.draft | not) and .prerelease and (.tag_name | startswith("server-v"))) ] | length > 0' \
+    "$work/releases.json" >/dev/null; then
+  fail "There are only test versions of Halden so far. To install the newest one:
+  curl -fsSL https://raw.githubusercontent.com/$repository/main/packaging/linux/get-halden.sh | sudo bash -s -- --beta"
+fi
 [ -n "$newest" ] || fail "No Halden server release for $arch was found on GitHub."
 IFS=$'\t' read -r version name url sums_url signature_url <<<"$newest"
 
@@ -109,6 +126,9 @@ tar -xzf "$work/$name" --no-same-owner -C "$work/package"
 [ -x "$work/package/$folder/halden" ] && [ -f "$work/package/$folder/install.sh" ] \
   || fail "The download is not a Halden server package, so it was not installed."
 (cd "$work/package/$folder" && bash ./install.sh)
+if [ "$beta" = true ]; then
+  echo "This is a test version. For further test versions: sudo halden update --beta on"
+fi
 }
 
 main "$@"

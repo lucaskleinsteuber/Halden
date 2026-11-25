@@ -7,6 +7,14 @@ import SwiftUI
 struct SettingsView: View {
     @Environment(AppModel.self) private var app
 
+    /// "0.1.0 (2)": the version and the build number.
+    static var version: String {
+        let info = Bundle.main.infoDictionary
+        let version = info?["CFBundleShortVersionString"] as? String ?? "?"
+        let build = info?["CFBundleVersion"] as? String ?? "?"
+        return "\(version) (\(build))"
+    }
+
     var body: some View {
         NavigationStack {
             Form {
@@ -59,8 +67,8 @@ struct SettingsView: View {
                     }
                 }
                 Section {
-                    LabeledContent(
-                        "Version", value: Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "?")
+                    LabeledContent("Version", value: Self.version)
+                        .accessibilityIdentifier("app-version")
                 }
                 if let problem = app.problem {
                     Section { Text(problem).foregroundStyle(.red) }

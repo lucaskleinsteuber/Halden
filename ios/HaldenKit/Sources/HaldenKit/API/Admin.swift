@@ -118,7 +118,11 @@ public struct UpdateStatus: Codable, Sendable, Equatable {
     public var notesUrl: String?
     public var checkedAt: Int64?
     public var message: String?
+    /// With test versions off: a newer test version they would offer.
+    public var testVersion: String?
     public var inDocker: Bool
+    /// Test versions (pre-releases) are offered too (`update.beta`). Older servers don't say.
+    public var beta: Bool?
     public var canInstall: Bool
     public var installHint: String?
 }

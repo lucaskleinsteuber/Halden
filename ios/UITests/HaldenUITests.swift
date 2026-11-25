@@ -666,6 +666,22 @@ final class HaldenUITests: XCTestCase {
         waitForExpectations(timeout: 15)
         back()
 
+        // Test versions on: the password, the server starts again with it, the switch stays on.
+        let update = app.buttons["admin-update"]
+        for _ in 0..<6 where !update.isHittable { app.swipeUp() }
+        update.tap()
+        let beta = app.switches["update-beta"]
+        XCTAssertTrue(beta.waitForExistence(timeout: 30), "the switch for test versions")
+        XCTAssertEqual(beta.value as? String, "0", "off at first")
+        beta.switches.firstMatch.tap()
+        let betaPassword = app.alerts.firstMatch.secureTextFields.firstMatch
+        XCTAssertTrue(betaPassword.waitForExistence(timeout: 5), "asks for the password")
+        betaPassword.typeText(password)
+        app.alerts.firstMatch.buttons["Continue"].firstMatch.tap()
+        expectation(for: NSPredicate(format: "value == '1'"), evaluatedWith: beta)
+        waitForExpectations(timeout: 60)
+        back()
+
         app.buttons["admin-accounts"].tap()
         app.buttons["add-account"].tap()
         let username = app.textFields["new-username"]

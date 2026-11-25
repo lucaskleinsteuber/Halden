@@ -42,11 +42,17 @@ cargo build --release
 
 ### Install on Ubuntu Server
 
-Once there is a release, one line installs the server, or updates it (it checks the download's
-signature first):
+One line installs the server, or updates it (it checks the download's signature first):
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/lucaskleinsteuber/Halden/main/packaging/linux/get-halden.sh | sudo bash
+```
+
+While Halden is 0.x, every release is a test version (a pre-release on GitHub); ask for them with
+`--beta`:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/lucaskleinsteuber/Halden/main/packaging/linux/get-halden.sh | sudo bash -s -- --beta
 ```
 
 It creates the system user `halden`, installs the program and the systemd units, installs
@@ -96,7 +102,10 @@ is back.
 ### Updates
 
 The server looks for a new version once a day and the app shows it; installing always waits for
-you (`sudo halden update`, or Install in the app). Every release is signed by the owner of Halden,
+you (`sudo halden update`, or Install in the app). Test versions (pre-releases, which every 0.x
+release is) are only offered once you turn them on: `sudo halden update --beta on`, or "Install
+test versions" in the app (Settings › Manage server › Update). With them off, `halden update` and
+`halden status` still say when one is waiting. Every release is signed by the owner of Halden,
 and nothing unsigned or older is ever installed. Before swapping, the database is backed up and
 the new version tests itself on a copy of it; if it doesn't answer after the restart, the old
 version and its database come back. Details: [docs/UPDATE_SIGNING.md](docs/UPDATE_SIGNING.md).

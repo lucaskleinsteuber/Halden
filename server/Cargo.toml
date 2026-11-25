@@ -1,6 +1,6 @@
 [package]
 name = "halden"
-version = "0.0.0"
+version = "0.1.0"
 edition = "2024"
 description = "Halden server: self-hosted photo and video library for the Halden iPhone camera"
 license = "MIT"

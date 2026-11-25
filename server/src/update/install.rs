@@ -460,7 +460,7 @@ pub fn report(
 }
 
 /// The status after a check.
-pub fn checked(config: &Config, found: Option<&Found>) -> UpdateStatus {
+pub fn checked(config: &Config, checked: &super::Checked) -> UpdateStatus {
     let mut current = status::read(config);
     if matches!(current.state, UpdateState::Installing) {
         // An installation is running; it reports itself.
@@ -469,7 +469,8 @@ pub fn checked(config: &Config, found: Option<&Found>) -> UpdateStatus {
     current.installed = crate::VERSION.to_string();
     current.checked_at = Some(db::now_ms());
     current.message = None;
-    match found {
+    current.test_version = checked.test_version.as_ref().map(ToString::to_string);
+    match checked.found.as_ref() {
         Some(found) => {
             current.state = UpdateState::Available;
             current.latest = Some(found.version.to_string());

@@ -765,9 +765,14 @@ Starts the server again (`202`). Written to the security log.
 ```json
 { "running": "0.1.0", "state": "available", "installed": "0.1.0", "latest": "0.2.0",
   "prerelease": false, "notesUrl": "https://github.com/…/releases/tag/server-v0.2.0",
-  "checkedAt": 1795443730000, "message": null,
-  "inDocker": false, "canInstall": true }
+  "checkedAt": 1795443730000, "message": null, "testVersion": "0.3.0",
+  "inDocker": false, "beta": false, "canInstall": true }
 ```
+
+`beta`: test versions (pre-releases) are offered too; change it like any setting with
+`PATCH /admin/config` `{"changes": {"update.beta": true}, "currentPassword": "…"}` (the server
+restarts). `testVersion`: with `beta` off, a newer test version that would be offered with it on
+(`null` otherwise). While Halden is 0.x, every release is a test version.
 
 `state`: `unknown` (not checked yet), `upToDate`, `available`, `installing`, `installed`,
 `failed` (nothing was changed; `message` says why), `rolledBack` (the new version didn't start,

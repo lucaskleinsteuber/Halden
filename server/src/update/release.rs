@@ -91,6 +91,37 @@ pub fn choose(
         .max_by(|a, b| a.version.cmp(&b.version))
 }
 
+/// What a look at the release list found.
+#[derive(Debug, Clone, Default)]
+pub struct Checked {
+    /// The newest version to install (test versions only with `beta`).
+    pub found: Option<Found>,
+    /// With test versions off: a test version newer than `found` and the installed one, so the
+    /// owner can be told how to get it (`halden update --beta on`).
+    pub test_version: Option<semver::Version>,
+}
+
+/// [`choose`], and with test versions off whether a newer test version is waiting.
+pub fn look(releases: &[Release], current: &semver::Version, beta: bool, arch: &str) -> Checked {
+    let found = choose(releases, current, beta, arch);
+    let test_version = if beta {
+        None
+    } else {
+        choose(releases, current, true, arch)
+            .filter(|test| {
+                test.prerelease
+                    && found
+                        .as_ref()
+                        .is_none_or(|stable| test.version > stable.version)
+            })
+            .map(|test| test.version)
+    };
+    Checked {
+        found,
+        test_version,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -143,5 +174,43 @@ mod tests {
         assert!(choose(&releases, &semver::Version::new(1, 0, 0), true, "x86_64").is_none());
         // No package for this processor.
         assert!(choose(&releases, &current, false, "aarch64").is_none());
+    }
+
+    #[test]
+    fn points_at_a_newer_test_version_while_they_are_off() {
+        // While Halden is 0.x every release is a pre-release on GitHub.
+        let list = serde_json::json!([
+            release("server-v0.3.0", true, false, true),
+            release("server-v0.2.0", false, false, true),
+        ]);
+        let releases = parse(list.to_string().as_bytes()).unwrap();
+        let current = semver::Version::new(0, 1, 0);
+        let off = look(&releases, &current, false, "x86_64");
+        assert_eq!(off.found.unwrap().version.to_string(), "0.2.0");
+        assert_eq!(off.test_version.unwrap().to_string(), "0.3.0");
+        let on = look(&releases, &current, true, "x86_64");
+        assert_eq!(on.found.unwrap().version.to_string(), "0.3.0");
+        assert!(
+            on.test_version.is_none(),
+            "with test versions on it is simply found"
+        );
+        // Only a test version, nothing stable.
+        let only = look(&releases, &semver::Version::new(0, 2, 0), false, "x86_64");
+        assert!(only.found.is_none());
+        assert_eq!(only.test_version.unwrap().to_string(), "0.3.0");
+        // Nothing newer at all.
+        let newest = look(&releases, &semver::Version::new(0, 3, 0), false, "x86_64");
+        assert!(newest.found.is_none() && newest.test_version.is_none());
+        // A test version older than the stable one found is not worth a word.
+        let list = serde_json::json!([
+            release("server-v0.4.0", false, false, true),
+            release("server-v0.3.0-rc.1", true, false, true),
+        ]);
+        let releases = parse(list.to_string().as_bytes()).unwrap();
+        assert!(
+            look(&releases, &current, false, "x86_64")
+                .test_version
+                .is_none()
+        );
     }
 }

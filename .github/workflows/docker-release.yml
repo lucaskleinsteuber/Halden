@@ -49,8 +49,13 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ github.token }}
       - name: Build and push
+        env:
+          PRERELEASE: ${{ github.event.release.prerelease }}
         run: |
           tags=(-t "ghcr.io/lucaskleinsteuber/halden:$VERSION")
-          case "$VERSION" in *-*) ;; *) tags+=(-t ghcr.io/lucaskleinsteuber/halden:latest) ;; esac
+          # latest only for stable releases (not pre-releases, as every 0.x version is).
+          if [ "$PRERELEASE" != true ]; then
+            case "$VERSION" in *-*) ;; *) tags+=(-t ghcr.io/lucaskleinsteuber/halden:latest) ;; esac
+          fi
           docker buildx build -f packaging/docker/Dockerfile --target release \
             --platform linux/amd64,linux/arm64 "${tags[@]}" --push .

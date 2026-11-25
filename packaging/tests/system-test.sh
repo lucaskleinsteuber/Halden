@@ -46,7 +46,7 @@ sleep 1
 
 # publish <version> <program> [prerelease]: packs, checksums, signs and lists a release.
 publish() {
-  local version=$1 program=$2 folder="halden-$1-x86_64-linux"
+  local version=$1 program=$2 prerelease=${3:-false} folder="halden-$1-x86_64-linux"
   local staging="$work/staging-$version"
   mkdir -p "$staging/$folder/systemd"
   install -m 755 "$program" "$staging/$folder/halden"
@@ -56,8 +56,8 @@ publish() {
   (cd "$site/files" && sha256sum "$folder.tar.gz" > "$version-SHA256SUMS")
   minisign -S -s "$work/key.sec" -m "$site/files/$version-SHA256SUMS" -x "$site/files/$version-SHA256SUMS.minisig" >/dev/null
   local base="http://127.0.0.1:$port/files"
-  jq --arg v "$version" --arg base "$base" --arg name "$folder.tar.gz" \
-    '[{ tag_name: ("server-v" + $v), draft: false, prerelease: false,
+  jq --arg v "$version" --arg base "$base" --arg name "$folder.tar.gz" --argjson pre "$prerelease" \
+    '[{ tag_name: ("server-v" + $v), draft: false, prerelease: $pre,
         html_url: ("https://example.invalid/" + $v),
         assets: [ { name: $name, browser_download_url: ($base + "/" + $name) },
                   { name: "SHA256SUMS", browser_download_url: ($base + "/" + $v + "-SHA256SUMS") },
@@ -65,22 +65,30 @@ publish() {
     "$site/releases.json" > "$site/releases.tmp" && mv "$site/releases.tmp" "$site/releases.json"
 }
 
-publish 0.0.1 "$v1"
+# As long as Halden is 0.x every release is a test version (a pre-release on GitHub).
+publish 0.0.1 "$v1" true
+
+step "Only test versions: get-halden.sh points at --beta"
+if sudo HALDEN_RELEASES_URL="http://127.0.0.1:$port/releases.json" HALDEN_SIGNING_PUBLIC_KEY="$key" \
+     bash "$here/packaging/linux/get-halden.sh" > "$work/no-beta.log" 2>&1; then
+  fail "a test version was installed without --beta"
+fi
+grep -q "only test versions" "$work/no-beta.log" || fail "unexpected refusal: $(cat "$work/no-beta.log")"
 
 step "A wrongly signed release is refused by get-halden.sh"
 other=$(mktemp -d)
 minisign -G -W -p "$other/key.pub" -s "$other/key.sec" >/dev/null
 if sudo HALDEN_RELEASES_URL="http://127.0.0.1:$port/releases.json" \
      HALDEN_SIGNING_PUBLIC_KEY="$(sed -n 2p "$other/key.pub")" \
-     bash "$here/packaging/linux/get-halden.sh" > "$work/wrong-key.log" 2>&1; then
+     bash "$here/packaging/linux/get-halden.sh" --beta > "$work/wrong-key.log" 2>&1; then
   fail "a release signed with another key was installed"
 fi
 grep -q "not signed by the owner" "$work/wrong-key.log" || fail "unexpected refusal: $(cat "$work/wrong-key.log")"
 
-step "Install 0.0.1 with the one-line installer"
+step "Install the test version 0.0.1 with the one-line installer"
 sudo HALDEN_RELEASES_URL="http://127.0.0.1:$port/releases.json" \
      HALDEN_SIGNING_PUBLIC_KEY="$key" HALDEN_LIBRARY=/srv/halden/library \
-     bash "$here/packaging/linux/get-halden.sh"
+     bash "$here/packaging/linux/get-halden.sh" --beta
 systemctl is-active --quiet halden || fail "the service is not running"
 systemctl is-enabled --quiet halden-update-request.path || fail "the update path unit is not on"
 [ "$(stat -c %U /var/lib/halden)" = halden ] || fail "the data folder doesn't belong to halden"

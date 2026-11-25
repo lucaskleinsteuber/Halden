@@ -47,7 +47,7 @@ struct AdminView: View {
                     NavigationLink("Mirror") { MirrorView() }
                     NavigationLink("Database backups") { BackupsView() }
                     NavigationLink("Failed jobs (\(status.jobs.failed))") { JobsView() }
-                    NavigationLink("Update") { UpdateView() }
+                    NavigationLink("Update") { UpdateView() }.accessibilityIdentifier("admin-update")
                     Button("Restart the server", role: .destructive) { confirmRestart = true }
                 }
                 if let note { Section { Text(note) } }
@@ -359,6 +359,10 @@ struct UpdateView: View {
     @Environment(AppModel.self) private var app
     @State private var status: UpdateStatus?
     @State private var askPassword = false
+    /// Test versions on or off, asked for: waits for the password.
+    @State private var askBeta: Bool?
+    /// …and being saved (the server starts again with it).
+    @State private var savingBeta: Bool?
     @State private var problem: String?
 
     var body: some View {
@@ -371,6 +375,25 @@ struct UpdateView: View {
                     if let message = status.message { Text(message).font(.footnote) }
                     if let checked = status.checkedAt {
                         LabeledContent("Checked", value: TakenAt.text(checked, offset: nil))
+                    }
+                }
+                if let beta = status.beta {
+                    Section {
+                        Toggle(
+                            "Install test versions",
+                            isOn: Binding(get: { savingBeta ?? beta }, set: { askBeta = $0 })
+                        )
+                        .disabled(savingBeta != nil)
+                        .accessibilityIdentifier("update-beta")
+                        if let test = status.testVersion, !beta {
+                            Text("Test version \(test) is available. Turn on test versions to get it.")
+                                .font(.footnote)
+                                .accessibilityIdentifier("update-test-version")
+                        }
+                    } footer: {
+                        Text(
+                            "Test versions (pre-releases) come first and may have rough edges. While Halden is 0.x, every version is one."
+                        )
                     }
                 }
                 Section {
@@ -393,6 +416,32 @@ struct UpdateView: View {
         .askingForPassword($askPassword, because: "Installing an update needs your password.") { password in
             run { try await $0.installUpdate(currentPassword: password) }
         }
+        .askingForPassword(
+            Binding(get: { askBeta != nil }, set: { asking in if !asking { askBeta = nil } }),
+            because: "Changing which versions are offered needs your password."
+        ) { password in
+            guard let beta = askBeta else { return }
+            savingBeta = beta
+            run { api in
+                _ = try await api.changeServerConfig(["update.beta": .bool(beta)], currentPassword: password)
+                // The server starts again with the setting, then looks with it.
+                return try await Self.afterRestart(api)
+            }
+        }
+    }
+
+    /// The status once the server answers again after starting with a changed setting.
+    private static func afterRestart(_ api: APIClient) async throws -> UpdateStatus {
+        var lastError: Error?
+        for _ in 0..<20 {
+            try await Task.sleep(for: .seconds(1))
+            do {
+                return try await api.checkForUpdate()
+            } catch {
+                lastError = error
+            }
+        }
+        throw lastError ?? CancellationError()
     }
 
     private func run(_ call: @escaping @MainActor (APIClient) async throws -> UpdateStatus) {
@@ -403,6 +452,7 @@ struct UpdateView: View {
             } catch {
                 problem = error.localizedDescription
             }
+            savingBeta = nil
         }
     }
 }

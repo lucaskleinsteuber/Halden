@@ -15,7 +15,17 @@ The same key is checked by:
 
 A test makes sure the program and `get-halden.sh` carry the same key.
 
-## One-time setup (before the first release)
+## The key (since 25.11.2026)
+
+The key pair exists: `~/.minisign/halden.key` (secret, password-protected) and
+`~/.minisign/halden.pub` on the owner's Mac; the public key is in the program and in
+`get-halden.sh`. The key's password is a random one kept in the Mac's Keychain (account
+`halden`, item "Halden release signing key"); `scripts/publish-release.sh` takes it from there,
+so releases can be signed without typing it. A backup of the key file and the password belongs
+somewhere offline (to see the password: Keychain Access › "Halden release signing key" ›
+Show password).
+
+## One-time setup (how the key was made)
 
 1. Install minisign: `brew install minisign`.
 2. Create the key pair, protected by a password:
@@ -37,7 +47,9 @@ refuses to install.
 ## What is checked, in order
 
 1. The release is a `server-v<version>` release, not a draft, newer than the installed version
-   (never older), and a test version only with `halden update --beta on`.
+   (never older), and a test version only with `halden update --beta on`. A test version is a
+   GitHub pre-release or a version with a suffix (`0.2.0-rc.1`); while Halden is 0.x, every
+   release is published as a pre-release.
 2. `SHA256SUMS.minisig` is a valid signature of `SHA256SUMS` by the built-in key (only the
    prehashed form minisign makes today; the legacy form is refused).
 3. The package matches its line in `SHA256SUMS`.

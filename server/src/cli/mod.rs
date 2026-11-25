@@ -428,6 +428,12 @@ async fn run_status(config_path: &Path) -> Result<()> {
         ),
         _ => {}
     }
+    if let Some(test) = &update.test_version {
+        row(
+            "Test version",
+            format!("Halden {test} is available: sudo halden update --beta on"),
+        );
+    }
     row(
         "State",
         if is_listening(config.server.port) {

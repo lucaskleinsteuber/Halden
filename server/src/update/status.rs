@@ -38,6 +38,8 @@ pub struct UpdateStatus {
     pub checked_at: Option<i64>,
     /// What went wrong, or what happened.
     pub message: Option<String>,
+    /// With test versions off: a newer test version that `halden update --beta on` would offer.
+    pub test_version: Option<String>,
 }
 
 pub fn path(config: &Config) -> PathBuf {

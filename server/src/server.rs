@@ -700,9 +700,9 @@ async fn keep_up_to_date(config: Config) {
     tokio::time::sleep(first).await;
     loop {
         match crate::update::check(&crate::update::Source::official(), config.update.beta).await {
-            Ok(found) => {
-                crate::update::install::checked(&config, found.as_ref());
-                if let Some(found) = found {
+            Ok(checked) => {
+                crate::update::install::checked(&config, &checked);
+                if let Some(found) = &checked.found {
                     tracing::info!(version = %found.version, "a new version of Halden is available");
                 }
             }

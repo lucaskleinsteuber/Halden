@@ -15,7 +15,8 @@ config=(--config "$work/config.toml")
 "$server" "${config[@]}" config set server.port "$port" > /dev/null
 "$server" "${config[@]}" config set network.bonjour false > /dev/null
 printf '%s\n' "$password" | "$server" "${config[@]}" user add lucas --owner > /dev/null
-"$server" "${config[@]}" serve > "$work/server.log" 2>&1 &
+# The server never asks the real GitHub for updates here (only debug builds listen to this).
+HALDEN_UPDATE_API=http://127.0.0.1:9/no-releases "$server" "${config[@]}" serve > "$work/server.log" 2>&1 &
 pid=$!
 trap 'kill $pid 2> /dev/null; wait $pid 2> /dev/null; rm -rf "$work"' EXIT
 for _ in $(seq 1 100); do

@@ -68,6 +68,19 @@ async fn serve_github(github: FakeGithub) -> String {
 }
 
 /// A stand-in `halden` program: says its version and passes (or fails) the database check.
+/// A version newer than this program, whatever it is now: one step up in the middle number,
+/// `patch` at the end (`ahead(1)` is 0.2.1 while the program is 0.1.0).
+fn ahead(patch: u64) -> String {
+    let now = semver::Version::parse(halden::VERSION).unwrap();
+    format!("{}.{}.{patch}", now.major, now.minor + 1)
+}
+
+/// A test version newer than every [`ahead`] one.
+fn ahead_test() -> String {
+    let now = semver::Version::parse(halden::VERSION).unwrap();
+    format!("{}.{}.0-rc.1", now.major, now.minor + 2)
+}
+
 fn fake_program(says: &str) -> String {
     format!(
         "#!/bin/sh\ncase \"$1\" in --version) echo \"halden {says}\"; exit 0;; esac\n\
@@ -243,17 +256,25 @@ async fn only_what_the_owner_signed_is_installed() {
     let key = signer.public();
     let setup = set_up().await;
     let work = tempfile::tempdir().unwrap();
-    let good = package(work.path(), "0.0.1", &fake_program("0.0.1"), &[]);
-    publish(&github, &base, &signer, "0.0.1", good.clone(), false);
-    // A test version is only offered with beta on.
-    let beta = package(work.path(), "0.1.0-rc.1", &fake_program("0.1.0-rc.1"), &[]);
-    publish(&github, &base, &signer, "0.1.0-rc.1", beta, true);
+    let new = ahead(1);
+    let good = package(work.path(), &new, &fake_program(&new), &[]);
+    publish(&github, &base, &signer, &new, good.clone(), false);
+    // A test version is only offered with beta on; with it off, it is pointed at.
+    let test = ahead_test();
+    let beta = package(work.path(), &test, &fake_program(&test), &[]);
+    publish(&github, &base, &signer, &test, beta, true);
 
     let (ok, out) = halden(&setup, &base, Some(&key), &["update", "--check"]);
     assert!(ok, "{out}");
-    assert!(out.contains("Newest:    0.0.1"), "{out}");
+    assert!(out.contains(&format!("Newest:    {new}\n")), "{out}");
+    assert!(
+        out.contains(&format!("Test version {test} is available too"))
+            && out.contains("sudo halden update --beta on"),
+        "{out}"
+    );
     assert_eq!(status(&setup)["state"], "available");
-    assert_eq!(status(&setup)["latest"], "0.0.1");
+    assert_eq!(status(&setup)["latest"], new.as_str());
+    assert_eq!(status(&setup)["testVersion"], test.as_str());
 
     // No key in this build: nothing is installed.
     let (ok, out) = halden(&setup, &base, None, &["update", "--yes"]);
@@ -292,10 +313,10 @@ async fn only_what_the_owner_signed_is_installed() {
     let backups_before = halden::backup::database::list(&setup.config).len();
     let (ok, out) = halden(&setup, &base, Some(&key), &["update", "--yes"]);
     assert!(ok, "{out}");
-    assert!(out.contains("Halden 0.0.1 is installed"), "{out}");
+    assert!(out.contains(&format!("Halden {new} is installed")), "{out}");
     assert_eq!(
         std::fs::read_to_string(&setup.installed).unwrap(),
-        fake_program("0.0.1")
+        fake_program(&new)
     );
     let mut previous = setup.installed.clone().into_os_string();
     previous.push(".previous");
@@ -305,7 +326,7 @@ async fn only_what_the_owner_signed_is_installed() {
         backups_before + 1
     );
     assert_eq!(status(&setup)["state"], "installed");
-    assert_eq!(status(&setup)["installed"], "0.0.1");
+    assert_eq!(status(&setup)["installed"], new.as_str());
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -318,8 +339,8 @@ async fn a_release_that_fails_its_self_test_or_carries_foreign_files_is_refused(
     let work = tempfile::tempdir().unwrap();
 
     // Says it is another version than the release.
-    let liar = package(work.path(), "0.0.2", &fake_program("9.9.9"), &[]);
-    publish(&github, &base, &signer, "0.0.2", liar, false);
+    let liar = package(work.path(), &ahead(2), &fake_program("9.9.9"), &[]);
+    publish(&github, &base, &signer, &ahead(2), liar, false);
     let (ok, out) = halden(&setup, &base, Some(&key), &["update", "--yes"]);
     assert!(!ok && out.contains("says it is"), "{out}");
     assert_eq!(std::fs::read(&setup.installed).unwrap(), b"the old program");
@@ -327,17 +348,25 @@ async fn a_release_that_fails_its_self_test_or_carries_foreign_files_is_refused(
     // Can't use the database.
     let broken = package(
         work.path(),
-        "0.0.3",
-        "#!/bin/sh\n[ \"$1\" = --version ] && echo halden 0.0.3 && exit 0\necho no >&2\nexit 1\n",
+        &ahead(3),
+        &format!(
+            "#!/bin/sh\n[ \"$1\" = --version ] && echo halden {} && exit 0\necho no >&2\nexit 1\n",
+            ahead(3)
+        ),
         &[],
     );
-    publish(&github, &base, &signer, "0.0.3", broken, false);
+    publish(&github, &base, &signer, &ahead(3), broken, false);
     let (ok, out) = halden(&setup, &base, Some(&key), &["update", "--yes"]);
     assert!(!ok && out.contains("can't use this database"), "{out}");
 
     // Signed, but with a file outside its own folder.
-    let foreign = package(work.path(), "0.0.4", &fake_program("0.0.4"), &["evil.sh"]);
-    publish(&github, &base, &signer, "0.0.4", foreign, false);
+    let foreign = package(
+        work.path(),
+        &ahead(4),
+        &fake_program(&ahead(4)),
+        &["evil.sh"],
+    );
+    publish(&github, &base, &signer, &ahead(4), foreign, false);
     let (ok, out) = halden(&setup, &base, Some(&key), &["update", "--yes"]);
     assert!(!ok && out.contains("not a Halden server package"), "{out}");
     assert_eq!(std::fs::read(&setup.installed).unwrap(), b"the old program");
@@ -353,8 +382,9 @@ async fn an_update_asked_for_in_the_app() {
     let key = signer.public();
     let setup = set_up().await;
     let work = tempfile::tempdir().unwrap();
-    let release = package(work.path(), "0.0.1", &fake_program("0.0.1"), &[]);
-    publish(&github, &base, &signer, "0.0.1", release, false);
+    let new = ahead(1);
+    let release = package(work.path(), &new, &fake_program(&new), &[]);
+    publish(&github, &base, &signer, &new, release, false);
 
     let port = TcpListener::bind("127.0.0.1:0")
         .unwrap()
@@ -449,7 +479,9 @@ async fn an_update_asked_for_in_the_app() {
         .await
         .unwrap();
     assert_eq!(checked["state"], "available", "{checked}");
-    assert_eq!(checked["latest"], "0.0.1");
+    assert_eq!(checked["latest"], new.as_str());
+    assert_eq!(checked["beta"], false);
+    assert!(checked["testVersion"].is_null(), "{checked}");
 
     let unconfirmed = http
         .post(format!("{api}/admin/update/install"))
@@ -479,7 +511,7 @@ async fn an_update_asked_for_in_the_app() {
     assert!(!request.exists(), "the request is used up");
     assert_eq!(
         std::fs::read_to_string(&setup.installed).unwrap(),
-        fake_program("0.0.1")
+        fake_program(&new)
     );
     // Without a request, nothing happens.
     std::fs::write(&setup.installed, "the old program").unwrap();

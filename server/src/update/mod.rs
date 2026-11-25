@@ -24,7 +24,7 @@ use std::{sync::Arc, time::Duration};
 use anyhow::{Context, Result};
 
 pub use self::{
-    release::{Found, Release},
+    release::{Checked, Found, Release},
     status::{UpdateState, UpdateStatus},
 };
 use crate::VERSION;
@@ -34,7 +34,7 @@ pub const REPOSITORY: &str = "lucaskleinsteuber/Halden";
 /// The owner's minisign public key: the second line of `halden.pub` (it starts with `RW`).
 /// While it is empty, this build installs no update at all and says so (see
 /// `docs/UPDATE_SIGNING.md`).
-pub const RELEASE_KEY: &str = "";
+pub const RELEASE_KEY: &str = "RWTs0qnx3DCwBdiw9Jmq5FYharADL9IMQE026EHwOd0aftNjjIDxoIoo";
 
 /// Biggest package the updater downloads.
 pub const MAX_PACKAGE_BYTES: u64 = 300 * 1024 * 1024;
@@ -99,8 +99,9 @@ pub fn client() -> Result<reqwest::Client> {
         .context("could not set up the HTTP client")
 }
 
-/// Looks for a newer version. `Ok(None)`: this one is the newest.
-pub async fn check(source: &Source, beta: bool) -> Result<Option<Found>> {
+/// Looks for a newer version (`found` is `None` when this one is the newest), and with test
+/// versions off for a newer test version.
+pub async fn check(source: &Source, beta: bool) -> Result<Checked> {
     let client = client()?;
     let response = client
         .get(&source.releases_url)
@@ -117,7 +118,7 @@ pub async fn check(source: &Source, beta: bool) -> Result<Option<Found>> {
         .await
         .context("GitHub's answer broke off")?;
     let releases = release::parse(&body)?;
-    Ok(release::choose(&releases, &current(), beta, arch()))
+    Ok(release::look(&releases, &current(), beta, arch()))
 }
 
 #[cfg(test)]

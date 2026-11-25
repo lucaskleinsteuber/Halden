@@ -89,7 +89,8 @@ jobs:
         run: |
           version="${GITHUB_REF_NAME#server-v}"
           flags=(--draft --title "Halden server $version" --notes "Signed and published by the owner; see CHANGELOG.md.")
-          case "$version" in *-*) flags+=(--prerelease) ;; esac
+          # Test versions, and every version while Halden is 0.x, are pre-releases.
+          case "$version" in 0.*|*-*) flags+=(--prerelease) ;; esac
           gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" "${flags[@]}" dist/*.tar.gz dist/SHA256SUMS
       - name: Keep the dry run's packages
         if: github.event_name != 'push'
