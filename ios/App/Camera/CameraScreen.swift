@@ -26,6 +26,10 @@ struct CameraScreen<Gallery: View>: View {
     @State private var manualValue: ManualPanel.Value?
     /// The focus is being turned by hand: the picture bigger, to see what is sharp.
     @State private var focusing = false
+    @State private var motion = MotionTracker()
+    @State private var focalBadge: FocalLength?
+    @State private var focalBadgeTicks = 0
+    @State private var smudgeDismissed = false
     /// The highlight that glides between the lens buttons.
     @Namespace private var lens
 
@@ -45,11 +49,25 @@ struct CameraScreen<Gallery: View>: View {
             }
             Color.black.opacity(flash ? 0.6 : 0).ignoresSafeArea().allowsHitTesting(false)
         }
-        .onAppear { camera.appear() }
-        .onDisappear { camera.disappear() }
+        .onAppear {
+            camera.appear()
+            motion.setEnabled(settings.showLevel)
+        }
+        .onDisappear {
+            motion.stop()
+            camera.disappear()
+        }
+        .onChange(of: settings.showLevel) { _, on in motion.setEnabled(on) }
+        .onChange(of: state.lensSmudged) { _, smudged in if !smudged { smudgeDismissed = false } }
+        .onChange(of: state.side) { _, _ in smudgeDismissed = false }
         .onChange(of: camera.shots) {
             flash = true
             withAnimation(.easeOut(duration: 0.2)) { flash = false }
+        }
+        .task(id: focalBadgeTicks) {
+            guard focalBadge != nil else { return }
+            try? await Task.sleep(for: .seconds(1.5))
+            if !Task.isCancelled { withAnimation(.easeOut(duration: 0.2)) { focalBadge = nil } }
         }
         .task(id: focusPoint) {
             guard focusPoint != nil else { return }
@@ -120,6 +138,9 @@ struct CameraScreen<Gallery: View>: View {
             }
         }
         .aspectRatio(ratio, contentMode: .fit)
+        .overlay {
+            if state.ready && settings.showLevel { LevelOverlay(reading: motion.reading) }
+        }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: fullFrame ? .center : .top)
         .padding(.top, fullFrame ? 0 : Self.topBarHeight)
         .ignoresSafeArea(edges: fullFrame ? .all : [])
@@ -145,6 +166,20 @@ struct CameraScreen<Gallery: View>: View {
     private var controlStack: some View {
         VStack(spacing: 0) {
             topBar
+            if state.lensSmudged && !smudgeDismissed {
+                Button {
+                    smudgeDismissed = true
+                } label: {
+                    Label("Clean Camera Lens", systemImage: "sparkles")
+                        .font(.caption.bold())
+                        .foregroundStyle(.yellow)
+                        .padding(.horizontal, 12)
+                        .frame(minWidth: 44, minHeight: 44)
+                        .background(.black.opacity(0.75), in: .capsule)
+                }
+                .padding(.top, 8)
+                .accessibilityIdentifier("lens-smudge-hint")
+            }
             Spacer(minLength: 0)
             if let problem = camera.problem {
                 Text(problem)
@@ -164,6 +199,17 @@ struct CameraScreen<Gallery: View>: View {
                     .padding(.bottom, 4)
                     .transition(.opacity.combined(with: .move(edge: .bottom)))
             } else {
+                if let focalBadge {
+                    Text(focalBadge.label)
+                        .font(.caption.bold().monospacedDigit())
+                        .foregroundStyle(.yellow)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 4)
+                        .background(.black.opacity(0.65), in: .capsule)
+                        .padding(.bottom, 4)
+                        .transition(.opacity)
+                        .accessibilityIdentifier("focal-length-badge")
+                }
                 zoomControl.frame(height: 56)
             }
             modeStrip
@@ -518,7 +564,12 @@ struct CameraScreen<Gallery: View>: View {
                     ForEach(state.presets, id: \.self) { preset in
                         let isActive = active == preset
                         Button {
-                            camera.zoom(to: preset, glide: true)
+                            if let badge = camera.tapZoomPreset(preset) {
+                                withAnimation(.snappy(duration: 0.2)) { focalBadge = badge }
+                                focalBadgeTicks += 1
+                            } else {
+                                focalBadge = nil
+                            }
                         } label: {
                             ZStack {
                                 // One highlight that glides to the chosen lens.

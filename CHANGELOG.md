@@ -10,6 +10,11 @@ part of the first versions.
 
 ### Added
 
+- Composition and video recording locks: CoreMotion horizon and overhead/flat-lay crosshair
+  level (`LevelOverlay`, `Composition`), 24 / 28 / 35 mm focal-length cycling when tapping the
+  active 1× lens button, front-camera mirroring, geometric lens distortion correction,
+  dismissible smudged-lens warning banner (where supported), and options under Settings › Camera
+  › Record Video to lock the active lens and white balance while filming.
 - In-camera iOS 26 control drawer (`CameraDrawer`, opened by the top-bar chevron or swiping up
   over the modes) with photo controls (flash, Live Photo, EV −2…+2 slider, aspect ratio
   4:3/16:9/1:1, timer off/3/5/10 s, 12/24/48 MP resolution, Bayer RAW DNG) and video controls

@@ -58,14 +58,23 @@ the design comes after that. What works today is described below.
   newest one in the library (its thumbnail, or its own file when the thumbnail isn't made yet).
   A tap opens it full screen, with "All Photos" leading on to the library; with no photos yet
   it opens the library at once.
-- **Zoom** (`Zoom`, `ZoomShown`): in doublings, as people know it. A lens button glides there in
+- **Zoom** (`Zoom`, `ZoomShown`, `LevelMath`): in doublings, as people know it. A lens button glides there in
   0.3 s however far it is (`ramp(toVideoZoomFactor:withRate:)`), pinching and the dial follow
   the finger with a quick ramp, so steps between touches don't show. The buttons show the zoom
   asked for at once (a tap on "2" says "2×" while the picture glides), and one highlight glides
-  to the chosen lens; the camera's own zoom shows only when something else changed it. The
+  to the chosen lens; the camera's own zoom shows only when something else changed it. Tapping
+  the active "1×" button on the main back camera cycles through 24 mm (1×), 28 mm (1.2×) and
+  35 mm (1.5×), starting at the default focal length chosen in Settings › Camera. The
   highest zoom is a round number (`Zoom.highest`: a camera that stops at 9.94 offers 10).
   Dragging the zoom buttons sideways turns them into a dial with a mark at every lens; a light
   tick when a lens is passed.
+- **Composition & video locks** (`Composition`, `LevelOverlay`, `MotionTracker`): optional
+  CoreMotion level showing a thin broken horizon bar on slight tilt (snapping yellow with light
+  haptics when straight, then fading out) and twin overhead crosshairs when aiming straight down
+  or up (flat-lay). Front-camera mirroring, geometric lens distortion correction
+  (`isGeometricDistortionCorrectionEnabled`), hardware lens-smudge detection hints
+  (`cameraLensSmudgeDetectionStatus`, dismissible banner), and optional camera-lens
+  (`primaryConstituentDeviceSwitchingBehavior`) and white-balance locks while recording video.
 - **Live Photos** (on by default, like Apple's camera; the button on top or Settings ›
   Camera): the photo and 1.5 s of video with sound before and after, taken together by
   `AVCapturePhotoOutput` with the same content identifier, the video with place and time. The

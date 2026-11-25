@@ -165,6 +165,24 @@ final class LayoutTests: XCTestCase {
             bar.buttons.firstMatch.tap()
             settle()
         }
+
+        // Turn on the camera level and check the camera screen with the level overlay visible.
+        let camSettings = app.buttons["camera-settings"]
+        for _ in 0..<6 where !camSettings.isHittable { app.swipeDown() }
+        if camSettings.exists {
+            camSettings.tap()
+            settle()
+            let levelToggle = app.switches["settings-show-level"]
+            for _ in 0..<8 where !levelToggle.isHittable { app.swipeUp() }
+            if levelToggle.exists {
+                levelToggle.switches.firstMatch.tap()
+                settle(0.4)
+                tabs.buttons["Camera"].tap()
+                XCTAssertTrue(app.buttons["shutter"].waitForExistence(timeout: 10))
+                settle()
+                shot("camera-level")
+            }
+        }
     }
 
     /// Lets animations finish before looking.

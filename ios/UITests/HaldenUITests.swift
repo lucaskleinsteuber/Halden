@@ -227,6 +227,49 @@ final class HaldenUITests: XCTestCase {
         XCTAssertTrue(app.buttons["topbar-reset"].exists)
     }
 
+    /// Tapping 1× cycles 24 / 28 / 35 mm focal lengths, Composition & Video Lock settings toggle
+    /// cleanly, and the level overlay and lens-smudge banner appear when triggered.
+    @MainActor
+    func testCompositionFocalLengthsLevelAndVideoLocks() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-ui-testing-signed-in", "-ui-testing-smudge"]
+        app.launch()
+        let one = app.buttons["zoom-1"]
+        XCTAssertTrue(one.waitForExistence(timeout: 10))
+        XCTAssertEqual(one.value as? String, "1×")
+
+        // Lens smudge hint is visible and dismissible.
+        let smudge = app.buttons["lens-smudge-hint"]
+        XCTAssertTrue(smudge.waitForExistence(timeout: 5))
+        smudge.tap()
+        XCTAssertTrue(smudge.waitForNonExistence(timeout: 5))
+
+        // Tapping active 1× cycles 24 mm (1×) → 28 mm (1.2×) → 35 mm (1.5×) → 24 mm (1×).
+        one.tap()
+        XCTAssertEqual(one.value as? String, "1.2×")
+        XCTAssertEqual(app.staticTexts["focal-length-badge"].label, "28 mm")
+        one.tap()
+        XCTAssertEqual(one.value as? String, "1.5×")
+        XCTAssertEqual(app.staticTexts["focal-length-badge"].label, "35 mm")
+        one.tap()
+        XCTAssertEqual(one.value as? String, "1×")
+        XCTAssertEqual(app.staticTexts["focal-length-badge"].label, "24 mm")
+
+        // Settings › Camera: toggle Lock camera, Lock white balance, and Level, then verify level.
+        let tabs = Tabs(app)
+        tabs.buttons["Settings"].tap()
+        app.buttons["camera-settings"].tap()
+        XCTAssertTrue(app.navigationBars["Camera"].waitForExistence(timeout: 5))
+        for id in ["settings-lock-camera", "settings-lock-wb", "settings-show-level"] {
+            let toggle = app.switches[id]
+            for _ in 0..<8 where !toggle.isHittable { app.swipeUp() }
+            XCTAssertTrue(toggle.waitForExistence(timeout: 5), id)
+            toggle.switches.firstMatch.tap()
+        }
+        tabs.buttons["Camera"].tap()
+        XCTAssertTrue(app.descendants(matching: .any)["camera-level"].waitForExistence(timeout: 5))
+    }
+
     /// Fifty thousand photos scroll without waiting for pictures.
     @MainActor
     func testTheGridScrollsThroughFiftyThousandPhotos() {

@@ -79,6 +79,17 @@ final class CameraModel {
         backend.flip()
     }
 
+    /// Tapping a zoom button: glides there, and on the main back 1× button cycles 24 / 28 / 35 mm.
+    /// Returns the newly chosen focal length when a focal-length preset should be shown briefly.
+    func tapZoomPreset(_ preset: Double) -> FocalLength? {
+        let active = Zoom.activePreset(for: zoom, presets: backend.state.presets)
+        let result = LevelMath.focalTap(
+            currentZoom: zoom, defaultFocal: settings().defaultFocalLength, activePreset: active,
+            presetTapped: preset, isBackCamera: backend.state.side == .back, zoomRange: backend.state.zoomRange)
+        zoom(to: result.zoom, glide: true)
+        return result.badge
+    }
+
     /// Hands a mode or format to the camera; meanwhile the picture is blurred. It clears again
     /// once the camera has the new one and a frame later, at the earliest when the frame has
     /// changed its shape on the screen.
@@ -109,6 +120,9 @@ final class CameraModel {
         let options = CaptureOptions(current)
         applied = options
         backend.prepare(mode: mode, options: options)
+        if current.defaultFocalLength != .mm24 {
+            zoom(to: current.defaultFocalLength.zoomFactor, glide: false)
+        }
         if current.keepManualSettings, let kept = current.keptManual {
             manual = kept
             backend.setManual(kept)
@@ -240,7 +254,8 @@ final class CameraModel {
             trueNorth: location.compass?.trueNorth ?? false, takenAt: now,
             live: settings.livePhotos && backend.state.canLive && !raw,
             resolution: settings.photoResolution, raw: raw,
-            prioritizeFaster: settings.prioritizeFasterShooting)
+            prioritizeFaster: settings.prioritizeFasterShooting,
+            mirrorFrontCamera: settings.mirrorFrontCamera)
         Task {
             guard var photo = await backend.takePhoto(request) else {
                 problem = "The photo could not be taken."

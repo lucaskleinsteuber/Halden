@@ -54,6 +54,10 @@ public struct AppSettings: Codable, Sendable, Equatable {
     public var videoHDR = false
     /// Automatically lower the video frame rate in low light when supported.
     public var autoLowLightFPS = false
+    /// Keep the active camera lens locked while recording video (no automatic lens switching).
+    public var lockVideoCamera = false
+    /// Lock white balance at the start of a video recording.
+    public var lockVideoWhiteBalance = false
     public var flash = Flash.auto
     public var showGrid = false
     /// Show the horizon / flat-lay level in the camera.
@@ -120,7 +124,7 @@ public struct AppSettings: Codable, Sendable, Equatable {
     enum CodingKeys: String, CodingKey {
         case uploadOverCellular, videosOnlyOnWiFi, onlyOnHomeNetwork, keepLocalCopies
         case photoFormat, photoAspectRatio, photoResolution, captureRAW
-        case videoResolution, videoFrameRate, videoHDR, autoLowLightFPS
+        case videoResolution, videoFrameRate, videoHDR, autoLowLightFPS, lockVideoCamera, lockVideoWhiteBalance
         case flash, showGrid, showLevel, mirrorFrontCamera, lensCorrection
         case livePhotos, slowMotionRate, timeLapseInterval
         case prioritizeFasterShooting, allowAudioPlayback, defaultFocalLength, volumeUpForBurst
@@ -151,6 +155,8 @@ public struct AppSettings: Codable, Sendable, Equatable {
         read(.videoFrameRate, into: &settings.videoFrameRate)
         read(.videoHDR, into: &settings.videoHDR)
         read(.autoLowLightFPS, into: &settings.autoLowLightFPS)
+        read(.lockVideoCamera, into: &settings.lockVideoCamera)
+        read(.lockVideoWhiteBalance, into: &settings.lockVideoWhiteBalance)
         read(.flash, into: &settings.flash)
         read(.showGrid, into: &settings.showGrid)
         read(.showLevel, into: &settings.showLevel)

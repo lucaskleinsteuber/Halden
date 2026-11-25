@@ -12,6 +12,7 @@ final class StandInCamera: CaptureBackend {
         ready: true, side: .back, canFlip: true, presets: [0.5, 1, 2], zoom: 1, zoomRange: 0.5...10,
         hasFlash: true, hasTorch: true, canLive: true, canRAW: true,
         availableResolutions: [.mp12, .mp24, .mp48],
+        lensSmudged: ProcessInfo.processInfo.arguments.contains("-ui-testing-smudge"),
         manualLimits: ManualLimits(shutter: (1.0 / 8000)...1, iso: 50...3200, exposureBias: -8...8))
     private(set) var readings = CameraReadings(shutter: 1.0 / 120, iso: 100, kelvin: 5200, tint: 0, focus: 0.5)
     @ObservationIgnored let previewView: UIView = StandInPreview()
@@ -22,6 +23,9 @@ final class StandInCamera: CaptureBackend {
 
     func prepare(mode: CameraMode, options video: CaptureOptions) {
         self.mode = mode
+        if ProcessInfo.processInfo.arguments.contains("-ui-testing-smudge") {
+            state.lensSmudged = true
+        }
     }
 
     func start() {}

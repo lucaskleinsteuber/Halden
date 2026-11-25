@@ -18,6 +18,8 @@ final class DeviceCamera: CaptureBackend {
     @ObservationIgnored private var rotationObservation: NSKeyValueObservation?
     @ObservationIgnored private var zoomObservation: NSKeyValueObservation?
     @ObservationIgnored private var zoomRelay: Relay<Double>?
+    @ObservationIgnored private var smudgeObservation: NSKeyValueObservation?
+    @ObservationIgnored private var smudgeRelay: Relay<Bool>?
     private(set) var readings = CameraReadings()
     @ObservationIgnored private var readingsWatch: ReadingsWatch?
     @ObservationIgnored private var configured = false
@@ -31,6 +33,7 @@ final class DeviceCamera: CaptureBackend {
             Task { @MainActor in self?.update(state, device: device?.value) }
         }
         zoomRelay = Relay { [weak self] zoom in self?.state.zoom = zoom }
+        smudgeRelay = Relay { [weak self] smudged in self?.state.lensSmudged = smudged }
         readingsWatch = ReadingsWatch { [weak self] readings in
             if self?.readings != readings { self?.readings = readings }
         }
@@ -170,11 +173,15 @@ final class DeviceCamera: CaptureBackend {
 
     private func update(_ new: CameraState, device: AVCaptureDevice?) {
         var new = new
-        // The zoom comes from the camera as it changes (below); a state sent before that is older.
-        if device == nil { new.zoom = state.zoom }
+        // The zoom and smudge status come from KVO on the device; a state sent without a new device is older.
+        if device == nil {
+            new.zoom = state.zoom
+            new.lensSmudged = state.lensSmudged
+        }
         state = new
         guard let device, device !== rotation?.device else { return }
         if let zoomRelay { zoomObservation = Self.follow(zoomOf: device, into: zoomRelay) }
+        if let smudgeRelay { smudgeObservation = Self.follow(smudgeOf: device, into: smudgeRelay) }
         readingsWatch?.watch(device)
         let coordinator = AVCaptureDevice.RotationCoordinator(device: device, previewLayer: preview.previewLayer)
         rotation = coordinator
@@ -199,6 +206,15 @@ final class DeviceCamera: CaptureBackend {
         let multiplier = Double(device.displayVideoZoomFactorMultiplier)
         return device.observe(\.videoZoomFactor, options: [.initial, .new]) { @Sendable device, change in
             relay.send(Double(change.newValue ?? device.videoZoomFactor) * multiplier)
+        }
+    }
+
+    nonisolated private static func follow(smudgeOf device: AVCaptureDevice, into relay: Relay<Bool>)
+        -> NSKeyValueObservation
+    {
+        device.observe(\.cameraLensSmudgeDetectionStatus, options: [.initial, .new]) { @Sendable device, change in
+            let status = change.newValue ?? device.cameraLensSmudgeDetectionStatus
+            relay.send(status == .smudged)
         }
     }
 
@@ -263,6 +279,8 @@ final class CaptureCore: NSObject, @unchecked Sendable {
     private var state = CameraState()
     private var photos: [Int64: PhotoCapture] = [:]
     private var recording: Recording?
+    private var lockedSwitchingForRecording = false
+    private var lockedWhiteBalanceForRecording = false
     private var wantRunning = false
     private var observers: [NSObjectProtocol] = []
     /// Gets every new state (and the camera, when it changed).
@@ -371,6 +389,7 @@ final class CaptureCore: NSObject, @unchecked Sendable {
             timeLapsing = false
             timeLapse.finish { _, _ in }
         }
+        unlockAfterRecording()
         if session.isRunning { session.stopRunning() }
     }
 
@@ -459,6 +478,73 @@ final class CaptureCore: NSObject, @unchecked Sendable {
             if let connection = frameOutput.connection(with: .video), connection.isVideoStabilizationSupported {
                 connection.preferredVideoStabilizationMode = .auto
             }
+        }
+        applyComposition(on: device)
+    }
+
+    /// Geometric distortion correction and lens smudge detection (where supported by hardware).
+    private func applyComposition(on device: AVCaptureDevice) {
+        guard (try? device.lockForConfiguration()) != nil else { return }
+        if device.isGeometricDistortionCorrectionSupported {
+            device.isGeometricDistortionCorrectionEnabled = video?.lensCorrection ?? true
+        }
+        if device.activeFormat.isCameraLensSmudgeDetectionSupported {
+            device.setCameraLensSmudgeDetectionEnabled(
+                true, detectionInterval: CMTime(seconds: 3, preferredTimescale: 1))
+        }
+        device.unlockForConfiguration()
+    }
+
+    private func applyMirroring(on connection: AVCaptureConnection, mirror: Bool) {
+        guard connection.isVideoMirroringSupported else { return }
+        if side == .front {
+            connection.automaticallyAdjustsVideoMirroring = false
+            connection.isVideoMirrored = mirror
+        } else {
+            connection.automaticallyAdjustsVideoMirroring = true
+        }
+    }
+
+    /// Locks the active constituent lens and/or white balance for the duration of a recording.
+    private func lockForRecording(on device: AVCaptureDevice) {
+        guard (try? device.lockForConfiguration()) != nil else { return }
+        defer { device.unlockForConfiguration() }
+        if video?.lockVideoCamera == true, device.isVirtualDevice,
+            device.primaryConstituentDeviceSwitchingBehavior != .unsupported
+        {
+            device.setPrimaryConstituentDeviceSwitchingBehavior(.locked, restrictedSwitchingBehaviorConditions: [])
+            lockedSwitchingForRecording = true
+        }
+        if video?.lockVideoWhiteBalance == true, manual.whiteBalance == nil,
+            device.isWhiteBalanceModeSupported(.locked)
+        {
+            var gains = device.deviceWhiteBalanceGains
+            let most = device.maxWhiteBalanceGain
+            gains.redGain = min(max(gains.redGain, 1), most)
+            gains.greenGain = min(max(gains.greenGain, 1), most)
+            gains.blueGain = min(max(gains.blueGain, 1), most)
+            device.setWhiteBalanceModeLocked(with: gains)
+            lockedWhiteBalanceForRecording = true
+        }
+    }
+
+    private func unlockAfterRecording() {
+        guard lockedSwitchingForRecording || lockedWhiteBalanceForRecording else { return }
+        let unlockSwitching = lockedSwitchingForRecording
+        let unlockWB = lockedWhiteBalanceForRecording
+        lockedSwitchingForRecording = false
+        lockedWhiteBalanceForRecording = false
+        guard let device, (try? device.lockForConfiguration()) != nil else { return }
+        defer { device.unlockForConfiguration() }
+        if unlockSwitching, device.isVirtualDevice,
+            device.primaryConstituentDeviceSwitchingBehavior != .unsupported
+        {
+            device.setPrimaryConstituentDeviceSwitchingBehavior(.auto, restrictedSwitchingBehaviorConditions: [])
+        }
+        if unlockWB, manual.whiteBalance == nil,
+            device.isWhiteBalanceModeSupported(.continuousAutoWhiteBalance)
+        {
+            device.whiteBalanceMode = .continuousAutoWhiteBalance
         }
     }
 
@@ -714,6 +800,7 @@ final class CaptureCore: NSObject, @unchecked Sendable {
             return done(nil)
         }
         if connection.isVideoRotationAngleSupported(angle) { connection.videoRotationAngle = angle }
+        applyMirroring(on: connection, mirror: request.mirrorFrontCamera)
         let heic = request.format == .heic && photoOutput.availablePhotoCodecTypes.contains(.hevc)
         let processedFormat: [String: Any] = [AVVideoCodecKey: heic ? AVVideoCodecType.hevc : .jpeg]
         let rawFormat = request.raw ? availableBayerRAW() : nil
@@ -760,6 +847,8 @@ final class CaptureCore: NSObject, @unchecked Sendable {
             guard session.isRunning, !timeLapsing, let connection = frameOutput.connection(with: .video) else { return }
             // The frames come upright, so the file needs no turning.
             if connection.isVideoRotationAngleSupported(angle) { connection.videoRotationAngle = angle }
+            applyMirroring(on: connection, mirror: video?.mirrorFrontCamera == true)
+            if let device { lockForRecording(on: device) }
             timeLapsing = true
             timeLapse.begin(url: request.url, fixedInterval: video?.timeLapseInterval, metadata: metadata)
             return
@@ -768,6 +857,8 @@ final class CaptureCore: NSObject, @unchecked Sendable {
             let connection = movieOutput.connection(with: .video)
         else { return }
         if connection.isVideoRotationAngleSupported(angle) { connection.videoRotationAngle = angle }
+        applyMirroring(on: connection, mirror: video?.mirrorFrontCamera == true)
+        if let device { lockForRecording(on: device) }
         movieOutput.metadata = metadata
         let recording = Recording()
         self.recording = recording
@@ -776,6 +867,7 @@ final class CaptureCore: NSObject, @unchecked Sendable {
 
     /// The finished file, and for a time-lapse which stretches were taken how often.
     func stopRecording(done: @escaping @Sendable (URL?, TimeLapsePlan?) -> Void) {
+        unlockAfterRecording()
         if timeLapsing {
             timeLapsing = false
             return timeLapse.finish { url, plan in done(url, plan) }

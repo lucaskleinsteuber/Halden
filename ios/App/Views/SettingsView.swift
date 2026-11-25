@@ -340,6 +340,18 @@ struct CameraSettings: View {
                         "Allow audio playback",
                         "Let music or podcasts keep playing while recording video.")
                 }
+                Toggle(isOn: app.setting(\.lockVideoCamera)) {
+                    Explained(
+                        "Lock camera",
+                        "Prevent automatic switching between lenses while recording video.")
+                }
+                .accessibilityIdentifier("settings-lock-camera")
+                Toggle(isOn: app.setting(\.lockVideoWhiteBalance)) {
+                    Explained(
+                        "Lock white balance",
+                        "Hold colour temperature steady once a video recording starts.")
+                }
+                .accessibilityIdentifier("settings-lock-wb")
             } header: {
                 Text("Record Video")
             } footer: {
@@ -372,15 +384,19 @@ struct CameraSettings: View {
                 Toggle(isOn: app.setting(\.showGrid)) {
                     Explained("Grid", "Lines in thirds over the picture, to line it up.")
                 }
+                .accessibilityIdentifier("settings-show-grid")
                 Toggle(isOn: app.setting(\.showLevel)) {
                     Explained("Level", "Horizon line and overhead crosshairs when the iPhone is slightly tilted.")
                 }
+                .accessibilityIdentifier("settings-show-level")
                 Toggle(isOn: app.setting(\.mirrorFrontCamera)) {
                     Explained("Mirror front camera", "Save selfies the same way they look in the preview.")
                 }
+                .accessibilityIdentifier("settings-mirror-front")
                 Toggle(isOn: app.setting(\.lensCorrection)) {
                     Explained("Lens correction", "Straighten optical distortion on ultra-wide and front lenses.")
                 }
+                .accessibilityIdentifier("settings-lens-correction")
             }
         }
         .navigationTitle("Camera")

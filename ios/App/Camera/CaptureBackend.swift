@@ -33,6 +33,10 @@ struct CaptureOptions: Equatable, Sendable {
     var captureRAW: Bool
     var prioritizeFasterShooting: Bool
     var allowAudioPlayback: Bool
+    var mirrorFrontCamera: Bool
+    var lensCorrection: Bool
+    var lockVideoCamera: Bool
+    var lockVideoWhiteBalance: Bool
     var slowMotionRate: Int
     /// Seconds between pictures of a time-lapse; `nil` for automatic.
     var timeLapseInterval: Double?
@@ -47,6 +51,10 @@ struct CaptureOptions: Equatable, Sendable {
         captureRAW = settings.captureRAW
         prioritizeFasterShooting = settings.prioritizeFasterShooting
         allowAudioPlayback = settings.allowAudioPlayback
+        mirrorFrontCamera = settings.mirrorFrontCamera
+        lensCorrection = settings.lensCorrection
+        lockVideoCamera = settings.lockVideoCamera
+        lockVideoWhiteBalance = settings.lockVideoWhiteBalance
         slowMotionRate = settings.slowMotionRate
         timeLapseInterval = settings.timeLapseInterval > 0 ? settings.timeLapseInterval : nil
     }
@@ -71,6 +79,8 @@ struct CameraState: Equatable, Sendable {
     var canRAW = false
     /// Photo resolutions the active camera supports (subset of 12 / 24 / 48 MP).
     var availableResolutions: [PhotoResolution] = [.mp12]
+    /// True when the camera detects a smudged lens (where supported by hardware).
+    var lensSmudged = false
     /// What can be set by hand on this camera now; `nil` when nothing.
     var manualLimits: ManualLimits?
     /// The video format actually used (the wished one may not exist on this camera).
@@ -106,6 +116,8 @@ struct PhotoRequest: Sendable {
     var raw = false
     /// Prefer faster capture over maximum processing latency.
     var prioritizeFaster = true
+    /// Mirror front-camera photos so they match the preview.
+    var mirrorFrontCamera = false
 }
 
 struct VideoRequest: Sendable {
