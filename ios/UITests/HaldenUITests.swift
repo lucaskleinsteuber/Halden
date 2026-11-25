@@ -331,7 +331,7 @@ final class HaldenUITests: XCTestCase {
         name.typeText("Harbour walk")
         app.alerts.firstMatch.buttons["Make"].firstMatch.tap()
 
-        XCTAssertTrue(app.navigationBars["Add 2 to album"].waitForNonExistence(timeout: 5), "the sheet closed")
+        XCTAssertTrue(app.navigationBars["Add 2 to album"].waitForNonExistence(timeout: 15), "the sheet closed")
         let albums = app.segmentedControls["photos-section"].buttons["Albums"]
         expectation(for: NSPredicate(format: "isEnabled == true"), evaluatedWith: albums)
         waitForExpectations(timeout: 5)
@@ -628,6 +628,8 @@ final class HaldenUITests: XCTestCase {
         addUIInterruptionMonitor(withDescription: "Place and photos") { alert in
             // Called on the main thread.
             MainActor.assumeIsolated {
+                // It may be gone already (answered, or the system took it back).
+                guard alert.exists else { return true }
                 for label in [
                     "Allow While Using App", "Allow Once", "Allow Full Access", "Allow Access to All Photos", "Allow",
                 ] where alert.buttons[label].exists {

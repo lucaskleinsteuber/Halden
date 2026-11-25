@@ -238,7 +238,12 @@ final class LocationTracker: NSObject, CLLocationManagerDelegate {
     func start(accuracyWanted: Double) {
         // The best the phone can do when a few metres matter; a little less precise saves power.
         manager.desiredAccuracy = accuracyWanted <= 20 ? kCLLocationAccuracyBest : kCLLocationAccuracyNearestTenMeters
-        if manager.authorizationStatus == .notDetermined { manager.requestWhenInUseAuthorization() }
+        // In the UI tests no system question covers the screen (a fresh simulator would ask).
+        if manager.authorizationStatus == .notDetermined,
+            !ProcessInfo.processInfo.arguments.contains("-ui-testing")
+        {
+            manager.requestWhenInUseAuthorization()
+        }
         manager.startUpdatingLocation()
         if CLLocationManager.headingAvailable() { manager.startUpdatingHeading() }
     }
