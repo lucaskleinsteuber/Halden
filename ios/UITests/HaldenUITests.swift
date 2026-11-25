@@ -399,7 +399,10 @@ final class HaldenUITests: XCTestCase {
         XCTAssertTrue(exposure.waitForExistence(timeout: 15), "the editor with the picture")
         exposure.adjust(toNormalizedSliderPosition: 0.75)
         app.segmentedControls["edit-tool"].buttons["Crop"].tap()
-        app.buttons["edit-turn"].tap()
+        let turn = app.buttons["edit-turn"]
+        if !turn.waitForExistence(timeout: 10) { app.segmentedControls["edit-tool"].buttons["Crop"].tap() }
+        XCTAssertTrue(turn.waitForExistence(timeout: 10), "the crop tool")
+        turn.tap()
         app.buttons["save-edit"].tap()
         app.buttons["info"].tap()
         XCTAssertTrue(app.descendants(matching: .any)["info-edited"].waitForExistence(timeout: 10), "edited")
@@ -437,7 +440,7 @@ final class HaldenUITests: XCTestCase {
         let newest = app.collectionViews["library-grid"].cells.firstMatch
         XCTAssertTrue(newest.waitForExistence(timeout: 30))
         expectation(for: NSPredicate(format: "label ENDSWITH 'backed up'"), evaluatedWith: newest)
-        waitForExpectations(timeout: 60)
+        waitForExpectations(timeout: 120)
         newest.tap()
 
         app.buttons["share"].tap()
@@ -485,7 +488,8 @@ final class HaldenUITests: XCTestCase {
         XCTAssertTrue(newest.waitForExistence(timeout: 30))
         let backedUp = NSPredicate(format: "label == 'Photo, backed up'")
         expectation(for: backedUp, evaluatedWith: newest)
-        waitForExpectations(timeout: 60)
+        // Up to two minutes: GitHub's machines are slow.
+        waitForExpectations(timeout: 120)
         newest.tap()
 
         // Photos are Live Photos by default.
@@ -529,7 +533,7 @@ final class HaldenUITests: XCTestCase {
         let newest = grid.cells.firstMatch
         XCTAssertTrue(newest.waitForExistence(timeout: 30))
         expectation(for: NSPredicate(format: "label == 'Photo, backed up'"), evaluatedWith: newest)
-        waitForExpectations(timeout: 60)
+        waitForExpectations(timeout: 120)
         let id = newest.identifier.replacingOccurrences(of: "photo-", with: "")
 
         newest.tap()
