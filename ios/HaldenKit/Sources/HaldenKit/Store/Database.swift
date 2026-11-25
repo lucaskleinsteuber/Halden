@@ -192,6 +192,13 @@ public final class HaldenDatabase: Sendable {
                 t.add(column: "streamSha256", .text)
             }
         }
+        migrator.registerMigration("9: bursts") { db in
+            try db.alter(table: "asset") { t in
+                // Photos taken together in a burst share this id.
+                t.add(column: "burstId", .text)
+            }
+            try db.create(index: "asset_by_burst", on: "asset", columns: ["burstId"])
+        }
         return migrator
     }
 }
@@ -250,6 +257,8 @@ public struct LocalAsset: Codable, Sendable, Equatable, Identifiable, FetchableR
     public var edit: EditRecipe?
     /// A video's small copy, to stream on the go.
     public var streamSha256: String?
+    /// Shared identifier for photos taken together in a burst.
+    public var burstId: String?
 
     public var isVideo: Bool { kind == "video" }
     public var isSlowMotion: Bool { isVideo && captureMode == "slowmo" }

@@ -16,6 +16,7 @@ struct PhotoView: View {
     @State private var editingSlowMotion = false
     @State private var addingToAlbum: ChosenPhotos?
     @State private var editing = false
+    @State private var pickingBurst = false
     @State private var linking: ChosenPhotos?
     @Environment(\.dismiss) private var dismiss
 
@@ -26,6 +27,11 @@ struct PhotoView: View {
     }
 
     private var asset: LocalAsset? { app.asset(current) }
+
+    private var burstMembers: [LocalAsset] {
+        guard let asset else { return [] }
+        return app.burstMembers(for: asset)
+    }
 
     /// Shown under the date when the place was estimated (for a screenshot or from a photo nearby).
     private var estimatedPlaceNote: String {
@@ -101,6 +107,18 @@ struct PhotoView: View {
                         .accessibilityIdentifier("slow-motion")
                     }
                 }
+                if burstMembers.count > 1 {
+                    ToolbarSpacer(.flexible, placement: .bottomBar)
+                    ToolbarItem(placement: .bottomBar) {
+                        Button {
+                            pickingBurst = true
+                        } label: {
+                            Label("Select (\(burstMembers.count))", systemImage: "square.stack")
+                        }
+                        .accessibilityLabel("Select from burst of \(burstMembers.count)")
+                        .accessibilityIdentifier("burst-select")
+                    }
+                }
                 ToolbarSpacer(.flexible, placement: .bottomBar)
                 ToolbarItem(placement: .bottomBar) {
                     Button {
@@ -139,6 +157,9 @@ struct PhotoView: View {
             }
             .sheet(isPresented: $editingSlowMotion) {
                 if let asset { SlowMotionEditor(asset: asset) }
+            }
+            .sheet(isPresented: $pickingBurst) {
+                if burstMembers.count > 1 { BurstPickerView(members: burstMembers) }
             }
             .sheet(item: $sharing) { file in ShareSheet(items: file.urls) }
             .alert("Can't share", isPresented: .constant(problem != nil)) {

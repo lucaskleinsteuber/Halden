@@ -23,6 +23,10 @@ final class AppModel {
     private(set) var connection: ServerConnection?
     /// Newest first, without trash.
     private(set) var library: [LocalAsset] = []
+    /// Library with multi-photo bursts collapsed to their cover photo for the grid.
+    private(set) var gridLibrary: [LocalAsset] = []
+    /// Cover asset id → shot count for bursts with at least two photos.
+    private(set) var burstCounts: [String: Int] = [:]
     /// Goes up whenever `library` changes, so views can tell cheaply.
     private(set) var libraryVersion = 0
     /// The albums, in their order, with their cover and size.
@@ -142,6 +146,17 @@ final class AppModel {
         UploadRules.permit(on: network, atHome: atHome, settings: settings)
     }
 
+    /// All photos in the same burst as `asset` (chronological), or `[asset]` when standalone.
+    func burstMembers(for asset: LocalAsset) -> [LocalAsset] {
+        Bursts.members(of: asset, in: library, chronological: true)
+    }
+
+    /// Opens the camera in the requested mode/side and triggers a short self-timer (Siri / Shortcuts).
+    func openCameraForAction(mode: String, front: Bool, delay: Int) {
+        cameraRequests += 1
+        camera.startTimedCapture(mode: CameraMode(rawValue: mode) ?? .photo, front: front, delay: delay)
+    }
+
     /// The server answers at its home-network address (not over Tailscale).
     var atHome: Bool {
         guard let host = client?.base.host() else { return false }
@@ -225,8 +240,16 @@ final class AppModel {
             .start(in: database.writer, scheduling: .async(onQueue: .main)) { _ in
             } onChange: { [weak self] assets in
                 MainActor.assumeIsolated {
-                    self?.library = assets
-                    self?.libraryVersion += 1
+                    guard let self else { return }
+                    self.library = assets
+                    let stacks = Bursts.collapse(assets)
+                    self.gridLibrary = stacks.map(\.cover)
+                    var counts: [String: Int] = [:]
+                    for stack in stacks where stack.count > 1 {
+                        counts[stack.cover.id] = stack.count
+                    }
+                    self.burstCounts = counts
+                    self.libraryVersion += 1
                 }
             }
         albumObservation =

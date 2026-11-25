@@ -309,8 +309,8 @@ async fn record(
                  width, height, duration_ms, camera_make, camera_model, lens, latitude, longitude, \
                  altitude, location_accuracy_m, heading, location_source, edit_latitude, \
                  edit_longitude, edit_altitude, edit_location_source, exif_json, client_json, \
-                 capture_mode, created_at, updated_at, seq) \
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                 capture_mode, burst_id, created_at, updated_at, seq) \
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         )
         .bind(&row.asset_id)
         .bind(&user.id)
@@ -340,6 +340,11 @@ async fn record(
             client
                 .known_capture_mode()
                 .filter(|_| media.kind.as_str() == "video"),
+        )
+        .bind(
+            client
+                .clean_burst_id()
+                .filter(|_| media.kind.as_str() == "photo"),
         )
         .bind(now)
         .bind(now)

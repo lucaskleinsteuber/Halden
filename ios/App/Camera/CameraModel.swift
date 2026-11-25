@@ -18,6 +18,14 @@ final class CameraModel {
     /// Seconds left on the self-timer while it runs.
     private(set) var countdown: Int?
     private(set) var recordingSince: Date?
+    private(set) var recordingPausedAt: Date?
+    private(set) var recordingPausedTotal: TimeInterval = 0
+    /// True while a QuickTake video is being recorded from photo mode.
+    private(set) var isQuickTake = false
+    /// True once QuickTake has been dragged right and locked hands-free.
+    private(set) var isQuickTakeLocked = false
+    /// Active burst count while shooting a burst (`0` when not bursting).
+    private(set) var burstCount = 0
     private(set) var torch = false
     private(set) var problem: String?
     /// Goes up with every photo taken, for the flash on the screen.
@@ -42,6 +50,7 @@ final class CameraModel {
     /// Updates persisted settings when Preserve Settings rules apply on close.
     @ObservationIgnored var updateSettings: (((inout AppSettings) -> Void) -> Void)?
     @ObservationIgnored private var countdownTask: Task<Void, Never>?
+    @ObservationIgnored private var burstTask: Task<Void, Never>?
     @ObservationIgnored private var video: (request: VideoRequest, place: ClientLocation?)?
     @ObservationIgnored private var applied: CaptureOptions?
     @ObservationIgnored private var switches = 0
@@ -60,6 +69,9 @@ final class CameraModel {
     }
 
     var recording: Bool { recordingSince != nil }
+    var isRecordingPaused: Bool { recordingPausedAt != nil }
+    /// Pause/resume and still-photo-during-video are available in standard video and locked QuickTake.
+    var canPauseAndSnapStill: Bool { recording && (mode == .video || isQuickTakeLocked) }
 
     /// The zoom to show: the one asked for (at once), or the camera's when something else moved it.
     var zoom: Double {
@@ -173,6 +185,7 @@ final class CameraModel {
 
     func disappear() {
         cancelCountdown()
+        stopBurst()
         if recording { stopRecording() }
         setTorch(false)
         let current = settings()
@@ -216,13 +229,35 @@ final class CameraModel {
     /// The big button: a photo (after the self-timer), or start and stop a video.
     func shutter() {
         if countdown != nil { return cancelCountdown() }
+        if burstTask != nil { return stopBurst() }
         if recording { return stopRecording() }
         let action: () -> Void =
             mode.records ? { [weak self] in self?.startRecording() } : { [weak self] in self?.takePhoto() }
         guard timer > 0 else { return action() }
-        countdown = timer
+        runCountdown(seconds: timer, then: action)
+    }
+
+    /// Triggered by Siri / Shortcuts App Intents: switches mode and camera side if needed, then
+    /// counts down (`delay` seconds) and captures automatically.
+    func startTimedCapture(mode targetMode: CameraMode, front: Bool, delay: Int = 3) {
+        guard !recording else { return }
+        cancelCountdown()
+        stopBurst()
+        if (backend.state.side == .front) != front, backend.state.canFlip {
+            flip()
+        }
+        if mode != targetMode {
+            switchTo(targetMode)
+        }
+        let action: () -> Void =
+            targetMode.records ? { [weak self] in self?.startRecording() } : { [weak self] in self?.takePhoto() }
+        runCountdown(seconds: max(1, delay), then: action)
+    }
+
+    private func runCountdown(seconds: Int, then action: @escaping () -> Void) {
+        countdown = seconds
         countdownTask = Task { [weak self] in
-            for left in stride(from: self?.timer ?? 0, to: 0, by: -1) {
+            for left in stride(from: seconds, to: 0, by: -1) {
                 self?.countdown = left
                 try? await Task.sleep(for: .seconds(1))
                 if Task.isCancelled { return }
@@ -230,6 +265,130 @@ final class CameraModel {
             self?.countdown = nil
             action()
         }
+    }
+
+    /// Starts a QuickTake video while staying in photo mode (shutter held > 0.35 s).
+    func startQuickTake() {
+        guard mode == .photo, !recording, countdown == nil, burstTask == nil else { return }
+        let now = Date()
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("\(UUID().uuidString).mov")
+        let request = VideoRequest(
+            url: url, location: place(at: now), takenAt: now, timeZone: .current, mode: .video)
+        guard backend.startQuickTake(request) else {
+            problem = "QuickTake video could not be started."
+            return
+        }
+        problem = nil
+        video = (request, request.location)
+        isQuickTake = true
+        isQuickTakeLocked = false
+        recordingPausedAt = nil
+        recordingPausedTotal = 0
+        recordingSince = now
+    }
+
+    /// Locks an active QuickTake recording hands-free (shutter dragged right).
+    func lockQuickTake() {
+        guard isQuickTake, !isQuickTakeLocked else { return }
+        isQuickTakeLocked = true
+    }
+
+    /// Stops an unlocked QuickTake recording when the user lifts their finger.
+    func finishQuickTake() {
+        guard isQuickTake else { return }
+        stopRecording()
+    }
+
+    /// Pauses or resumes the active video / locked QuickTake recording.
+    func togglePauseRecording() {
+        guard canPauseAndSnapStill else { return }
+        let now = Date()
+        if let pausedAt = recordingPausedAt {
+            recordingPausedTotal += max(0, now.timeIntervalSince(pausedAt))
+            recordingPausedAt = nil
+            backend.resumeRecording()
+        } else {
+            recordingPausedAt = now
+            backend.pauseRecording()
+        }
+    }
+
+    /// Captures a still photo without interrupting an active video recording.
+    func takeStillWhileRecording() {
+        guard canPauseAndSnapStill else { return }
+        let now = Date()
+        let currentSettings = settings()
+        let place = place(at: now)
+        shots += 1
+        let request = PhotoRequest(
+            format: currentSettings.photoFormat, flash: .off, location: place,
+            trueNorth: location.compass?.trueNorth ?? false, takenAt: now, live: false,
+            resolution: .mp12, raw: false, prioritizeFaster: true,
+            mirrorFrontCamera: currentSettings.mirrorFrontCamera)
+        Task {
+            guard let photo = await backend.takeStillWhileRecording(request) else { return }
+            let data = photo.data
+            if let small = await Task.detached(operation: { Self.small(data) }).value {
+                withAnimation(.snappy(duration: 0.25)) { lastShot = small }
+            }
+            var metadata = Self.metadata(at: now, place: place)
+            metadata.width = photo.width
+            metadata.height = photo.height
+            keepPhoto?(photo, metadata)
+        }
+    }
+
+    /// Starts shooting a burst of rapid photos sharing one `burstId`.
+    func startBurst() {
+        guard mode == .photo, !recording, countdown == nil, burstTask == nil else { return }
+        let burstId = UUID().uuidString.lowercased()
+        burstCount = 0
+        burstTask = Task { [weak self] in
+            for _ in 0..<50 {
+                guard let self, !Task.isCancelled else { break }
+                let captured = await self.takeBurstFrame(burstId: burstId)
+                if captured {
+                    self.burstCount += 1
+                }
+                try? await Task.sleep(for: .milliseconds(120))
+            }
+        }
+    }
+
+    func stopBurst() {
+        burstTask?.cancel()
+        burstTask = nil
+        burstCount = 0
+    }
+
+    private func takeBurstFrame(burstId: String) async -> Bool {
+        let now = Date()
+        let currentSettings = settings()
+        let place = place(at: now)
+        let aspectRatio = currentSettings.photoAspectRatio
+        shots += 1
+        let request = PhotoRequest(
+            format: currentSettings.photoFormat, flash: .off, location: place,
+            trueNorth: location.compass?.trueNorth ?? false, takenAt: now, live: false,
+            resolution: .mp12, raw: false, prioritizeFaster: true,
+            mirrorFrontCamera: currentSettings.mirrorFrontCamera)
+        guard var photo = await backend.takePhoto(request) else { return false }
+        problem = nil
+        if let crop = aspectRatio.crop(forWidth: photo.width, height: photo.height) {
+            var recipe = EditRecipe()
+            recipe.crop = crop
+            photo.edit = recipe
+        }
+        let data = photo.data
+        if let small = await Task.detached(operation: { Self.small(data) }).value {
+            withAnimation(.snappy(duration: 0.25)) { lastShot = small }
+        }
+        var metadata = Self.metadata(at: now, place: place)
+        metadata.width = photo.width
+        metadata.height = photo.height
+        metadata.burstId = burstId
+        keepPhoto?(photo, metadata)
+        return true
     }
 
     private func cancelCountdown() {
@@ -306,6 +465,10 @@ final class CameraModel {
         }
         problem = nil
         video = (request, request.location)
+        isQuickTake = false
+        isQuickTakeLocked = false
+        recordingPausedAt = nil
+        recordingPausedTotal = 0
         recordingSince = now
     }
 
@@ -313,6 +476,10 @@ final class CameraModel {
         guard let (request, place) = video else { return }
         video = nil
         recordingSince = nil
+        recordingPausedAt = nil
+        recordingPausedTotal = 0
+        isQuickTake = false
+        isQuickTakeLocked = false
         Task {
             guard let url = await backend.stopRecording() else {
                 problem = "The video could not be saved."

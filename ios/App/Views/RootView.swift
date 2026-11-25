@@ -27,6 +27,12 @@ struct RootView: View {
         .onChange(of: model.photosRequests) { screen = .photos }
         // The camera control, or "Open Halden" in the lock-screen camera.
         .onReceive(NotificationCenter.default.publisher(for: .haldenOpenCamera)) { _ in model.showCamera() }
+        .onReceive(NotificationCenter.default.publisher(for: .haldenCameraAction)) { note in
+            let mode = note.userInfo?["mode"] as? String ?? "photo"
+            let front = note.userInfo?["front"] as? Bool ?? false
+            let delay = note.userInfo?["delay"] as? Int ?? 3
+            model.openCameraForAction(mode: mode, front: front, delay: delay)
+        }
         .onContinueUserActivity(NSUserActivityTypeLockedCameraCapture) { _ in model.showCamera() }
     }
 }

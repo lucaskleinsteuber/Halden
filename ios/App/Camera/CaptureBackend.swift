@@ -156,7 +156,13 @@ protocol CaptureBackend: AnyObject {
     /// Values set by hand; what is `nil` the camera decides. Kept across lenses and modes.
     func setManual(_ settings: ManualSettings)
     func takePhoto(_ request: PhotoRequest) async -> TakenPhoto?
+    /// Takes a still photo without interrupting an active video recording.
+    func takeStillWhileRecording(_ request: PhotoRequest) async -> TakenPhoto?
     func startRecording(_ request: VideoRequest) -> Bool
+    /// Starts a QuickTake video recording from photo mode (temporarily detaching Live Photos).
+    func startQuickTake(_ request: VideoRequest) -> Bool
+    func pauseRecording()
+    func resumeRecording()
     /// The finished video file, or `nil` when nothing usable was recorded.
     func stopRecording() async -> URL?
 }

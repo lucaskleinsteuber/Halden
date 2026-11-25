@@ -18,6 +18,8 @@ final class StandInCamera: CaptureBackend {
     @ObservationIgnored let previewView: UIView = StandInPreview()
     @ObservationIgnored private var taken = 0
     @ObservationIgnored private var recording: (request: VideoRequest, started: Date)?
+    @ObservationIgnored private var paused = false
+    @ObservationIgnored private var quickTaking = false
     @ObservationIgnored private var mode = CameraMode.photo
     @ObservationIgnored private var gliding: Task<Void, Never>?
 
@@ -111,15 +113,45 @@ final class StandInCamera: CaptureBackend {
         return photo
     }
 
+    func takeStillWhileRecording(_ request: PhotoRequest) async -> TakenPhoto? {
+        guard recording != nil else { return nil }
+        let seed = nextSeed()
+        let data = await Task.detached { SampleMedia.photo(seed: seed) }.value
+        guard let data else { return nil }
+        return TakenPhoto(data: data, heic: false, width: 1600, height: 1200)
+    }
+
     func startRecording(_ request: VideoRequest) -> Bool {
         guard mode.records, recording == nil else { return false }
+        paused = false
+        quickTaking = false
         recording = (request, Date())
         return true
+    }
+
+    func startQuickTake(_ request: VideoRequest) -> Bool {
+        guard mode == .photo, recording == nil else { return false }
+        paused = false
+        quickTaking = true
+        recording = (request, Date())
+        return true
+    }
+
+    func pauseRecording() {
+        guard recording != nil else { return }
+        paused = true
+    }
+
+    func resumeRecording() {
+        guard recording != nil else { return }
+        paused = false
     }
 
     func stopRecording() async -> URL? {
         guard let (request, started) = recording else { return nil }
         recording = nil
+        paused = false
+        quickTaking = false
         let seconds = min(max(Date().timeIntervalSince(started), 1), 5)
         let seed = nextSeed()
         do {

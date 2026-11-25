@@ -30,6 +30,11 @@ enum UITestWorld {
                 asset.backedUp = index % 9 != 0
                 asset.thumbnailSha256 = shas[index % colors]
                 asset.durationMs = asset.isVideo ? Int64(5_000 + index % 60_000) : nil
+                if count >= 10, (3...5).contains(index) {
+                    asset.kind = "photo"
+                    asset.durationMs = nil
+                    asset.burstId = "00000000-0000-4000-8000-bbbbbbbbbbbb"
+                }
                 asset.seq = Int64(count - index)
                 // Places all over Europe (the same every time); one in ten has none, some are
                 // estimated.

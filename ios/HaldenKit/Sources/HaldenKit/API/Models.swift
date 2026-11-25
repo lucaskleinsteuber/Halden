@@ -118,6 +118,8 @@ public struct Asset: Codable, Sendable, Equatable {
     public var description: String?
     /// How a video was taken: `slowmo` or `timelapse`.
     public var captureMode: String?
+    /// Shared identifier for photos taken together in a burst.
+    public var burstId: String?
     /// The slow part of a slow-motion video, if it was changed.
     public var playback: SlowMotion?
     /// Light, colour, crop and trim as set by hand; the original stays as it is.
@@ -150,13 +152,17 @@ public struct UploadMetadata: Codable, Sendable, Equatable {
     public var originalFilename: String?
     /// For videos: `slowmo` or `timelapse`.
     public var captureMode: String?
+    /// For burst photos: shared burst identifier.
+    public var burstId: String?
 
     public init(
         takenAt: Int64? = nil, timeZoneOffsetMinutes: Int? = nil, timeZone: String? = nil,
         location: ClientLocation? = nil, width: Int? = nil, height: Int? = nil,
-        durationMs: Int64? = nil, originalFilename: String? = nil, captureMode: String? = nil
+        durationMs: Int64? = nil, originalFilename: String? = nil, captureMode: String? = nil,
+        burstId: String? = nil
     ) {
         self.captureMode = captureMode
+        self.burstId = burstId
         self.takenAt = takenAt
         self.timeZoneOffsetMinutes = timeZoneOffsetMinutes
         self.timeZone = timeZone

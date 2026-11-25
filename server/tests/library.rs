@@ -909,3 +909,76 @@ async fn thumbnails_from_the_phone_are_never_replaced() {
     assert_eq!(thumbnail["sha256"], sha_hex(&own).as_str());
     api.stop().await;
 }
+
+/// Photos shot together in a burst carry a shared `burstId` through `GET /assets/{id}` and
+/// `/sync`; videos ignore `burstId`, and overly long ids are refused.
+#[tokio::test]
+async fn burst_photos_keep_their_burst_id_and_sync() {
+    let api = Api::start().await;
+    let token = owner(&api).await;
+    let burst_id = Uuid::new_v4().to_string();
+    let first = Uuid::new_v4().to_string();
+    let second = Uuid::new_v4().to_string();
+    let video = Uuid::new_v4().to_string();
+
+    api.upload(
+        &token,
+        &first,
+        &random_bytes(111),
+        "image/heic",
+        json!({ "takenAt": 1_795_443_730_000_i64, "burstId": burst_id }),
+    )
+    .await;
+    api.upload(
+        &token,
+        &second,
+        &random_bytes(112),
+        "image/heic",
+        json!({ "takenAt": 1_795_443_730_200_i64, "burstId": burst_id }),
+    )
+    .await;
+    api.upload(
+        &token,
+        &video,
+        &random_bytes(113),
+        "video/quicktime",
+        json!({ "takenAt": 1_795_443_731_000_i64, "burstId": burst_id }),
+    )
+    .await;
+
+    let detail = api.get(&format!("/api/v1/assets/{first}"), &token).await;
+    assert_eq!(detail.status, 200, "{}", detail.body);
+    assert_eq!(detail.body["burstId"], burst_id.as_str());
+
+    let synced = api.get("/api/v1/sync?since=0", &token).await;
+    let assets = synced.body["assets"].as_array().unwrap();
+    let a1 = assets.iter().find(|a| a["id"] == first.as_str()).unwrap();
+    let a2 = assets.iter().find(|a| a["id"] == second.as_str()).unwrap();
+    let v1 = assets.iter().find(|a| a["id"] == video.as_str()).unwrap();
+    assert_eq!(a1["burstId"], burst_id.as_str());
+    assert_eq!(a2["burstId"], burst_id.as_str());
+    assert!(
+        v1["burstId"].is_null(),
+        "videos do not store a photo burst id"
+    );
+
+    // Overly long burstId is rejected when announcing the upload.
+    let too_long = "b".repeat(65);
+    let data = random_bytes(64);
+    let refused = api
+        .post(
+            "/api/v1/uploads",
+            Some(&token),
+            json!({
+                "assetId": Uuid::new_v4().to_string(),
+                "role": "original",
+                "size": data.len(),
+                "sha256": sha_hex(&data),
+                "mimeType": "image/heic",
+                "metadata": { "burstId": too_long }
+            }),
+        )
+        .await;
+    assert_eq!(refused.status, 422, "{}", refused.body);
+    api.stop().await;
+}

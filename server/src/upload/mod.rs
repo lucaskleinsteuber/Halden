@@ -97,6 +97,8 @@ pub struct ClientMetadata {
     pub original_filename: Option<String>,
     /// How a video was taken: `slowmo` or `timelapse`. Other values are kept but not used.
     pub capture_mode: Option<String>,
+    /// Shared identifier for photos taken together in one burst.
+    pub burst_id: Option<String>,
     #[serde(flatten)]
     pub other: Map<String, Value>,
 }
@@ -107,6 +109,14 @@ impl ClientMetadata {
         self.capture_mode
             .as_deref()
             .filter(|mode| matches!(*mode, "slowmo" | "timelapse"))
+    }
+
+    /// The burst identifier, if non-empty.
+    pub fn clean_burst_id(&self) -> Option<&str> {
+        self.burst_id
+            .as_deref()
+            .map(str::trim)
+            .filter(|id| !id.is_empty())
     }
 }
 
@@ -173,8 +183,9 @@ impl ClientMetadata {
                 .as_ref()
                 .is_some_and(|n| n.len() > 255)
             || self.capture_mode.as_ref().is_some_and(|m| m.len() > 32)
+            || self.burst_id.as_ref().is_some_and(|b| b.len() > 64)
         {
-            return Err("timeZone, originalFilename or captureMode is too long.".into());
+            return Err("timeZone, originalFilename, captureMode or burstId is too long.".into());
         }
         Ok(())
     }

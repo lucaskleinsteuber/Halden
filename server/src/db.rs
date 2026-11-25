@@ -236,6 +236,8 @@ mod upgrade_tests {
             // 12
             "INSERT INTO shares (id, user_id, token, asset_ids, created_at) \
              VALUES ('s1', 'u1', 'tok', '[\"a1\"]', 1)",
+            // 13
+            "UPDATE assets SET burst_id = 'b1' WHERE id = 'a1'",
         ];
         for statement in &statements[..level.min(statements.len())] {
             sqlx::raw_sql(*statement)

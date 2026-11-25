@@ -81,6 +81,7 @@ public actor Syncer {
         local.previewSha256 = asset.file("preview")?.sha256 ?? local.previewSha256
         local.pairedVideoSha256 = asset.file("paired_video")?.sha256 ?? local.pairedVideoSha256
         local.captureMode = asset.captureMode ?? local.captureMode
+        local.burstId = asset.burstId ?? local.burstId
         local.playback = asset.playback
         local.edit = asset.edit
         local.streamSha256 = asset.file("stream")?.sha256 ?? local.streamSha256

@@ -138,11 +138,33 @@ final class DeviceCamera: CaptureBackend {
         }
     }
 
+    func takeStillWhileRecording(_ request: PhotoRequest) async -> TakenPhoto? {
+        let angle = captureAngle
+        return await withCheckedContinuation { continuation in
+            core.run { $0.takeStillWhileRecording(request, angle: angle) { continuation.resume(returning: $0) } }
+        }
+    }
+
     func startRecording(_ request: VideoRequest) -> Bool {
         guard state.ready else { return false }
         let angle = captureAngle
         core.run { $0.startRecording(request, angle: angle) }
         return true
+    }
+
+    func startQuickTake(_ request: VideoRequest) -> Bool {
+        guard state.ready else { return false }
+        let angle = captureAngle
+        core.run { $0.startQuickTake(request, angle: angle) }
+        return true
+    }
+
+    func pauseRecording() {
+        core.run { $0.pauseRecording() }
+    }
+
+    func resumeRecording() {
+        core.run { $0.resumeRecording() }
     }
 
     func stopRecording() async -> URL? {
@@ -279,6 +301,7 @@ final class CaptureCore: NSObject, @unchecked Sendable {
     private var state = CameraState()
     private var photos: [Int64: PhotoCapture] = [:]
     private var recording: Recording?
+    private var quickTaking = false
     private var lockedSwitchingForRecording = false
     private var lockedWhiteBalanceForRecording = false
     private var wantRunning = false
@@ -397,23 +420,29 @@ final class CaptureCore: NSObject, @unchecked Sendable {
         changed?(state, device.map(Carry.init))
     }
 
-    /// Only this output in the session.
-    private func use(_ output: AVCaptureOutput) {
-        for other in [photoOutput, movieOutput, frameOutput] as [AVCaptureOutput] where other !== output {
-            if session.outputs.contains(other) { session.removeOutput(other) }
+    /// Keeps exactly these outputs in the session. Live Photos and `movieOutput` must never be
+    /// active together; in photo mode only `photoOutput` is attached, while in video mode Live
+    /// Photos are off so `movieOutput` and `photoOutput` coexist for photo-while-recording.
+    private func use(_ outputs: [AVCaptureOutput]) {
+        for candidate in [photoOutput, movieOutput, frameOutput] as [AVCaptureOutput] {
+            if !outputs.contains(where: { $0 === candidate }), session.outputs.contains(candidate) {
+                session.removeOutput(candidate)
+            }
         }
-        if !session.outputs.contains(output), session.canAddOutput(output) { session.addOutput(output) }
+        for output in outputs {
+            if !session.outputs.contains(output), session.canAddOutput(output) { session.addOutput(output) }
+        }
     }
 
-    /// Photo: the photo output in the chosen resolution and prioritization. Video and slow motion:
-    /// the movie output with the chosen format, HEVC, stabilized, with sound when allowed.
-    /// Time-lapse: the frames, without sound.
+    /// Photo: the photo output in the chosen resolution and prioritization (no movie output so
+    /// Live Photos work). Video: movie + photo output (Live Photos off) for photo-while-recording.
+    /// Slow motion: movie output. Time-lapse: video data output, without sound.
     private func apply(mode: CameraMode, on device: AVCaptureDevice) {
         session.automaticallyConfiguresCaptureDeviceForWideColor = mode == .photo
         configureAudioSession(allowPlayback: video?.allowAudioPlayback == true, needsAudio: mode != .timeLapse)
         switch mode {
         case .photo:
-            use(photoOutput)
+            use([photoOutput])
             // Live Photos record sound (unless RAW is active, which cannot combine with Live Photos).
             let raw = video?.captureRAW == true && availableBayerRAW() != nil
             let live = video?.live == true && !raw
@@ -441,7 +470,10 @@ final class CaptureCore: NSObject, @unchecked Sendable {
             if photoOutput.isLivePhotoCaptureEnabled { photoOutput.isLivePhotoAutoTrimmingEnabled = true }
             state.videoFormat = nil
         case .video, .slowMotion:
-            use(movieOutput)
+            // Disable Live Photos before adding `movieOutput`, then keep `photoOutput` attached in
+            // `.video` mode so users can snap still photos while recording.
+            photoOutput.isLivePhotoCaptureEnabled = false
+            use(mode == .video ? [movieOutput, photoOutput] : [movieOutput])
             addMicrophone()
             if let video {
                 if mode == .slowMotion {
@@ -455,6 +487,13 @@ final class CaptureCore: NSObject, @unchecked Sendable {
                         on: device)
                 }
             }
+            if mode == .video,
+                let largest = device.activeFormat.supportedMaxPhotoDimensions.max(by: {
+                    $0.width * $0.height < $1.width * $1.height
+                })
+            {
+                photoOutput.maxPhotoDimensions = largest
+            }
             if let connection = movieOutput.connection(with: .video) {
                 if movieOutput.availableVideoCodecTypes.contains(.hevc) {
                     movieOutput.setOutputSettings([AVVideoCodecKey: AVVideoCodecType.hevc], for: connection)
@@ -464,7 +503,7 @@ final class CaptureCore: NSObject, @unchecked Sendable {
                 }
             }
         case .timeLapse:
-            use(frameOutput)
+            use([frameOutput])
             if let audioInput {
                 session.removeInput(audioInput)
                 self.audioInput = nil
@@ -840,6 +879,79 @@ final class CaptureCore: NSObject, @unchecked Sendable {
         photoOutput.capturePhoto(with: settings, delegate: capture)
     }
 
+    /// Snaps a still photo during an active video or locked QuickTake recording (no Live Photo,
+    /// no RAW, no flash) using the `photoOutput` coexisting in the session.
+    func takeStillWhileRecording(
+        _ request: PhotoRequest, angle: CGFloat, done: @escaping @Sendable (TakenPhoto?) -> Void
+    ) {
+        guard session.isRunning, movieOutput.isRecording, session.outputs.contains(photoOutput),
+            let connection = photoOutput.connection(with: .video)
+        else { return done(nil) }
+        if connection.isVideoRotationAngleSupported(angle) { connection.videoRotationAngle = angle }
+        applyMirroring(on: connection, mirror: request.mirrorFrontCamera)
+        let heic = request.format == .heic && photoOutput.availablePhotoCodecTypes.contains(.hevc)
+        let settings = AVCapturePhotoSettings(format: [AVVideoCodecKey: heic ? AVVideoCodecType.hevc : .jpeg])
+        settings.maxPhotoDimensions = photoOutput.maxPhotoDimensions
+        let speedPriority = AVCapturePhotoOutput.QualityPrioritization.speed
+        settings.photoQualityPrioritization =
+            speedPriority.rawValue <= photoOutput.maxPhotoQualityPrioritization.rawValue
+            ? speedPriority : photoOutput.maxPhotoQualityPrioritization
+        if photoOutput.supportedFlashModes.contains(.off) { settings.flashMode = .off }
+        let id = settings.uniqueID
+        let capture = PhotoCapture(request: request, heic: heic) { [weak self] photo in
+            self?.run { $0.photos[id] = nil }
+            done(photo)
+        }
+        photos[id] = capture
+        photoOutput.capturePhoto(with: settings, delegate: capture)
+    }
+
+    /// Starts a QuickTake video from photo mode by disabling Live Photos and attaching
+    /// `movieOutput` temporarily; restored back to photo mode once recording ends.
+    func startQuickTake(_ request: VideoRequest, angle: CGFloat) {
+        guard mode == .photo, session.isRunning, !movieOutput.isRecording, let device else { return }
+        session.beginConfiguration()
+        photoOutput.isLivePhotoCaptureEnabled = false
+        if !session.outputs.contains(movieOutput), session.canAddOutput(movieOutput) {
+            session.addOutput(movieOutput)
+        }
+        addMicrophone()
+        if let largest = device.activeFormat.supportedMaxPhotoDimensions.max(by: {
+            $0.width * $0.height < $1.width * $1.height
+        }) {
+            photoOutput.maxPhotoDimensions = largest
+        }
+        if let connection = movieOutput.connection(with: .video) {
+            if movieOutput.availableVideoCodecTypes.contains(.hevc) {
+                movieOutput.setOutputSettings([AVVideoCodecKey: AVVideoCodecType.hevc], for: connection)
+            }
+            if connection.isVideoStabilizationSupported {
+                connection.preferredVideoStabilizationMode = .auto
+            }
+        }
+        session.commitConfiguration()
+        guard let connection = movieOutput.connection(with: .video) else { return }
+        if connection.isVideoRotationAngleSupported(angle) { connection.videoRotationAngle = angle }
+        applyMirroring(on: connection, mirror: video?.mirrorFrontCamera == true)
+        lockForRecording(on: device)
+        movieOutput.metadata = VideoMetadata.items(
+            location: request.location, takenAt: request.takenAt, timeZone: request.timeZone)
+        let recording = Recording()
+        self.recording = recording
+        quickTaking = true
+        movieOutput.startRecording(to: request.url, recordingDelegate: recording)
+    }
+
+    func pauseRecording() {
+        guard movieOutput.isRecording, !movieOutput.isRecordingPaused else { return }
+        movieOutput.pauseRecording()
+    }
+
+    func resumeRecording() {
+        guard movieOutput.isRecording, movieOutput.isRecordingPaused else { return }
+        movieOutput.resumeRecording()
+    }
+
     func startRecording(_ request: VideoRequest, angle: CGFloat) {
         let metadata = VideoMetadata.items(
             location: request.location, takenAt: request.takenAt, timeZone: request.timeZone)
@@ -874,7 +986,21 @@ final class CaptureCore: NSObject, @unchecked Sendable {
         }
         guard let recording else { return done(nil, nil) }
         self.recording = nil
-        recording.whenFinished { done($0, nil) }
+        let wasQuickTake = quickTaking
+        quickTaking = false
+        recording.whenFinished { [weak self] url in
+            if wasQuickTake {
+                self?.run { core in
+                    guard core.mode == .photo, let device = core.device else { return }
+                    core.session.beginConfiguration()
+                    core.apply(mode: .photo, on: device)
+                    core.session.commitConfiguration()
+                    core.state = core.describe(device)
+                    core.publish(device: nil)
+                }
+            }
+            done(url, nil)
+        }
         if movieOutput.isRecording { movieOutput.stopRecording() }
     }
 }

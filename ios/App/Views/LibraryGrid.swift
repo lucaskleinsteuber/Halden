@@ -13,6 +13,8 @@ struct LibraryGrid: UIViewControllerRepresentable {
     let pipeline: ImagePipeline
     /// While choosing photos (to delete many at once), a tap selects instead of opening.
     var selection: Set<String>? = nil
+    /// Cover asset ID → number of shots in a collapsed burst stack (only entries > 1).
+    var burstCounts: [String: Int] = [:]
     let open: (String) -> Void
 
     func makeUIViewController(context: Context) -> GridController {
@@ -21,7 +23,8 @@ struct LibraryGrid: UIViewControllerRepresentable {
 
     func updateUIViewController(_ controller: GridController, context: Context) {
         controller.open = open
-        controller.show(assets: assets, version: version, uploads: uploads, selection: selection)
+        controller.show(
+            assets: assets, version: version, uploads: uploads, selection: selection, burstCounts: burstCounts)
     }
 }
 
@@ -36,6 +39,7 @@ final class GridController: UIViewController, UICollectionViewDelegate, UICollec
     private var assets: [String: LocalAsset] = [:]
     private var uploads: [String: Double] = [:]
     private var selection: Set<String>?
+    private var burstCounts: [String: Int] = [:]
     private var shownVersion = -1
 
     init(pipeline: ImagePipeline, open: @escaping (String) -> Void) {
@@ -91,7 +95,7 @@ final class GridController: UIViewController, UICollectionViewDelegate, UICollec
 
     func show(
         assets list: [LocalAsset], version: Int, uploads newUploads: [String: Double],
-        selection newSelection: Set<String>?
+        selection newSelection: Set<String>?, burstCounts newBurstCounts: [String: Int] = [:]
     ) {
         guard dataSource != nil else { return }
         var snapshot = dataSource.snapshot()
@@ -118,6 +122,13 @@ final class GridController: UIViewController, UICollectionViewDelegate, UICollec
                 animate = before > 0 && abs(ids.count - before) < 50
             }
         }
+        if newBurstCounts != burstCounts {
+            for id in Set(burstCounts.keys).union(newBurstCounts.keys)
+            where burstCounts[id] != newBurstCounts[id] {
+                changed.insert(id)
+            }
+            burstCounts = newBurstCounts
+        }
         for (id, progress) in newUploads where uploads[id] != progress { changed.insert(id) }
         for id in uploads.keys where newUploads[id] == nil { changed.insert(id) }
         uploads = newUploads
@@ -142,7 +153,9 @@ final class GridController: UIViewController, UICollectionViewDelegate, UICollec
 
     private func configure(_ cell: GridCell, id: String) {
         guard let asset = assets[id] else { return }
-        cell.show(asset: asset, upload: uploads[id], selected: selection.map { $0.contains(id) })
+        cell.show(
+            asset: asset, upload: uploads[id], selected: selection.map { $0.contains(id) },
+            burstCount: burstCounts[id] ?? 1)
         let pixels = cellPixels
         if let image = pipeline.cached(asset, pixels: pixels) {
             cell.setImage(UIImage(cgImage: image.cgImage), for: id)
@@ -171,6 +184,7 @@ final class GridCell: UICollectionViewCell {
     private let badge = UIImageView()
     private let progress = ProgressRing()
     private let duration = UILabel()
+    private let burstBadge = UILabel()
     private let check = UIImageView()
     private(set) var shownId: String?
     var loading: Task<Void, Never>?
@@ -184,7 +198,13 @@ final class GridCell: UICollectionViewCell {
         duration.textColor = .white
         duration.shadowColor = .black.withAlphaComponent(0.6)
         duration.shadowOffset = CGSize(width: 0, height: 1)
-        for view in [imageView, badge, progress, duration, check] as [UIView] {
+        burstBadge.font = .monospacedDigitSystemFont(ofSize: 10, weight: .bold)
+        burstBadge.textColor = .white
+        burstBadge.backgroundColor = UIColor.black.withAlphaComponent(0.55)
+        burstBadge.layer.cornerRadius = 7
+        burstBadge.layer.masksToBounds = true
+        burstBadge.isHidden = true
+        for view in [imageView, badge, progress, duration, burstBadge, check] as [UIView] {
             view.translatesAutoresizingMaskIntoConstraints = false
             contentView.addSubview(view)
         }
@@ -203,6 +223,8 @@ final class GridCell: UICollectionViewCell {
             progress.heightAnchor.constraint(equalToConstant: 16),
             duration.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 5),
             duration.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -3),
+            burstBadge.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 4),
+            burstBadge.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 4),
             check.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 4),
             check.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -4),
             check.widthAnchor.constraint(equalToConstant: 22),
@@ -221,7 +243,7 @@ final class GridCell: UICollectionViewCell {
     }
 
     /// `selected`: `nil` while not choosing.
-    func show(asset: LocalAsset, upload: Double?, selected: Bool? = nil) {
+    func show(asset: LocalAsset, upload: Double?, selected: Bool? = nil, burstCount: Int = 1) {
         shownId = asset.id
         check.isHidden = selected == nil
         check.image = UIImage(systemName: selected == true ? "checkmark.circle.fill" : "circle")?
@@ -270,9 +292,26 @@ final class GridCell: UICollectionViewCell {
         } else {
             duration.isHidden = true
         }
+        if burstCount > 1,
+            let symbol = UIImage(
+                systemName: "square.stack.fill",
+                withConfiguration: UIImage.SymbolConfiguration(pointSize: 9, weight: .bold))
+        {
+            let text = NSMutableAttributedString(string: " ")
+            text.append(
+                NSAttributedString(
+                    attachment: NSTextAttachment(image: symbol.withTintColor(.white, renderingMode: .alwaysOriginal))))
+            text.append(NSAttributedString(string: " \(burstCount) "))
+            burstBadge.attributedText = text
+            burstBadge.isHidden = false
+        } else {
+            burstBadge.isHidden = true
+        }
         let kind =
-            asset.isSlowMotion
-            ? "Slow-motion video" : asset.isTimeLapse ? "Time-lapse" : asset.isVideo ? "Video" : "Photo"
+            burstCount > 1
+            ? "Burst of \(burstCount) photos"
+            : asset.isSlowMotion
+                ? "Slow-motion video" : asset.isTimeLapse ? "Time-lapse" : asset.isVideo ? "Video" : "Photo"
         accessibilityLabel = "\(kind), \(state)"
     }
 

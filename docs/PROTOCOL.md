@@ -270,7 +270,8 @@ taken (`[storage] path_template`). Two photos from the same second get `_2`, `_3
                   "heading": 271.5, "headingAccuracy": 10.0, "source": "client" },
     "width": 4032, "height": 3024, "durationMs": null,
     "originalFilename": "IMG_0001.HEIC",
-    "captureMode": null
+    "captureMode": null,
+    "burstId": null
   }
 }
 ```
@@ -283,6 +284,8 @@ taken (`[storage] path_template`). Two photos from the same second get `_2`, `_3
   `video/quicktime`, `video/mp4`, `video/x-matroska`, `video/webm`. Anything else: `415`.
 - `captureMode`: for videos `slowmo` (recorded at a high frame rate, played with a slow part) or
   `timelapse`; it becomes the asset's `captureMode`. Other values are kept but not used.
+- `burstId`: optional identifier (at most 64 bytes) shared by photos taken together in a burst;
+  stored on photos and carried by `GET /assets/{id}` and `GET /sync`. Ignored on videos.
 - `metadata` is optional and every field in it too. Unknown fields are kept but not used. When the
   device doesn't say when or where, the server reads it from the file (EXIF, QuickTime); for the
   time the order is device, file, upload time. `location.source` is optional: `client` (default,
@@ -366,6 +369,7 @@ finished before (a finished upload stays stored).
 
 `takenAtSource` is `client`, `exif` or `upload`; `location.source` is `client` or `exif`. `seq`
 changes with every change to the asset. `captureMode` is `slowmo`, `timelapse` or `null`;
+`burstId` is the shared burst identifier for photos shot in a burst (otherwise `null`);
 `playback` is the slow part of a slow-motion video (see `PATCH`) or `null` to play it as
 recorded.
 

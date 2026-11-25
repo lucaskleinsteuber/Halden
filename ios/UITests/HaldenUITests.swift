@@ -270,6 +270,79 @@ final class HaldenUITests: XCTestCase {
         XCTAssertTrue(app.descendants(matching: .any)["camera-level"].waitForExistence(timeout: 5))
     }
 
+    /// Tap-to-focus shows the sun exposure slider, shutter gestures drive QuickTake and Burst, and
+    /// video recording supports pause/resume and snapping a still photo mid-recording.
+    @MainActor
+    func testCameraGesturesAndRecordingControls() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-ui-testing-signed-in"]
+        app.launch()
+        let shutter = app.buttons["shutter"]
+        XCTAssertTrue(shutter.waitForExistence(timeout: 10))
+
+        // Tap preview → focus box with sun exposure slider appears.
+        let preview = app.descendants(matching: .any)["camera-preview"].firstMatch
+        preview.tap()
+        XCTAssertTrue(app.descendants(matching: .any)["focus-exposure-sun"].waitForExistence(timeout: 5))
+
+        // Drag shutter left → shoots a burst (photos saved into the library).
+        let center = shutter.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+        center.press(forDuration: 0.05, thenDragTo: center.withOffset(CGVector(dx: -110, dy: 0)))
+
+        // Hold shutter in photo mode → QuickTake starts recording, lifts to stop & save video.
+        shutter.press(forDuration: 1.0)
+        XCTAssertTrue(app.buttons["Take a photo"].waitForExistence(timeout: 5))
+
+        // Switch to Video: start recording, pause, take a still photo, resume, stop.
+        app.buttons["mode-video"].tap()
+        XCTAssertTrue(app.buttons["Record a video"].waitForExistence(timeout: 5))
+        shutter.tap()
+        let pause = app.buttons["pause-recording"]
+        let still = app.buttons["capture-still"]
+        XCTAssertTrue(pause.waitForExistence(timeout: 5))
+        XCTAssertTrue(still.exists)
+        XCTAssertEqual(pause.label, "Pause recording")
+        pause.tap()
+        XCTAssertEqual(pause.label, "Resume recording")
+        still.tap()
+        pause.tap()
+        XCTAssertEqual(pause.label, "Pause recording")
+        shutter.tap()
+        XCTAssertTrue(app.buttons["Record a video"].waitForExistence(timeout: 5))
+    }
+
+    /// Burst photos collapse into a single stack tile in the library and open the burst picker to
+    /// choose keepers and trash the rest.
+    @MainActor
+    func testBurstStackAndPickerInLibrary() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-ui-testing-signed-in", "-ui-testing-library", "30"]
+        app.launch()
+        let tabs = Tabs(app)
+        XCTAssertTrue(tabs.waitForExistence(timeout: 10))
+        tabs.buttons["Photos"].tap()
+        let grid = app.collectionViews["library-grid"]
+        XCTAssertTrue(grid.waitForExistence(timeout: 10))
+        let burstCell = grid.cells["photo-00000000-0000-4000-8000-000000000003"]
+        XCTAssertTrue(burstCell.waitForExistence(timeout: 5))
+        XCTAssertTrue(burstCell.label.contains("Burst of 3 photos"), burstCell.label)
+
+        // Open the burst stack, launch the picker, keep photo 2 only, confirm Done.
+        burstCell.tap()
+        let select = app.buttons["burst-select"]
+        XCTAssertTrue(select.waitForExistence(timeout: 5))
+        select.tap()
+        XCTAssertTrue(app.buttons["burst-item-1"].waitForExistence(timeout: 5))
+        // Unselect item 0, select item 1.
+        app.buttons["burst-toggle-keep"].tap()
+        app.buttons["burst-item-1"].tap()
+        app.buttons["burst-toggle-keep"].tap()
+        app.buttons["burst-picker-done"].tap()
+        XCTAssertTrue(app.buttons["burst-picker-done"].waitForNonExistence(timeout: 5))
+        // Only one photo remains, so the burst selector button disappears.
+        XCTAssertTrue(select.waitForNonExistence(timeout: 5))
+    }
+
     /// Fifty thousand photos scroll without waiting for pictures.
     @MainActor
     func testTheGridScrollsThroughFiftyThousandPhotos() {

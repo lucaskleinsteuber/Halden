@@ -40,6 +40,8 @@ pub struct Asset {
     pub description: Option<String>,
     /// How a video was taken: `slowmo` or `timelapse`; `null` for everything else.
     pub capture_mode: Option<String>,
+    /// Shared identifier for photos taken together in a burst; `null` for standalone assets.
+    pub burst_id: Option<String>,
     /// How it plays: the slow part of a slow-motion video (a correction).
     pub playback: Option<Value>,
     /// The edit (light, colour, crop, trim) the apps apply; `null` for none.
@@ -95,7 +97,7 @@ macro_rules! asset_columns {
          a.updated_at, a.seq, a.trashed_at, a.deleted_at, a.title, a.description, \
          a.edit_taken_at, a.edit_tz_offset_min, a.edit_latitude, a.edit_longitude, \
          a.edit_altitude, a.edit_location_source, a.location_hidden, a.capture_mode, \
-         a.playback_json, a.edit_json"
+         a.burst_id, a.playback_json, a.edit_json"
     };
 }
 pub(crate) use asset_columns;
@@ -134,6 +136,7 @@ pub(crate) struct AssetRow {
     edit_location_source: Option<String>,
     location_hidden: bool,
     capture_mode: Option<String>,
+    burst_id: Option<String>,
     pub playback_json: Option<String>,
     pub edit_json: Option<String>,
 }
@@ -206,6 +209,7 @@ impl AssetRow {
             title: self.title,
             description: self.description,
             capture_mode: self.capture_mode,
+            burst_id: self.burst_id,
             playback: self
                 .playback_json
                 .as_deref()

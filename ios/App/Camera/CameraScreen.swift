@@ -1,3 +1,4 @@
+import AVKit
 import HaldenKit
 import SwiftUI
 import UIKit
@@ -15,6 +16,8 @@ struct CameraScreen<Gallery: View>: View {
     @ViewBuilder let gallery: () -> Gallery
 
     @State private var focusPoint: CGPoint?
+    @State private var focusSunStartBias: Double?
+    @State private var focusTouches = 0
     @State private var flash = false
     @State private var pinchStart = 1.0
     /// While the zoom dial is dragged: the zoom it started at.
@@ -30,6 +33,12 @@ struct CameraScreen<Gallery: View>: View {
     @State private var focalBadge: FocalLength?
     @State private var focalBadgeTicks = 0
     @State private var smudgeDismissed = false
+    @State private var shutterHoldTask: Task<Void, Never>?
+    @State private var shutterPressed = false
+    @State private var shutterStartZoom = 1.0
+    @State private var shutterConsumedGesture = false
+    @State private var hardwareBurstTask: Task<Void, Never>?
+    @State private var cameraVisible = false
     /// The highlight that glides between the lens buttons.
     @Namespace private var lens
 
@@ -50,10 +59,16 @@ struct CameraScreen<Gallery: View>: View {
             Color.black.opacity(flash ? 0.6 : 0).ignoresSafeArea().allowsHitTesting(false)
         }
         .onAppear {
+            cameraVisible = true
             camera.appear()
             motion.setEnabled(settings.showLevel)
         }
         .onDisappear {
+            cameraVisible = false
+            shutterHoldTask?.cancel()
+            shutterHoldTask = nil
+            hardwareBurstTask?.cancel()
+            hardwareBurstTask = nil
             motion.stop()
             camera.disappear()
         }
@@ -69,10 +84,10 @@ struct CameraScreen<Gallery: View>: View {
             try? await Task.sleep(for: .seconds(1.5))
             if !Task.isCancelled { withAnimation(.easeOut(duration: 0.2)) { focalBadge = nil } }
         }
-        .task(id: focusPoint) {
+        .task(id: "\(focusPoint?.x ?? -1),\(focusPoint?.y ?? -1),\(focusTouches)") {
             guard focusPoint != nil else { return }
-            try? await Task.sleep(for: .seconds(1.5))
-            if !state.focusLocked { focusPoint = nil }
+            try? await Task.sleep(for: .seconds(2.0))
+            if !Task.isCancelled, !state.focusLocked { focusPoint = nil }
         }
     }
 
@@ -86,12 +101,16 @@ struct CameraScreen<Gallery: View>: View {
             if state.ready {
                 CameraPreviewHost(
                     preview: camera.backend.previewView,
+                    hasFocusPoint: focusPoint != nil,
+                    hardwareEnabled: cameraVisible && state.ready,
                     tap: { point in
                         focusPoint = point
+                        focusTouches += 1
                         camera.backend.focus(at: point, lock: false)
                     },
                     hold: { point in
                         focusPoint = point
+                        focusTouches += 1
                         camera.backend.focus(at: point, lock: true)
                     },
                     pinch: { scale, began in
@@ -99,18 +118,20 @@ struct CameraScreen<Gallery: View>: View {
                         camera.zoom(
                             to: Zoom.pinched(from: pinchStart, scale: scale, in: state.zoomRange), glide: false)
                     },
-                    swipe: { towardsLeft in camera.switchMode(by: towardsLeft ? 1 : -1) }
+                    swipe: { towardsLeft in camera.switchMode(by: towardsLeft ? 1 : -1) },
+                    verticalDrag: { dy, began in
+                        if began { focusSunStartBias = camera.manual.exposureBias }
+                        let start = focusSunStartBias ?? camera.manual.exposureBias
+                        let bias = ShutterGestures.sunExposureBias(from: start, dy: dy)
+                        camera.setManual { $0.exposureBias = bias }
+                        focusTouches += 1
+                    },
+                    hardwarePrimary: { phase in handleHardwarePrimary(phase) },
+                    hardwareSecondary: { phase in handleHardwareSecondary(phase) }
                 )
                 // In the same place as the picture, so a tap and its square line up.
                 .overlay {
                     if settings.showGrid { ThirdsGrid().allowsHitTesting(false) }
-                    if let focusPoint {
-                        Rectangle()
-                            .strokeBorder(.yellow, lineWidth: 1.5)
-                            .frame(width: 72, height: 72)
-                            .position(focusPoint)
-                            .allowsHitTesting(false)
-                    }
                 }
                 .overlay(alignment: .top) {
                     if state.focusLocked {
@@ -139,7 +160,37 @@ struct CameraScreen<Gallery: View>: View {
         }
         .aspectRatio(ratio, contentMode: .fit)
         .overlay {
-            if state.ready && settings.showLevel { LevelOverlay(reading: motion.reading) }
+            if state.ready {
+                if settings.showLevel { LevelOverlay(reading: motion.reading) }
+                if let focusPoint {
+                    GeometryReader { geo in
+                        let sunOnRight = focusPoint.x < geo.size.width - 72
+                        let sunOffset = -camera.manual.exposureBias / 2.0 * 32.0
+                        ZStack {
+                            Rectangle()
+                                .strokeBorder(.yellow, lineWidth: 1.5)
+                                .frame(width: 72, height: 72)
+                            ZStack {
+                                Rectangle()
+                                    .fill(.yellow.opacity(0.65))
+                                    .frame(width: 1.5, height: 72)
+                                Image(systemName: "sun.max.fill")
+                                    .font(.system(size: 16, weight: .semibold))
+                                    .foregroundStyle(.yellow)
+                                    .padding(3)
+                                    .background(.black.opacity(0.45), in: .circle)
+                                    .offset(y: sunOffset)
+                            }
+                            .offset(x: sunOnRight ? 52 : -52)
+                            .accessibilityElement()
+                            .accessibilityLabel("Exposure \(ManualText.bias(camera.manual.exposureBias))")
+                            .accessibilityIdentifier("focus-exposure-sun")
+                        }
+                        .position(focusPoint)
+                        .allowsHitTesting(false)
+                    }
+                }
+            }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: fullFrame ? .center : .top)
         .padding(.top, fullFrame ? 0 : Self.topBarHeight)
@@ -212,24 +263,28 @@ struct CameraScreen<Gallery: View>: View {
                 }
                 zoomControl.frame(height: 56)
             }
-            modeStrip
-                .frame(height: Self.modeHeight)
-                .simultaneousGesture(
-                    DragGesture(minimumDistance: 18)
-                        .onEnded { value in
-                            guard !camera.recording,
-                                abs(value.translation.height) > abs(value.translation.width)
-                            else { return }
-                            withAnimation(.snappy(duration: 0.2)) {
-                                if value.translation.height < -24 {
-                                    showControls = true
-                                    showManual = false
-                                } else if value.translation.height > 24 {
-                                    showControls = false
+            if camera.recording || camera.burstCount > 0 {
+                Color.clear.frame(height: Self.modeHeight)
+            } else {
+                modeStrip
+                    .frame(height: Self.modeHeight)
+                    .simultaneousGesture(
+                        DragGesture(minimumDistance: 18)
+                            .onEnded { value in
+                                guard !camera.recording,
+                                    abs(value.translation.height) > abs(value.translation.width)
+                                else { return }
+                                withAnimation(.snappy(duration: 0.2)) {
+                                    if value.translation.height < -24 {
+                                        showControls = true
+                                        showManual = false
+                                    } else if value.translation.height > 24 {
+                                        showControls = false
+                                    }
                                 }
                             }
-                        }
-                )
+                    )
+            }
             shutterRow.frame(height: Self.shutterHeight)
         }
         .foregroundStyle(.white)
@@ -476,16 +531,36 @@ struct CameraScreen<Gallery: View>: View {
         }
     }
 
-    /// Recording time while recording, the format menu for videos, or the drawer chevron for photos.
+    /// Recording time while recording, burst counter while bursting, the format menu for videos,
+    /// or the drawer chevron for photos.
     @ViewBuilder private var topMiddle: some View {
         if let since = camera.recordingSince {
             TimelineView(.periodic(from: since, by: 1)) { context in
-                Text(Duration.seconds(context.date.timeIntervalSince(since)).formatted(.time(pattern: .minuteSecond)))
-                    .font(.body.monospacedDigit())
-                    .padding(.horizontal, 6)
-                    .background(.red, in: .rect(cornerRadius: 4))
+                let elapsed = ShutterGestures.recordingElapsed(
+                    started: since, pausedAt: camera.recordingPausedAt, totalPaused: camera.recordingPausedTotal,
+                    now: context.date)
+                HStack(spacing: 4) {
+                    if camera.isRecordingPaused {
+                        Image(systemName: "pause.fill").font(.caption2)
+                    }
+                    Text(Duration.seconds(elapsed).formatted(.time(pattern: .minuteSecond)))
+                }
+                .font(.body.monospacedDigit())
+                .padding(.horizontal, 8)
+                .padding(.vertical, 2)
+                .background(camera.isRecordingPaused ? Color.gray : Color.red, in: .rect(cornerRadius: 4))
             }
+            .accessibilityLabel(camera.isRecordingPaused ? "Recording paused" : "Recording time")
             .accessibilityIdentifier("recording-time")
+        } else if camera.burstCount > 0 {
+            Text("\(camera.burstCount)")
+                .font(.body.bold().monospacedDigit())
+                .foregroundStyle(.black)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 2)
+                .background(.yellow, in: .capsule)
+                .accessibilityLabel("Burst \(camera.burstCount) photos")
+                .accessibilityIdentifier("burst-counter")
         } else if camera.mode.records {
             Menu {
                 switch camera.mode {
@@ -659,40 +734,87 @@ struct CameraScreen<Gallery: View>: View {
         .offset(x: (middle - chosen) * width)
         .animation(.snappy(duration: 0.3), value: camera.mode)
         .frame(maxWidth: .infinity)
-        .opacity(camera.recording ? 0 : 1)
+        .opacity(camera.recording || camera.burstCount > 0 ? 0 : 1)
+        .accessibilityHidden(camera.recording || camera.burstCount > 0)
     }
 
     private var shutterRow: some View {
         HStack {
-            gallery()
-                .frame(width: 52, height: 52)
-                .opacity(camera.recording ? 0 : 1)
+            if camera.canPauseAndSnapStill {
+                Button {
+                    camera.togglePauseRecording()
+                } label: {
+                    Image(systemName: camera.isRecordingPaused ? "play.fill" : "pause.fill")
+                        .font(.title3.weight(.semibold))
+                        .foregroundStyle(camera.isRecordingPaused ? .yellow : .white)
+                        .frame(width: 52, height: 52)
+                        .background(.white.opacity(0.18), in: .circle)
+                }
+                .accessibilityLabel(camera.isRecordingPaused ? "Resume recording" : "Pause recording")
+                .accessibilityIdentifier("pause-recording")
+            } else if camera.recording || camera.burstCount > 0 {
+                Color.clear.frame(width: 52, height: 52)
+            } else {
+                gallery()
+                    .frame(width: 52, height: 52)
+            }
             Spacer()
             shutterButton
             Spacer()
-            Button {
-                camera.flip()
-            } label: {
-                Image(systemName: "arrow.triangle.2.circlepath")
-                    .font(.title3.weight(.semibold))
+            if camera.canPauseAndSnapStill {
+                Button {
+                    camera.takeStillWhileRecording()
+                } label: {
+                    ZStack {
+                        Circle().strokeBorder(.white.opacity(0.65), lineWidth: 2).frame(width: 52, height: 52)
+                        Circle().fill(.white).frame(width: 40, height: 40)
+                    }
                     .frame(width: 52, height: 52)
-                    .background(.white.opacity(0.15), in: .circle)
+                }
+                .accessibilityLabel("Take photo while recording")
+                .accessibilityIdentifier("capture-still")
+            } else if camera.isQuickTake && !camera.isQuickTakeLocked {
+                Image(systemName: "lock.open")
+                    .font(.title3.weight(.semibold))
+                    .foregroundStyle(.white)
+                    .frame(width: 52, height: 52)
+                    .background(.white.opacity(0.22), in: .circle)
+                    .accessibilityIdentifier("quicktake-lock-target")
+            } else if camera.recording || camera.burstCount > 0 {
+                Color.clear.frame(width: 52, height: 52)
+            } else {
+                Button {
+                    camera.flip()
+                } label: {
+                    Image(systemName: "arrow.triangle.2.circlepath")
+                        .font(.title3.weight(.semibold))
+                        .frame(width: 52, height: 52)
+                        .background(.white.opacity(0.15), in: .circle)
+                }
+                .disabled(!state.canFlip)
+                .accessibilityLabel("Switch camera")
+                .accessibilityIdentifier("flip-camera")
             }
-            .disabled(!state.canFlip || camera.recording)
-            .opacity(camera.recording ? 0 : 1)
-            .accessibilityLabel("Switch camera")
-            .accessibilityIdentifier("flip-camera")
         }
         .padding(.horizontal, 28)
     }
 
     private var shutterButton: some View {
         Button {
+            if shutterConsumedGesture {
+                shutterConsumedGesture = false
+                return
+            }
             camera.shutter()
         } label: {
             ZStack {
                 Circle().strokeBorder(.white, lineWidth: 4).frame(width: 76, height: 76)
-                if camera.mode.records {
+                if camera.burstCount > 0 {
+                    Circle().fill(.yellow).frame(width: 64, height: 64)
+                    Text("\(camera.burstCount)")
+                        .font(.title2.bold().monospacedDigit())
+                        .foregroundStyle(.black)
+                } else if camera.recording || camera.mode.records {
                     RoundedRectangle(cornerRadius: camera.recording ? 6 : 30)
                         .fill(.red)
                         .frame(width: camera.recording ? 30 : 62, height: camera.recording ? 30 : 62)
@@ -703,12 +825,100 @@ struct CameraScreen<Gallery: View>: View {
             .animation(.snappy(duration: 0.25), value: camera.recording)
         }
         .disabled(!state.ready)
+        .simultaneousGesture(shutterGesture)
         .accessibilityLabel(
             camera.countdown != nil
                 ? "Stop the self-timer"
                 : camera.recording ? "Stop recording" : camera.mode.shutterLabel
         )
         .accessibilityIdentifier("shutter")
+    }
+
+    /// Hold in photo mode for QuickTake video (drag right to lock, drag up to zoom); drag left
+    /// from the shutter for a photo burst.
+    private var shutterGesture: some Gesture {
+        DragGesture(minimumDistance: 0)
+            .onChanged { drag in
+                guard state.ready else { return }
+                if !shutterPressed && camera.mode == .photo && !camera.recording && camera.countdown == nil {
+                    shutterPressed = true
+                    shutterConsumedGesture = false
+                    shutterStartZoom = camera.zoom
+                    shutterHoldTask?.cancel()
+                    shutterHoldTask = Task {
+                        try? await Task.sleep(for: .seconds(ShutterGestures.quickTakeHoldSeconds))
+                        guard !Task.isCancelled, shutterPressed, camera.burstCount == 0,
+                            camera.mode == .photo, !camera.recording
+                        else { return }
+                        shutterConsumedGesture = true
+                        camera.startQuickTake()
+                    }
+                }
+                guard shutterPressed else { return }
+                let action = ShutterGestures.evaluateDrag(
+                    dx: drag.translation.width, dy: drag.translation.height,
+                    quickTaking: camera.isQuickTake, locked: camera.isQuickTakeLocked,
+                    startZoom: shutterStartZoom, zoomRange: state.zoomRange)
+                switch action {
+                case .none: break
+                case .burst:
+                    shutterHoldTask?.cancel()
+                    shutterHoldTask = nil
+                    shutterConsumedGesture = true
+                    camera.startBurst()
+                case .lockQuickTake:
+                    shutterConsumedGesture = true
+                    camera.lockQuickTake()
+                case .quickTakeZoom(let zoom):
+                    shutterConsumedGesture = true
+                    camera.zoom(to: zoom, glide: false)
+                }
+            }
+            .onEnded { _ in
+                shutterPressed = false
+                shutterHoldTask?.cancel()
+                shutterHoldTask = nil
+                if camera.burstCount > 0 {
+                    shutterConsumedGesture = true
+                    camera.stopBurst()
+                } else if camera.isQuickTake && !camera.isQuickTakeLocked {
+                    shutterConsumedGesture = true
+                    camera.finishQuickTake()
+                }
+            }
+    }
+
+    /// Volume Up: tap captures / toggles recording; hold in photo mode shoots a burst when enabled.
+    private func handleHardwarePrimary(_ phase: AVCaptureEventPhase) {
+        switch phase {
+        case .began:
+            guard camera.mode == .photo, !camera.recording, settings.volumeUpForBurst else { return }
+            hardwareBurstTask?.cancel()
+            hardwareBurstTask = Task {
+                try? await Task.sleep(for: .seconds(ShutterGestures.quickTakeHoldSeconds))
+                guard !Task.isCancelled, camera.mode == .photo, !camera.recording else { return }
+                camera.startBurst()
+            }
+        case .ended:
+            hardwareBurstTask?.cancel()
+            hardwareBurstTask = nil
+            if camera.burstCount > 0 {
+                camera.stopBurst()
+            } else {
+                camera.shutter()
+            }
+        case .cancelled:
+            hardwareBurstTask?.cancel()
+            hardwareBurstTask = nil
+            if camera.burstCount > 0 { camera.stopBurst() }
+        @unknown default:
+            break
+        }
+    }
+
+    /// Volume Down / AirPods stem: tap captures or starts/stops recording.
+    private func handleHardwareSecondary(_ phase: AVCaptureEventPhase) {
+        if phase == .ended { camera.shutter() }
     }
 }
 
@@ -816,12 +1026,20 @@ struct ThirdsGrid: View {
 /// hold to lock focus and exposure, pinch to zoom, swipe sideways for the next mode.
 struct CameraPreviewHost: UIViewRepresentable {
     let preview: UIView
+    let hasFocusPoint: Bool
+    let hardwareEnabled: Bool
     let tap: (CGPoint) -> Void
     let hold: (CGPoint) -> Void
     /// The scale since the pinch began, and whether it just began.
     let pinch: (Double, Bool) -> Void
     /// A swipe sideways: `true` towards the left.
     let swipe: (Bool) -> Void
+    /// Vertical drag while the focus box is visible to slide exposure (sun icon).
+    let verticalDrag: (Double, Bool) -> Void
+    /// Hardware Volume Up / primary capture button events.
+    let hardwarePrimary: (AVCaptureEventPhase) -> Void
+    /// Hardware Volume Down / AirPods stem secondary capture events.
+    let hardwareSecondary: (AVCaptureEventPhase) -> Void
 
     func makeUIView(context: Context) -> UIView {
         let host = UIView()
@@ -837,6 +1055,9 @@ struct CameraPreviewHost: UIViewRepresentable {
         let press = UILongPressGestureRecognizer(target: coordinator, action: #selector(Coordinator.held(_:)))
         press.minimumPressDuration = 0.6
         recognizers.append(press)
+        let pan = UIPanGestureRecognizer(target: coordinator, action: #selector(Coordinator.panned(_:)))
+        coordinator.sunPan = pan
+        recognizers.append(pan)
         for direction in [UISwipeGestureRecognizer.Direction.left, .right] {
             let swipe = UISwipeGestureRecognizer(target: coordinator, action: #selector(Coordinator.swiped(_:)))
             swipe.direction = direction
@@ -846,11 +1067,18 @@ struct CameraPreviewHost: UIViewRepresentable {
             recognizer.delegate = coordinator
             host.addGestureRecognizer(recognizer)
         }
+        let interaction = AVCaptureEventInteraction(
+            primary: { [weak coordinator] event in coordinator?.parent.hardwarePrimary(event.phase) },
+            secondary: { [weak coordinator] event in coordinator?.parent.hardwareSecondary(event.phase) })
+        interaction.isEnabled = hardwareEnabled
+        host.addInteraction(interaction)
+        coordinator.captureInteraction = interaction
         return host
     }
 
     func updateUIView(_ host: UIView, context: Context) {
         context.coordinator.parent = self
+        context.coordinator.captureInteraction?.isEnabled = hardwareEnabled
         if preview.superview !== host {
             preview.frame = host.bounds
             host.addSubview(preview)
@@ -863,12 +1091,23 @@ struct CameraPreviewHost: UIViewRepresentable {
     final class Coordinator: NSObject, UIGestureRecognizerDelegate {
         var parent: CameraPreviewHost
         weak var host: UIView?
+        weak var sunPan: UIPanGestureRecognizer?
+        var captureInteraction: AVCaptureEventInteraction?
 
         /// Only touches on the picture itself: a drag on a slider or the zoom buttons lying over
         /// the picture is theirs, not a swipe to the next mode.
         func gestureRecognizer(_ recognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
             guard let host, let view = touch.view else { return true }
             return view === host || view.isDescendant(of: host)
+        }
+
+        func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
+            if gestureRecognizer === sunPan, let pan = gestureRecognizer as? UIPanGestureRecognizer {
+                guard parent.hasFocusPoint else { return false }
+                let velocity = pan.velocity(in: host)
+                return abs(velocity.y) > abs(velocity.x)
+            }
+            return true
         }
 
         init(parent: CameraPreviewHost) {
@@ -891,6 +1130,15 @@ struct CameraPreviewHost: UIViewRepresentable {
             switch gesture.state {
             case .began: parent.pinch(Double(gesture.scale), true)
             case .changed: parent.pinch(Double(gesture.scale), false)
+            default: break
+            }
+        }
+
+        @objc func panned(_ gesture: UIPanGestureRecognizer) {
+            let dy = Double(gesture.translation(in: gesture.view).y)
+            switch gesture.state {
+            case .began: parent.verticalDrag(0, true)
+            case .changed: parent.verticalDrag(dy, false)
             default: break
             }
         }

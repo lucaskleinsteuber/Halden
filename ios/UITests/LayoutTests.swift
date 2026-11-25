@@ -113,6 +113,19 @@ final class LayoutTests: XCTestCase {
         app.swipeLeft()
         settle()
         shot("photo-estimated-place")
+        // Next tile is a 3-photo burst stack; open its picker sheet and check every control.
+        app.swipeLeft()
+        settle()
+        let burstSelect = app.buttons["burst-select"]
+        if burstSelect.waitForExistence(timeout: 5) {
+            burstSelect.tap()
+            settle()
+            shot("burst-picker")
+            app.buttons["burst-picker-cancel"].tap()
+            settle()
+        }
+        app.swipeRight()
+        settle()
         app.swipeRight()
         settle()
         if app.buttons["edit"].exists {
@@ -181,6 +194,16 @@ final class LayoutTests: XCTestCase {
                 XCTAssertTrue(app.buttons["shutter"].waitForExistence(timeout: 10))
                 settle()
                 shot("camera-level")
+                // Recording controls (pause/resume + still capture) in video mode.
+                app.buttons["mode-video"].tap()
+                settle()
+                app.buttons["shutter"].tap()
+                if app.buttons["pause-recording"].waitForExistence(timeout: 5) {
+                    settle()
+                    shot("camera-recording")
+                    app.buttons["shutter"].tap()
+                    settle()
+                }
             }
         }
     }
@@ -279,7 +302,10 @@ final class LayoutTests: XCTestCase {
         // In the camera, the shutter row must stay visibly clear above the floating tab bar.
         let tabTop = controls.filter(\.inTabBar).map(\.frame.minY).min()
         if let tabTop {
-            for control in controls where ["shutter", "last-photo", "flip-camera"].contains(control.identifier) {
+            for control in controls
+            where ["shutter", "last-photo", "flip-camera", "pause-recording", "capture-still"].contains(
+                control.identifier)
+            {
                 let gap = tabTop - control.frame.maxY
                 if gap < 11.5 {
                     XCTFail(

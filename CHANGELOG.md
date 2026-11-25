@@ -10,6 +10,19 @@ part of the first versions.
 
 ### Added
 
+- Camera gestures, bursts, recording controls and voice shortcuts:
+  - Tap-to-focus now displays a sun exposure slider beside the focus square (drag up/down for EV
+    −2…+2).
+  - QuickTake video by holding the photo shutter (drag right to lock hands-free, drag up to
+    zoom).
+  - Burst photography by dragging the shutter left or holding Volume Up (configurable), with a
+    live counter, shared server `burstId` (migration `0013_burst.sql`, carried via `/sync`),
+    collapsed stack tiles in the library grid, and a burst picker (`BurstPickerView`) to keep
+    favorites and move the rest to the trash.
+  - Photo while recording and video pause/resume (`AVCaptureMovieFileOutput.pauseRecording`) in
+    video mode and locked QuickTake without conflicting with Live Photos.
+  - Hardware shutter & AirPods stem support via `AVCaptureEventInteraction`, plus Siri/Shortcuts
+    App Intents ("Take a Photo", "Record a Video", "Take a Selfie") with a 3-second countdown.
 - Composition and video recording locks: CoreMotion horizon and overhead/flat-lay crosshair
   level (`LevelOverlay`, `Composition`), 24 / 28 / 35 mm focal-length cycling when tapping the
   active 1× lens button, front-camera mirroring, geometric lens distortion correction,

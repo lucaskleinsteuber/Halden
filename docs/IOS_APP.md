@@ -75,6 +75,26 @@ the design comes after that. What works today is described below.
   (`isGeometricDistortionCorrectionEnabled`), hardware lens-smudge detection hints
   (`cameraLensSmudgeDetectionStatus`, dismissible banner), and optional camera-lens
   (`primaryConstituentDeviceSwitchingBehavior`) and white-balance locks while recording video.
+- **Gestures, shutter & bursts** (`ShutterGestures`, `Bursts`, `BurstPickerView`,
+  `HaldenShortcuts`):
+  - **Focus & exposure sun**: tapping the picture focuses and shows a vertical sun slider beside
+    the focus square; dragging vertically adjusts exposure compensation (EV −2…+2). Long press
+    locks AE/AF.
+  - **QuickTake**: holding the shutter in photo mode starts a video recording (temporarily
+    detaching Live Photos so `AVCaptureMovieFileOutput` never coexists with active Live Photos);
+    dragging right locks recording hands-free, and dragging up zooms smoothly.
+  - **Burst**: dragging the shutter left (or holding Volume Up when enabled) shoots a rapid burst
+    of photos sharing a `burstId` carried through the server and `/sync`, with a live counter.
+    In the library grid, burst photos collapse into one stack tile with a count badge; full
+    screen opens `BurstPickerView` to pick favorites and move the rest to the trash.
+  - **Photo while recording & pause/resume**: in video mode (where Live Photos are off, so photo
+    and movie outputs coexist) and locked QuickTake, the shutter row shows a pause/resume button
+    (`AVCaptureMovieFileOutput.pauseRecording`) and a still-photo button that snaps a photo
+    without interrupting recording.
+  - **Hardware shutter & voice**: `AVCaptureEventInteraction` triggers the shutter (or Volume Up
+    burst) from hardware volume buttons and AirPods stem where iOS allows it. Siri & Shortcuts
+    App Intents (`TakePhotoIntent`, `RecordVideoIntent`, `TakeSelfieIntent`) open the camera in
+    the chosen mode/side and fire after a 3-second countdown.
 - **Live Photos** (on by default, like Apple's camera; the button on top or Settings ›
   Camera): the photo and 1.5 s of video with sound before and after, taken together by
   `AVCapturePhotoOutput` with the same content identifier, the video with place and time. The

@@ -70,7 +70,7 @@ struct PhotosView: View {
             }
             .navigationDestination(for: Route.self) { route in
                 switch route {
-                case .photo(let id): PhotoView(start: id, assets: app.library)
+                case .photo(let id): PhotoView(start: id, assets: app.gridLibrary)
                 case .withoutPlace: WithoutPlaceView()
                 case .uploads: UploadsView()
                 case .trash: TrashView()
@@ -90,8 +90,8 @@ struct PhotosView: View {
 
     private var library: some View {
         LibraryGrid(
-            assets: app.library, version: app.libraryVersion, uploads: app.uploads, pipeline: app.pipeline,
-            selection: selection
+            assets: app.gridLibrary, version: app.libraryVersion, uploads: app.uploads, pipeline: app.pipeline,
+            selection: selection, burstCounts: app.burstCounts
         ) { id in
             if var chosen = selection {
                 if chosen.contains(id) { chosen.remove(id) } else { chosen.insert(id) }
