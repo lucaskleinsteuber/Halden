@@ -26,6 +26,12 @@ final class CameraModel {
     private(set) var isQuickTakeLocked = false
     /// Active burst count while shooting a burst (`0` when not bursting).
     private(set) var burstCount = 0
+    /// Updated from CoreMotion; true when the iPhone rests steadily on a tripod.
+    var isOnTripod = false
+    /// Non-nil (0…1) while capturing and stacking a Night Mode exposure series.
+    private(set) var nightCaptureProgress: Double?
+    /// Remaining estimated seconds during a Night Mode capture.
+    private(set) var nightCaptureSecondsLeft: Int?
     private(set) var torch = false
     private(set) var problem: String?
     /// Goes up with every photo taken, for the flash on the screen.
@@ -72,6 +78,22 @@ final class CameraModel {
     var isRecordingPaused: Bool { recordingPausedAt != nil }
     /// Pause/resume and still-photo-during-video are available in standard video and locked QuickTake.
     var canPauseAndSnapStill: Bool { recording && (mode == .video || isQuickTakeLocked) }
+    var isNightCapturing: Bool { nightCaptureProgress != nil }
+
+    /// Suggested Night Mode exposure time in dark scenes (1–3 s handheld, 10–30 s on tripod).
+    var nightSuggestedSeconds: Int? {
+        guard mode == .photo, settings().flash != .on,
+            let iso = backend.readings.iso, let shutter = backend.readings.shutter
+        else { return nil }
+        return NightMath.suggestedSeconds(iso: iso, shutterSeconds: shutter, onTripod: isOnTripod)
+    }
+
+    /// Effective Night Mode capture time (`0` when off or bright with Auto).
+    var nightActiveSeconds: Int {
+        guard mode == .photo, settings().flash != .on else { return 0 }
+        return NightMath.effectiveSeconds(
+            setting: settings().nightMode, suggested: nightSuggestedSeconds, onTripod: isOnTripod)
+    }
 
     /// The zoom to show: the one asked for (at once), or the camera's when something else moved it.
     var zoom: Double {
@@ -228,6 +250,7 @@ final class CameraModel {
 
     /// The big button: a photo (after the self-timer), or start and stop a video.
     func shutter() {
+        if isNightCapturing { return }
         if countdown != nil { return cancelCountdown() }
         if burstTask != nil { return stopBurst() }
         if recording { return stopRecording() }
@@ -401,10 +424,16 @@ final class CameraModel {
     }
 
     private func takePhoto() {
+        guard !isNightCapturing else { return }
         let now = Date()
         let settings = settings()
         let place = place(at: now)
         let isPortrait = mode == .portrait
+        let nightSeconds = nightActiveSeconds
+        if mode == .photo && nightSeconds > 0 {
+            takeNightPhoto(seconds: nightSeconds, at: now, place: place, settings: settings)
+            return
+        }
         let raw = !isPortrait && settings.captureRAW && backend.state.canRAW
         let autoDepth = mode == .photo && backend.state.subjectDetected && backend.state.canDepth && !raw
         let aspectRatio = settings.photoAspectRatio
@@ -431,6 +460,59 @@ final class CameraModel {
             photo.edit = Self.captureEdit(
                 aspectRatio: aspectRatio, width: photo.width, height: photo.height,
                 style: style, filter: filter, portraitAperture: aperture, portraitLighting: lighting)
+            let data = photo.data
+            if let small = await Task.detached(operation: { Self.small(data) }).value {
+                withAnimation(.snappy(duration: 0.25)) { lastShot = small }
+            }
+            var metadata = Self.metadata(at: now, place: place)
+            metadata.width = photo.width
+            metadata.height = photo.height
+            keepPhoto?(photo, metadata)
+        }
+    }
+
+    private func takeNightPhoto(seconds: Int, at now: Date, place: ClientLocation?, settings: AppSettings) {
+        let frameCount = NightMath.frameCount(forSeconds: seconds)
+        let aspectRatio = settings.photoAspectRatio
+        let style = settings.photographicStyle
+        let filter = settings.photoFilter
+        let preferHEIC = settings.photoFormat == .heic
+        let request = PhotoRequest(
+            format: settings.photoFormat, flash: .off, location: place,
+            trueNorth: location.compass?.trueNorth ?? false, takenAt: now,
+            live: false, resolution: .mp12, raw: false, prioritizeFaster: true,
+            mirrorFrontCamera: settings.mirrorFrontCamera)
+        nightCaptureProgress = 0.05
+        nightCaptureSecondsLeft = seconds
+        Task {
+            defer {
+                nightCaptureProgress = nil
+                nightCaptureSecondsLeft = nil
+            }
+            let frames = await backend.takeNightBurst(count: frameCount, request: request) { done, total in
+                let ratio = Double(done) / Double(max(total, 1))
+                self.nightCaptureProgress = 0.05 + ratio * 0.8
+                self.nightCaptureSecondsLeft = max(1, Int(ceil(Double(seconds) * (1.0 - ratio))))
+            }
+            guard !frames.isEmpty else {
+                problem = "The Night Mode photo could not be taken."
+                return
+            }
+            nightCaptureProgress = 0.9
+            nightCaptureSecondsLeft = 0
+            let stacked = await Task.detached(priority: .userInitiated) {
+                NightStacker.stack(frameData: frames, preferHEIC: preferHEIC)
+            }.value
+            guard let stacked else {
+                problem = "Night Mode stacking failed."
+                return
+            }
+            shots += 1
+            problem = nil
+            var photo = TakenPhoto(
+                data: stacked.data, heic: stacked.heic, width: stacked.width, height: stacked.height)
+            photo.edit = Self.captureEdit(
+                aspectRatio: aspectRatio, width: photo.width, height: photo.height, style: style, filter: filter)
             let data = photo.data
             if let small = await Task.detached(operation: { Self.small(data) }).value {
                 withAnimation(.snappy(duration: 0.25)) { lastShot = small }

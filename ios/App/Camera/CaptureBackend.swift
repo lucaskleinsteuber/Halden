@@ -179,6 +179,10 @@ protocol CaptureBackend: AnyObject {
     /// Values set by hand; what is `nil` the camera decides. Kept across lenses and modes.
     func setManual(_ settings: ManualSettings)
     func takePhoto(_ request: PhotoRequest) async -> TakenPhoto?
+    /// Captures a rapid burst of short exposures for Night Mode stacking.
+    func takeNightBurst(
+        count: Int, request: PhotoRequest, onFrame: @MainActor @escaping (Int, Int) -> Void
+    ) async -> [Data]
     /// Takes a still photo without interrupting an active video recording.
     func takeStillWhileRecording(_ request: PhotoRequest) async -> TakenPhoto?
     func startRecording(_ request: VideoRequest) -> Bool

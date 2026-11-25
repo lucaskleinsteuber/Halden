@@ -429,6 +429,38 @@ final class HaldenUITests: XCTestCase {
         XCTAssertTrue(app.switches["preserve-portrait"].waitForExistence(timeout: 5))
     }
 
+    /// Night Mode: moon badge appears in dark scenes, slider sets Off/Auto, shutter captures and
+    /// stacks a Night photo, and Preserve Settings includes Night mode.
+    @MainActor
+    func testNightModeBadgeSliderCaptureAndPreserveSetting() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-ui-testing-signed-in", "-ui-testing-library", "5", "-ui-testing-night"]
+        app.launch()
+        XCTAssertTrue(app.buttons["shutter"].waitForExistence(timeout: 30))
+
+        let badge = app.buttons["night-mode-badge"]
+        XCTAssertTrue(badge.waitForExistence(timeout: 5), "moon badge appears automatically in dark scenes")
+        badge.tap()
+
+        let slider = app.sliders["drawer-night-slider"]
+        XCTAssertTrue(slider.waitForExistence(timeout: 5), "night duration slider opens")
+        app.buttons["drawer-night-off"].tap()
+        app.buttons["drawer-night-auto"].tap()
+        app.buttons["camera-controls-toggle"].tap()
+
+        // Capture a stacked Night Mode photo.
+        app.buttons["shutter"].tap()
+        Thread.sleep(forTimeInterval: 1.5)
+        XCTAssertTrue(app.buttons["shutter"].isHittable, "shutter ready again after Night stacking")
+
+        // Verify Preserve Night Mode toggle in Settings › Camera › Preserve Settings.
+        let tabs = Tabs(app)
+        tabs.buttons["Settings"].tap()
+        app.buttons["camera-settings"].tap()
+        app.buttons["camera-preserve-settings"].tap()
+        XCTAssertTrue(app.switches["preserve-night"].waitForExistence(timeout: 5), "night mode preserve toggle")
+    }
+
     /// Fifty thousand photos scroll without waiting for pictures.
     @MainActor
     func testTheGridScrollsThroughFiftyThousandPhotos() {

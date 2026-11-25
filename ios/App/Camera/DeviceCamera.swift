@@ -141,6 +141,28 @@ final class DeviceCamera: CaptureBackend {
         }
     }
 
+    func takeNightBurst(
+        count: Int, request: PhotoRequest, onFrame: @MainActor @escaping (Int, Int) -> Void
+    ) async -> [Data] {
+        var fast = request
+        fast.live = false
+        fast.raw = false
+        fast.flash = .off
+        fast.prioritizeFaster = true
+        fast.captureDepth = false
+        fast.capturePortraitMatte = false
+        var frames: [Data] = []
+        let total = max(1, count)
+        frames.reserveCapacity(total)
+        for index in 0..<total {
+            if let shot = await takePhoto(fast) {
+                frames.append(shot.data)
+            }
+            onFrame(index + 1, total)
+        }
+        return frames
+    }
+
     func takeStillWhileRecording(_ request: PhotoRequest) async -> TakenPhoto? {
         let angle = captureAngle
         return await withCheckedContinuation { continuation in

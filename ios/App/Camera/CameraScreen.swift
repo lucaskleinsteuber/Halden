@@ -26,6 +26,7 @@ struct CameraScreen<Gallery: View>: View {
     @State private var dialTouches = 0
     @State private var showManual = false
     @State private var showControls = false
+    @State private var drawerPanel: CameraDrawer.Panel?
     @State private var manualValue: ManualPanel.Value?
     /// The focus is being turned by hand: the picture bigger, to see what is sharp.
     @State private var focusing = false
@@ -61,7 +62,9 @@ struct CameraScreen<Gallery: View>: View {
         .onAppear {
             cameraVisible = true
             camera.appear()
-            motion.setEnabled(settings.showLevel)
+            motion.showLevel = settings.showLevel
+            motion.start()
+            camera.isOnTripod = motion.isOnTripod
         }
         .onDisappear {
             cameraVisible = false
@@ -72,7 +75,11 @@ struct CameraScreen<Gallery: View>: View {
             motion.stop()
             camera.disappear()
         }
-        .onChange(of: settings.showLevel) { _, on in motion.setEnabled(on) }
+        .onChange(of: settings.showLevel) { _, on in motion.showLevel = on }
+        .onChange(of: motion.isOnTripod) { _, tripod in camera.isOnTripod = tripod }
+        .onChange(of: camera.isNightCapturing) { _, active in
+            if active { motion.anchorHoldStill() } else { motion.clearHoldStill() }
+        }
         .onChange(of: state.lensSmudged) { _, smudged in if !smudged { smudgeDismissed = false } }
         .onChange(of: state.side) { _, _ in smudgeDismissed = false }
         .onChange(of: camera.shots) {
@@ -161,7 +168,12 @@ struct CameraScreen<Gallery: View>: View {
         .aspectRatio(ratio, contentMode: .fit)
         .overlay {
             if state.ready {
-                if settings.showLevel { LevelOverlay(reading: motion.reading) }
+                if camera.isNightCapturing {
+                    NightHoldStillOverlay(
+                        offset: motion.holdStillOffset, secondsLeft: camera.nightCaptureSecondsLeft)
+                } else if settings.showLevel {
+                    LevelOverlay(reading: motion.reading)
+                }
                 if let focusPoint {
                     GeometryReader { geo in
                         let sunOnRight = focusPoint.x < geo.size.width - 72
@@ -250,6 +262,37 @@ struct CameraScreen<Gallery: View>: View {
                     .padding(.top, 8)
                     .accessibilityLabel("Automatic portrait depth active")
                     .accessibilityIdentifier("portrait-auto-depth")
+            } else if camera.mode == .photo && !camera.isNightCapturing
+                && (camera.nightSuggestedSeconds != nil || settings.nightMode != .auto)
+            {
+                let activeSeconds = camera.nightActiveSeconds
+                Button {
+                    withAnimation(.snappy(duration: 0.2)) {
+                        showManual = false
+                        showControls = true
+                        drawerPanel = .night
+                    }
+                } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: "moon.stars.fill")
+                        Text(
+                            settings.nightMode.label(
+                                suggested: camera.nightSuggestedSeconds, onTripod: camera.isOnTripod)
+                        )
+                        .monospacedDigit()
+                    }
+                    .font(.caption.bold())
+                    .foregroundStyle(activeSeconds > 0 ? .yellow : .white)
+                    .padding(.horizontal, 12)
+                    .frame(minWidth: 44, minHeight: 44)
+                    .background(.black.opacity(0.65), in: .capsule)
+                }
+                .padding(.top, 6)
+                .accessibilityLabel(
+                    activeSeconds > 0
+                        ? "Night Mode \(activeSeconds) seconds" : "Night Mode off"
+                )
+                .accessibilityIdentifier("night-mode-badge")
             }
             Spacer(minLength: 0)
             if let problem = camera.problem {
@@ -266,7 +309,7 @@ struct CameraScreen<Gallery: View>: View {
                     .transition(.opacity)
             }
             if showControls && !camera.recording {
-                CameraDrawer(camera: camera, settings: settings, update: update)
+                CameraDrawer(camera: camera, settings: settings, update: update, expanded: $drawerPanel)
                     .padding(.bottom, 4)
                     .transition(.opacity.combined(with: .move(edge: .bottom)))
             } else {
@@ -745,6 +788,8 @@ struct CameraScreen<Gallery: View>: View {
                         } label: {
                             Text(mode.title.uppercased())
                                 .font(.footnote.weight(.semibold))
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.72)
                                 .foregroundStyle(mode == camera.mode ? .yellow : .white)
                                 .frame(width: width, height: 44)
                                 .contentShape(.rect)
@@ -833,7 +878,18 @@ struct CameraScreen<Gallery: View>: View {
         } label: {
             ZStack {
                 Circle().strokeBorder(.white, lineWidth: 4).frame(width: 76, height: 76)
-                if camera.burstCount > 0 {
+                if let progress = camera.nightCaptureProgress {
+                    Circle()
+                        .trim(from: 0, to: progress)
+                        .stroke(.yellow, style: StrokeStyle(lineWidth: 4, lineCap: .round))
+                        .rotationEffect(.degrees(-90))
+                        .frame(width: 72, height: 72)
+                        .accessibilityIdentifier("night-progress")
+                    Circle().fill(.yellow.opacity(0.22)).frame(width: 60, height: 60)
+                    Image(systemName: "moon.stars.fill")
+                        .font(.title3.bold())
+                        .foregroundStyle(.yellow)
+                } else if camera.burstCount > 0 {
                     Circle().fill(.yellow).frame(width: 64, height: 64)
                     Text("\(camera.burstCount)")
                         .font(.title2.bold().monospacedDigit())

@@ -10,6 +10,13 @@ part of the first versions.
 
 ### Added
 
+- Night Mode (`NightMode`, `TripodDetector`, `NightStacker`):
+  - Automatic low-light moon indicator and control-drawer duration slider (1–3 s handheld, up to
+    30 s when CoreMotion detects a tripod; Off / Auto / manual), plus Preserve Settings support
+    (`preserveNightMode`).
+  - Multi-frame low-light burst capture with circular shutter progress ring and live "Hold still"
+    crosshair, Vision homographic alignment, Metal outlier-rejecting trimmed-mean merge, Core
+    Image denoise, and HEIC encoding.
 - Portrait mode, Portrait Lighting and automatic depth in Photo mode (`Portrait`,
   `PortraitRenderer`):
   - New **Portrait** camera mode with live bokeh preview via the Metal viewfinder, depth &

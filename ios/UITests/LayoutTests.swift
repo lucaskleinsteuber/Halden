@@ -55,6 +55,7 @@ final class LayoutTests: XCTestCase {
         let drawer = app.descendants(matching: .any)["camera-drawer"]
         let screenWidth = app.windows.firstMatch.frame.width
         for (id, screen) in [
+            ("drawer-night", "camera-controls-night"),
             ("drawer-style", "camera-controls-style"),
             ("drawer-filter", "camera-controls-filter"),
             ("drawer-exposure", "camera-controls-exposure"),

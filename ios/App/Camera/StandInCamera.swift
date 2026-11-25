@@ -17,7 +17,10 @@ final class StandInCamera: CaptureBackend {
         canDepth: true,
         subjectDetected: ProcessInfo.processInfo.arguments.contains("-ui-testing-subject"),
         manualLimits: ManualLimits(shutter: (1.0 / 8000)...1, iso: 50...3200, exposureBias: -8...8))
-    private(set) var readings = CameraReadings(shutter: 1.0 / 120, iso: 100, kelvin: 5200, tint: 0, focus: 0.5)
+    private(set) var readings =
+        ProcessInfo.processInfo.arguments.contains("-ui-testing-night")
+        ? CameraReadings(shutter: 1.0 / 15, iso: 2000, kelvin: 4800, tint: 0, focus: 0.5)
+        : CameraReadings(shutter: 1.0 / 120, iso: 100, kelvin: 5200, tint: 0, focus: 0.5)
     @ObservationIgnored private let standInPreview = StandInPreview()
     var previewView: UIView { standInPreview }
     @ObservationIgnored private var taken = 0
@@ -133,6 +136,26 @@ final class StandInCamera: CaptureBackend {
             if (try? await SampleMedia.video(at: movie, seed: seed, seconds: 1)) != nil { photo.liveVideo = movie }
         }
         return photo
+    }
+
+    func takeNightBurst(
+        count: Int, request: PhotoRequest, onFrame: @MainActor @escaping (Int, Int) -> Void
+    ) async -> [Data] {
+        guard mode == .photo else { return [] }
+        let total = max(1, count)
+        let baseSeed = nextSeed()
+        var frames: [Data] = []
+        frames.reserveCapacity(total)
+        for index in 0..<total {
+            try? await Task.sleep(for: .milliseconds(45))
+            if let data = await Task.detached(operation: {
+                SampleMedia.photo(seed: baseSeed, width: 640, height: 480)
+            }).value {
+                frames.append(data)
+            }
+            onFrame(index + 1, total)
+        }
+        return frames
     }
 
     func takeStillWhileRecording(_ request: PhotoRequest) async -> TakenPhoto? {

@@ -90,11 +90,14 @@ public struct AppSettings: Codable, Sendable, Equatable {
     public var portraitAperture = PortraitMath.defaultAperture
     /// Portrait mode lighting style.
     public var portraitLighting = PortraitLighting.natural
+    /// Night Mode setting (auto when dark, off, or manual duration in seconds).
+    public var nightMode = NightModeSetting.auto
     // Preserve Settings
     public var preserveMode = false
     public var keptMode: String?
     public var preserveStyle = false
     public var preservePortraitZoom = false
+    public var preserveNightMode = false
     public var preserveExposure = false
     public var keptExposureBias = 0.0
     public var preserveLivePhoto = true
@@ -138,8 +141,9 @@ public struct AppSettings: Codable, Sendable, Equatable {
         case flash, showGrid, showLevel, mirrorFrontCamera, lensCorrection
         case livePhotos, slowMotionRate, timeLapseInterval
         case prioritizeFasterShooting, allowAudioPlayback, defaultFocalLength, volumeUpForBurst
-        case topBarControls, photographicStyle, photoFilter, portraitAperture, portraitLighting
-        case preserveMode, keptMode, preserveStyle, preservePortraitZoom, preserveExposure, keptExposureBias,
+        case topBarControls, photographicStyle, photoFilter, portraitAperture, portraitLighting, nightMode
+        case preserveMode, keptMode, preserveStyle, preservePortraitZoom, preserveNightMode, preserveExposure,
+            keptExposureBias,
             preserveLivePhoto, preserveResolution
         case keepManualSettings, keptManual, tripKilometres, videoCopy, makeSmallCopies
         case locationAccuracyLimit, inaccurateLocation
@@ -186,10 +190,12 @@ public struct AppSettings: Codable, Sendable, Equatable {
         read(.photoFilter, into: &settings.photoFilter)
         read(.portraitAperture, into: &settings.portraitAperture)
         read(.portraitLighting, into: &settings.portraitLighting)
+        read(.nightMode, into: &settings.nightMode)
         read(.preserveMode, into: &settings.preserveMode)
         read(.keptMode, into: &settings.keptMode)
         read(.preserveStyle, into: &settings.preserveStyle)
         read(.preservePortraitZoom, into: &settings.preservePortraitZoom)
+        read(.preserveNightMode, into: &settings.preserveNightMode)
         read(.preserveExposure, into: &settings.preserveExposure)
         read(.keptExposureBias, into: &settings.keptExposureBias)
         read(.preserveLivePhoto, into: &settings.preserveLivePhoto)

@@ -426,6 +426,12 @@ struct PreserveCameraSettingsView: View {
                         "Remember your Portrait f-stop and lighting choice between sessions.")
                 }
                 .accessibilityIdentifier("preserve-portrait")
+                Toggle(isOn: app.setting(\.preserveNightMode)) {
+                    Explained(
+                        "Night mode",
+                        "Keep your Night Mode off or duration choice instead of resetting to Auto.")
+                }
+                .accessibilityIdentifier("preserve-night")
                 Toggle(isOn: app.setting(\.preserveExposure)) {
                     Explained("Exposure adjustment", "Keep the EV offset instead of resetting to 0.")
                 }

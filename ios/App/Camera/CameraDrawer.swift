@@ -6,14 +6,14 @@ import SwiftUI
 /// Future stages add Night, Photographic Styles, Portrait, Action and Audio items here.
 struct CameraDrawer: View {
     enum Panel: Hashable {
-        case aperture, lighting, style, filter, exposure, aspectRatio, timer, resolution, videoFrameRate,
+        case night, aperture, lighting, style, filter, exposure, aspectRatio, timer, resolution, videoFrameRate,
             timeLapseInterval
     }
 
     let camera: CameraModel
     let settings: AppSettings
     let update: ((inout AppSettings) -> Void) -> Void
-    @State private var expanded: Panel?
+    @Binding var expanded: Panel?
 
     private var state: CameraState { camera.backend.state }
 
@@ -78,6 +78,19 @@ struct CameraDrawer: View {
                 }
                 camera.settingsChanged()
             }
+        }
+
+        // Night Mode
+        let nightSuggested = camera.nightSuggestedSeconds
+        let nightActive = camera.nightActiveSeconds > 0
+        drawerChip(
+            symbol: "moon.stars.fill",
+            text: settings.nightMode.label(suggested: nightSuggested, onTripod: camera.isOnTripod),
+            active: nightActive || expanded == .night,
+            label: nightActive ? "Night Mode \(camera.nightActiveSeconds) seconds" : "Night Mode",
+            id: "drawer-night"
+        ) {
+            expanded = expanded == .night ? nil : .night
         }
 
         // Photographic Style
@@ -289,6 +302,40 @@ struct CameraDrawer: View {
     @ViewBuilder private func detailBar(for panel: Panel) -> some View {
         Group {
             switch panel {
+            case .night:
+                let maxSec = NightMath.maxSeconds(onTripod: camera.isOnTripod)
+                let currentSec = Double(camera.nightActiveSeconds)
+                HStack(spacing: 8) {
+                    optionPill("Off", selected: settings.nightMode.isOff, id: "drawer-night-off") {
+                        update { $0.nightMode = .off }
+                    }
+                    optionPill("Auto", selected: settings.nightMode == .auto, id: "drawer-night-auto") {
+                        update { $0.nightMode = .auto }
+                    }
+                    Slider(
+                        value: Binding(
+                            get: { currentSec },
+                            set: { value in
+                                let rounded = Int(value.rounded())
+                                update { $0.nightMode = rounded <= 0 ? .off : .seconds(rounded) }
+                            }),
+                        in: 0...Double(maxSec),
+                        step: 1
+                    )
+                    .tint(.yellow)
+                    .accessibilityLabel("Night Mode duration")
+                    .accessibilityIdentifier("drawer-night-slider")
+
+                    Text(camera.nightActiveSeconds == 0 ? "Off" : "\(camera.nightActiveSeconds)s")
+                        .font(.caption.bold().monospacedDigit())
+                        .foregroundStyle(camera.nightActiveSeconds > 0 ? .yellow : .white)
+                        .frame(minWidth: 34, alignment: .trailing)
+                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 4)
+                .background(.black.opacity(0.65), in: .rect(cornerRadius: 12))
+                .padding(.horizontal, 12)
+
             case .aperture:
                 HStack(spacing: 10) {
                     Text(PortraitMath.formatAperture(settings.portraitAperture))

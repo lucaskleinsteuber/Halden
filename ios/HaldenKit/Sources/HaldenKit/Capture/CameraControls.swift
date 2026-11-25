@@ -171,6 +171,7 @@ public enum TopBarControl: String, Codable, Sendable, CaseIterable, Identifiable
 /// Extended in later stages with Night (C8), Styles (C6), Portrait (C7), Action & Audio (C9).
 public enum CameraDrawerItem: String, Sendable, Hashable, Identifiable {
     case flash
+    case night
     case live
     case style
     case filter
@@ -264,6 +265,7 @@ public enum CameraControls {
             next.portraitAperture = PortraitMath.defaultAperture
             next.portraitLighting = .natural
         }
+        if !settings.preserveNightMode { next.nightMode = .auto }
         if !settings.preserveExposure { next.keptExposureBias = 0 }
         if !settings.preserveLivePhoto { next.livePhotos = true }
         if !settings.preserveResolution {

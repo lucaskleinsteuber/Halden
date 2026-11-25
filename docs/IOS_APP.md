@@ -75,6 +75,16 @@ the design comes after that. What works today is described below.
   (`isGeometricDistortionCorrectionEnabled`), hardware lens-smudge detection hints
   (`cameraLensSmudgeDetectionStatus`, dismissible banner), and optional camera-lens
   (`primaryConstituentDeviceSwitchingBehavior`) and white-balance locks while recording video.
+- **Night Mode** (`NightMode`, `NightMath`, `TripodDetector`, `NightStacker`):
+  - Automatically suggests Night Mode in dark scenes (`moon.stars.fill` badge and drawer slider):
+    1–3 s handheld, or 10–30 s when CoreMotion (`TripodDetector`) detects the iPhone is mounted on
+    a tripod. The drawer slider lets you choose Off, Auto, or a manual duration (up to 10 s
+    handheld / 30 s on tripod), with Preserve Settings support (`preserveNightMode`).
+  - Captures a burst of short exposures while showing a circular progress ring around the shutter
+    and a live "Hold still" twin-crosshair target, aligns the frames with Vision
+    (`VNHomographicImageRegistrationRequest`, translational fallback), merges them on Metal GPU
+    using a median-anchored outlier-rejecting trimmed-mean compute kernel (with CPU fallback),
+    applies Core Image noise reduction and shadow lift, and saves the result as HEIC.
 - **Portrait mode & automatic depth** (`Portrait`, `PortraitMath`, `PortraitRenderer`):
   - Dedicated **Portrait** camera mode with live blurred background preview through the Metal
     viewfinder (`AVCaptureDepthDataOutput` + `AVCaptureDataOutputSynchronizer` when supported,
