@@ -170,30 +170,43 @@ final class HaldenUITests: XCTestCase {
         let toggle = app.buttons["camera-controls-toggle"]
         XCTAssertTrue(toggle.waitForExistence(timeout: 10))
         toggle.tap()
-        XCTAssertTrue(app.descendants(matching: .any)["camera-drawer"].waitForExistence(timeout: 5))
+        let drawer = app.descendants(matching: .any)["camera-drawer"]
+        XCTAssertTrue(drawer.waitForExistence(timeout: 5))
+        let screenWidth = app.windows.firstMatch.frame.width
+        func drawerChip(_ id: String) -> XCUIElement {
+            let chip = app.buttons[id]
+            for _ in 0..<5 where chip.exists && (chip.frame.maxX > screenWidth - 8 || chip.frame.minX < 0) {
+                let from = drawer.coordinate(
+                    withNormalizedOffset: CGVector(dx: chip.frame.minX < 0 ? 0.2 : 0.85, dy: 0.92))
+                let to = drawer.coordinate(
+                    withNormalizedOffset: CGVector(dx: chip.frame.minX < 0 ? 0.85 : 0.2, dy: 0.92))
+                from.press(forDuration: 0.02, thenDragTo: to)
+            }
+            return chip
+        }
 
         // Aspect ratio 4:3 → 16:9 → 4:3.
-        app.buttons["drawer-aspect"].tap()
+        drawerChip("drawer-aspect").tap()
         app.buttons["drawer-aspect-16:9"].tap()
         XCTAssertEqual(app.buttons["drawer-aspect"].label, "Aspect ratio 16:9")
-        app.buttons["drawer-aspect"].tap()
+        drawerChip("drawer-aspect").tap()
         app.buttons["drawer-aspect-4:3"].tap()
 
         // Exposure compensation slider (-2...+2 EV).
-        app.buttons["drawer-exposure"].tap()
+        drawerChip("drawer-exposure").tap()
         let evSlider = app.sliders["drawer-ev-slider"]
         XCTAssertTrue(evSlider.waitForExistence(timeout: 5))
         evSlider.adjust(toNormalizedSliderPosition: 0.75)
         app.buttons["drawer-ev-reset"].tap()
 
         // Resolution (48 MP) and RAW.
-        let res = app.buttons["drawer-resolution"]
+        let res = drawerChip("drawer-resolution")
         if res.exists {
             res.tap()
             app.buttons["drawer-res-48"].tap()
             XCTAssertEqual(res.label, "Resolution 48 MP")
         }
-        let raw = app.buttons["drawer-raw"]
+        let raw = drawerChip("drawer-raw")
         if raw.exists {
             raw.tap()
             XCTAssertEqual(raw.label, "RAW on")
@@ -341,6 +354,44 @@ final class HaldenUITests: XCTestCase {
         XCTAssertTrue(app.buttons["burst-picker-done"].waitForNonExistence(timeout: 5))
         // Only one photo remains, so the burst selector button disappears.
         XCTAssertTrue(select.waitForNonExistence(timeout: 5))
+    }
+
+    /// Photographic Styles (preset + tone/color pad + palette) and Filters work in the camera
+    /// drawer, and Settings › Preserve Settings exposes Photographic Style preservation.
+    @MainActor
+    func testPhotographicStylesAndFiltersInCamera() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-ui-testing-signed-in"]
+        app.launch()
+        let toggle = app.buttons["camera-controls-toggle"]
+        XCTAssertTrue(toggle.waitForExistence(timeout: 10))
+        toggle.tap()
+        XCTAssertTrue(app.buttons["drawer-style"].waitForExistence(timeout: 5))
+
+        // Select Amber style, adjust palette, then reset.
+        app.buttons["drawer-style"].tap()
+        XCTAssertTrue(app.descendants(matching: .any)["style-pad"].waitForExistence(timeout: 5))
+        app.buttons["style-preset-amber"].tap()
+        XCTAssertTrue(app.buttons["drawer-style"].label.contains("Amber"))
+        app.sliders["style-palette-slider"].adjust(toNormalizedSliderPosition: 0.8)
+        app.buttons["style-reset"].tap()
+        XCTAssertEqual(app.buttons["drawer-style"].label, "Photographic style")
+
+        // Select Vivid Warm filter, then back to Original.
+        app.buttons["drawer-filter"].tap()
+        XCTAssertTrue(app.buttons["filter-vividWarm"].waitForExistence(timeout: 5))
+        app.buttons["filter-vividWarm"].tap()
+        XCTAssertEqual(app.buttons["drawer-filter"].label, "Filter Vivid Warm")
+        app.buttons["filter-original"].tap()
+        XCTAssertEqual(app.buttons["drawer-filter"].label, "Filter off")
+        toggle.tap()
+
+        // Settings › Camera › Preserve Settings › Photographic Style & Filter.
+        let tabs = Tabs(app)
+        tabs.buttons["Settings"].tap()
+        app.buttons["camera-settings"].tap()
+        app.buttons["camera-preserve-settings"].tap()
+        XCTAssertTrue(app.switches["preserve-style"].waitForExistence(timeout: 5))
     }
 
     /// Fifty thousand photos scroll without waiting for pictures.

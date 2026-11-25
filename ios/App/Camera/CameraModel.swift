@@ -366,6 +366,8 @@ final class CameraModel {
         let currentSettings = settings()
         let place = place(at: now)
         let aspectRatio = currentSettings.photoAspectRatio
+        let style = currentSettings.photographicStyle
+        let filter = currentSettings.photoFilter
         shots += 1
         let request = PhotoRequest(
             format: currentSettings.photoFormat, flash: .off, location: place,
@@ -374,11 +376,8 @@ final class CameraModel {
             mirrorFrontCamera: currentSettings.mirrorFrontCamera)
         guard var photo = await backend.takePhoto(request) else { return false }
         problem = nil
-        if let crop = aspectRatio.crop(forWidth: photo.width, height: photo.height) {
-            var recipe = EditRecipe()
-            recipe.crop = crop
-            photo.edit = recipe
-        }
+        photo.edit = Self.captureEdit(
+            aspectRatio: aspectRatio, width: photo.width, height: photo.height, style: style, filter: filter)
         let data = photo.data
         if let small = await Task.detached(operation: { Self.small(data) }).value {
             withAnimation(.snappy(duration: 0.25)) { lastShot = small }
@@ -407,6 +406,8 @@ final class CameraModel {
         let place = place(at: now)
         let raw = settings.captureRAW && backend.state.canRAW
         let aspectRatio = settings.photoAspectRatio
+        let style = settings.photographicStyle
+        let filter = settings.photoFilter
         shots += 1
         let request = PhotoRequest(
             format: settings.photoFormat, flash: settings.flash, location: place,
@@ -421,11 +422,8 @@ final class CameraModel {
                 return
             }
             problem = nil
-            if let crop = aspectRatio.crop(forWidth: photo.width, height: photo.height) {
-                var recipe = EditRecipe()
-                recipe.crop = crop
-                photo.edit = recipe
-            }
+            photo.edit = Self.captureEdit(
+                aspectRatio: aspectRatio, width: photo.width, height: photo.height, style: style, filter: filter)
             let data = photo.data
             if let small = await Task.detached(operation: { Self.small(data) }).value {
                 withAnimation(.snappy(duration: 0.25)) { lastShot = small }
@@ -435,6 +433,17 @@ final class CameraModel {
             metadata.height = photo.height
             keepPhoto?(photo, metadata)
         }
+    }
+
+    /// Combines non-destructive aspect crop, Photographic Style and Filter into one v2 edit recipe.
+    static func captureEdit(
+        aspectRatio: PhotoAspectRatio, width: Int, height: Int, style: PhotographicStyle?, filter: PhotoFilter?
+    ) -> EditRecipe? {
+        var recipe = EditRecipe()
+        recipe.crop = aspectRatio.crop(forWidth: width, height: height)
+        if let style = style?.fitted, !style.isDefault { recipe.style = style }
+        recipe.filter = filter
+        return recipe.isEmpty ? nil : recipe.fitted
     }
 
     /// The library shows the newest photo itself now.

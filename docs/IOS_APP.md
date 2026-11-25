@@ -75,6 +75,20 @@ the design comes after that. What works today is described below.
   (`isGeometricDistortionCorrectionEnabled`), hardware lens-smudge detection hints
   (`cameraLensSmudgeDetectionStatus`, dismissible banner), and optional camera-lens
   (`primaryConstituentDeviceSwitchingBehavior`) and white-balance locks while recording video.
+- **Photographic Styles, Filters & Metal viewfinder** (`PhotoLooks`, `LookRenderer`,
+  `MetalPreviewView`, `StylePadView`):
+  - **Custom Metal viewfinder**: when a non-default Photographic Style or Filter (or later
+    Portrait or live scopes) is active, `AVCaptureVideoDataOutput` frames pass through Core Image
+    and render on demand into an `MTKView` (`MetalPreviewView`). When inactive, the video output
+    is detached and the system `AVCaptureVideoPreviewLayer` runs with zero GPU overhead.
+  - **Photographic Styles**: 15 presets (Standard, Amber, Gold, Rose Gold, Neutral, Cool Rose,
+    Vibrant, Natural, Luminous, Dramatic, Quiet, Cozy, Ethereal, Muted B&W, Stark B&W) with a 2D
+    Tone/Color control pad and Palette intensity slider, implemented non-destructively in Core
+    Image and stored in `EditRecipe` (version 2) so they can be changed later in `EditView` ›
+    Looks.
+  - **Filters**: Vivid, Vivid Warm, Vivid Cool, Dramatic, Dramatic Warm, Dramatic Cool, Mono,
+    Silvertone and Noir, stored in `EditRecipe` (version 2) and synced across devices with full
+    edit history.
 - **Gestures, shutter & bursts** (`ShutterGestures`, `Bursts`, `BurstPickerView`,
   `HaldenShortcuts`):
   - **Focus & exposure sun**: tapping the picture focuses and shows a vertical sun slider beside

@@ -80,11 +80,53 @@ impl Playback {
 /// Longest edit the server keeps, as JSON.
 pub const MAX_EDIT_BYTES: usize = 16 * 1024;
 
-/// An edit is the apps' business; the server only checks it is one: an object with a version.
+/// An edit is the apps' business; the server checks it is an object with a version >= 1, stays
+/// within `MAX_EDIT_BYTES`, and that known v2 look fields (`style`, `filter`) have valid shapes.
 fn check_edit(edit: &Value) -> Result<(), String> {
     let version = edit.get("version").and_then(Value::as_i64);
-    if !edit.is_object() || version.is_none_or(|v| v < 1) {
+    let Some(map) = edit.as_object() else {
         return Err("edit must be an object with a version of 1 or more.".into());
+    };
+    if version.is_none_or(|v| v < 1) {
+        return Err("edit must be an object with a version of 1 or more.".into());
+    }
+    if let Some(style) = map.get("style")
+        && !style.is_null()
+    {
+        let Some(obj) = style.as_object() else {
+            return Err("edit.style must be an object.".into());
+        };
+        let preset_ok = obj
+            .get("preset")
+            .and_then(Value::as_str)
+            .is_some_and(|s| !s.is_empty() && s.len() <= 32);
+        if !preset_ok {
+            return Err("edit.style.preset must be a non-empty string up to 32 bytes.".into());
+        }
+        for (key, min, max) in [
+            ("tone", -1.0_f64, 1.0_f64),
+            ("color", -1.0, 1.0),
+            ("palette", 0.0, 1.0),
+        ] {
+            if let Some(value) = obj.get(key)
+                && !value.is_null()
+            {
+                let valid = value
+                    .as_f64()
+                    .is_some_and(|n| n.is_finite() && (min..=max).contains(&n));
+                if !valid {
+                    return Err(format!("edit.style.{key} must be between {min} and {max}."));
+                }
+            }
+        }
+    }
+    if let Some(filter) = map.get("filter")
+        && !filter.is_null()
+        && !filter
+            .as_str()
+            .is_some_and(|s| !s.is_empty() && s.len() <= 32)
+    {
+        return Err("edit.filter must be a non-empty string up to 32 bytes.".into());
     }
     if edit.to_string().len() > MAX_EDIT_BYTES {
         return Err(format!(

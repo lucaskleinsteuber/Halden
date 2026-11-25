@@ -11,9 +11,9 @@ import UIKit
 @Observable
 final class DeviceCamera: CaptureBackend {
     private(set) var state = CameraState()
-    @ObservationIgnored let preview = PreviewView()
+    @ObservationIgnored let preview = PreviewContainerView()
     var previewView: UIView { preview }
-    @ObservationIgnored private let core = CaptureCore()
+    @ObservationIgnored private let core: CaptureCore
     @ObservationIgnored private var rotation: AVCaptureDevice.RotationCoordinator?
     @ObservationIgnored private var rotationObservation: NSKeyValueObservation?
     @ObservationIgnored private var zoomObservation: NSKeyValueObservation?
@@ -27,6 +27,9 @@ final class DeviceCamera: CaptureBackend {
     @ObservationIgnored private var video: CaptureOptions?
 
     init() {
+        let preview = self.preview
+        let core = CaptureCore(metalView: preview.metalView)
+        self.core = core
         preview.previewLayer.session = core.session
         preview.previewLayer.videoGravity = .resizeAspectFill
         core.changed = { [weak self] state, device in
@@ -201,6 +204,7 @@ final class DeviceCamera: CaptureBackend {
             new.lensSmudged = state.lensSmudged
         }
         state = new
+        preview.setMetalActive(new.customPreviewActive)
         guard let device, device !== rotation?.device else { return }
         if let zoomRelay { zoomObservation = Self.follow(zoomOf: device, into: zoomRelay) }
         if let smudgeRelay { smudgeObservation = Self.follow(smudgeOf: device, into: smudgeRelay) }
@@ -238,12 +242,6 @@ final class DeviceCamera: CaptureBackend {
             let status = change.newValue ?? device.cameraLensSmudgeDetectionStatus
             relay.send(status == .smudged)
         }
-    }
-
-    /// The camera's picture.
-    final class PreviewView: UIView {
-        override class var layerClass: AnyClass { AVCaptureVideoPreviewLayer.self }
-        var previewLayer: AVCaptureVideoPreviewLayer { layer as! AVCaptureVideoPreviewLayer }
     }
 }
 
@@ -289,6 +287,10 @@ final class CaptureCore: NSObject, @unchecked Sendable {
     private let movieOutput = AVCaptureMovieFileOutput()
     /// Time-lapses: the frames, of which `timeLapse` keeps a few.
     private let frameOutput = AVCaptureVideoDataOutput()
+    /// Custom Metal preview output: attached only when a style, filter, portrait or scopes need GPU rendering.
+    private let previewOutput = AVCaptureVideoDataOutput()
+    private let metalView: MetalPreviewView
+    private let previewRelay: PreviewFrameRelay
     private let timeLapse = TimeLapseRecorder()
     private var timeLapsing = false
     /// Values set by hand, applied to every camera and mode.
@@ -309,10 +311,15 @@ final class CaptureCore: NSObject, @unchecked Sendable {
     /// Gets every new state (and the camera, when it changed).
     var changed: (@Sendable (CameraState, Carry<AVCaptureDevice>?) -> Void)?
 
-    override init() {
+    init(metalView: MetalPreviewView) {
+        self.metalView = metalView
+        self.previewRelay = PreviewFrameRelay(metalView: metalView)
         super.init()
         frameOutput.alwaysDiscardsLateVideoFrames = true
         frameOutput.setSampleBufferDelegate(timeLapse, queue: timeLapse.queue)
+        previewOutput.alwaysDiscardsLateVideoFrames = true
+        previewOutput.videoSettings = [kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA]
+        previewOutput.setSampleBufferDelegate(previewRelay, queue: previewRelay.queue)
         observers.append(
             NotificationCenter.default.addObserver(
                 forName: AVCaptureSession.runtimeErrorNotification, object: session, queue: nil
@@ -421,10 +428,11 @@ final class CaptureCore: NSObject, @unchecked Sendable {
     }
 
     /// Keeps exactly these outputs in the session. Live Photos and `movieOutput` must never be
-    /// active together; in photo mode only `photoOutput` is attached, while in video mode Live
-    /// Photos are off so `movieOutput` and `photoOutput` coexist for photo-while-recording.
+    /// active together; in photo mode only `photoOutput` (plus `previewOutput` when a look needs
+    /// Metal rendering) is attached, while in video mode Live Photos are off so `movieOutput` and
+    /// `photoOutput` coexist for photo-while-recording.
     private func use(_ outputs: [AVCaptureOutput]) {
-        for candidate in [photoOutput, movieOutput, frameOutput] as [AVCaptureOutput] {
+        for candidate in [photoOutput, movieOutput, frameOutput, previewOutput] as [AVCaptureOutput] {
             if !outputs.contains(where: { $0 === candidate }), session.outputs.contains(candidate) {
                 session.removeOutput(candidate)
             }
@@ -434,15 +442,25 @@ final class CaptureCore: NSObject, @unchecked Sendable {
         }
     }
 
+    private var needsMetalPreview: Bool {
+        guard mode == .photo else { return false }
+        return LookRenderer.needsCustomPreview(style: video?.style, filter: video?.filter)
+    }
+
     /// Photo: the photo output in the chosen resolution and prioritization (no movie output so
     /// Live Photos work). Video: movie + photo output (Live Photos off) for photo-while-recording.
     /// Slow motion: movie output. Time-lapse: video data output, without sound.
     private func apply(mode: CameraMode, on device: AVCaptureDevice) {
         session.automaticallyConfiguresCaptureDeviceForWideColor = mode == .photo
         configureAudioSession(allowPlayback: video?.allowAudioPlayback == true, needsAudio: mode != .timeLapse)
+        metalView.configure(style: video?.style, filter: video?.filter)
         switch mode {
         case .photo:
-            use([photoOutput])
+            use(needsMetalPreview ? [photoOutput, previewOutput] : [photoOutput])
+            if let connection = previewOutput.connection(with: .video) {
+                if connection.isVideoRotationAngleSupported(90) { connection.videoRotationAngle = 90 }
+                applyMirroring(on: connection, mirror: side == .front)
+            }
             // Live Photos record sound (unless RAW is active, which cannot combine with Live Photos).
             let raw = video?.captureRAW == true && availableBayerRAW() != nil
             let live = video?.live == true && !raw
@@ -727,6 +745,7 @@ final class CaptureCore: NSObject, @unchecked Sendable {
             (width: Int($0.width), height: Int($0.height))
         }
         described.availableResolutions = PhotoResolution.available(for: dims)
+        described.customPreviewActive = needsMetalPreview && session.outputs.contains(previewOutput)
         described.manualLimits = limits(of: device)
         described.focusLocked = state.focusLocked
         described.videoFormat = state.videoFormat

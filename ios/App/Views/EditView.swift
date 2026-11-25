@@ -10,6 +10,7 @@ struct EditView: View {
     enum Tool: String, CaseIterable, Identifiable {
         case light = "Light"
         case colour = "Colour"
+        case looks = "Looks"
         case shape = "Crop"
         case trim = "Trim"
         var id: String { rawValue }
@@ -30,7 +31,7 @@ struct EditView: View {
         _recipe = State(initialValue: asset.edit ?? EditRecipe())
     }
 
-    private var tools: [Tool] { asset.isVideo ? [.light, .colour, .trim] : [.light, .colour, .shape] }
+    private var tools: [Tool] { asset.isVideo ? [.light, .colour, .trim] : [.light, .colour, .looks, .shape] }
     private var durationMs: Int64 { max(asset.durationMs ?? 1000, 200) }
 
     var body: some View {
@@ -149,6 +150,20 @@ struct EditView: View {
                     slider("Vibrance", \.vibrance)
                     slider("Warmth", \.warmth)
                     slider("Tint", \.tint)
+                case .looks:
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text("Photographic Style").font(.footnote.weight(.semibold))
+                        StylePadView(
+                            style: Binding(
+                                get: { recipe.style },
+                                set: { recipe.style = $0 }),
+                            compact: false)
+                        Text("Filter").font(.footnote.weight(.semibold))
+                        FilterStripView(
+                            filter: Binding(
+                                get: { recipe.filter },
+                                set: { recipe.filter = $0 }))
+                    }
                 case .shape:
                     HStack {
                         Button("Turn", systemImage: "rotate.right") {

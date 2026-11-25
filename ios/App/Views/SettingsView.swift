@@ -414,6 +414,12 @@ struct PreserveCameraSettingsView: View {
                     Explained("Camera mode", "Remember the last mode (such as Video) instead of resetting to Photo.")
                 }
                 .accessibilityIdentifier("preserve-mode")
+                Toggle(isOn: app.setting(\.preserveStyle)) {
+                    Explained(
+                        "Photographic Style & Filter",
+                        "Keep your chosen Photographic Style and filter when you reopen the camera.")
+                }
+                .accessibilityIdentifier("preserve-style")
                 Toggle(isOn: app.setting(\.preserveExposure)) {
                     Explained("Exposure adjustment", "Keep the EV offset instead of resetting to 0.")
                 }

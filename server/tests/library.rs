@@ -982,3 +982,94 @@ async fn burst_photos_keep_their_burst_id_and_sync() {
     assert_eq!(refused.status, 422, "{}", refused.body);
     api.stop().await;
 }
+
+/// Edit recipe version 2 carries photographic `style` and `filter`, records history, syncs to
+/// other devices, and rejects malformed look payloads.
+#[tokio::test]
+async fn edit_recipe_v2_style_and_filter_sync_and_keep_history() {
+    let api = Api::start().await;
+    let token = owner(&api).await;
+    let photo = Uuid::new_v4().to_string();
+    api.upload(
+        &token,
+        &photo,
+        &random_bytes(128),
+        "image/heic",
+        json!({ "takenAt": 1_795_443_730_000_i64 }),
+    )
+    .await;
+
+    let path = format!("/api/v1/assets/{photo}");
+    let v2 = json!({
+        "version": 2,
+        "style": { "preset": "amber", "tone": 0.25, "color": 0.4, "palette": 0.7 },
+        "filter": "vividWarm"
+    });
+    let saved = api
+        .call(
+            Method::PATCH,
+            &path,
+            Some(&token),
+            Some(json!({ "edit": v2 })),
+        )
+        .await;
+    assert_eq!(saved.status, 200, "{}", saved.body);
+    assert_eq!(saved.body["edit"], v2);
+
+    // Sync carries the v2 edit with style and filter intact.
+    let synced = api.get("/api/v1/sync?since=0", &token).await;
+    let found = synced.body["assets"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|a| a["id"] == photo.as_str())
+        .unwrap();
+    assert_eq!(found["edit"]["version"], 2);
+    assert_eq!(found["edit"]["style"]["preset"], "amber");
+    assert_eq!(found["edit"]["filter"], "vividWarm");
+
+    // Changing style/filter appends to edit history.
+    let updated = json!({
+        "version": 2,
+        "style": { "preset": "starkBW", "tone": -0.3, "color": 0.0, "palette": 0.8 },
+        "filter": "noir"
+    });
+    let res = api
+        .call(
+            Method::PATCH,
+            &path,
+            Some(&token),
+            Some(json!({ "edit": updated })),
+        )
+        .await;
+    assert_eq!(res.status, 200, "{}", res.body);
+    let detail = api.get(&path, &token).await;
+    let edits = detail.body["edits"].as_array().unwrap();
+    assert_eq!(edits.len(), 2);
+    assert_eq!(edits[1]["old"], v2);
+    assert_eq!(edits[1]["new"], updated);
+
+    // Malformed style or filter values are rejected with 422.
+    for bad in [
+        json!({ "version": 2, "style": { "preset": "" } }),
+        json!({ "version": 2, "style": { "preset": "amber", "tone": 2.5 } }),
+        json!({ "version": 2, "style": { "preset": "amber", "palette": -0.2 } }),
+        json!({ "version": 2, "filter": 42 }),
+        json!({ "version": 2, "filter": "" }),
+    ] {
+        let refused = api
+            .call(
+                Method::PATCH,
+                &path,
+                Some(&token),
+                Some(json!({ "edit": bad })),
+            )
+            .await;
+        assert_eq!(
+            refused.status, 422,
+            "expected 422 for {bad}: {}",
+            refused.body
+        );
+    }
+    api.stop().await;
+}

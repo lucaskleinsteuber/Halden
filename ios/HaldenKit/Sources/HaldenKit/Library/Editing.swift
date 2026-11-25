@@ -9,8 +9,8 @@ import UniformTypeIdentifiers
 /// shown or exported, and can always be taken back. Kept on the server as the asset's `edit`
 /// (a correction with its history), so every device shows the same.
 public struct EditRecipe: Codable, Sendable, Hashable {
-    /// Newer apps may know more; an edit from a newer version is shown as far as it is understood.
-    public static let currentVersion = 1
+    /// Version 2 adds photographic `style` and `filter` (version 1 edits still decode cleanly).
+    public static let currentVersion = 2
 
     /// The values live in a box shared by copies until one changes (copy on write): the library
     /// holds one recipe per photo, and most photos have none, so a recipe costs a pointer there.
@@ -25,6 +25,8 @@ public struct EditRecipe: Codable, Sendable, Hashable {
         var vibrance: Double = 0
         var warmth: Double = 0
         var tint: Double = 0
+        var style: PhotographicStyle? = nil
+        var filter: PhotoFilter? = nil
         var quarterTurns: Int = 0
         var straighten: Double = 0
         var crop: Crop? = nil
@@ -33,6 +35,7 @@ public struct EditRecipe: Codable, Sendable, Hashable {
 
         enum CodingKeys: String, CodingKey {
             case version, exposure, brightness, contrast, highlights, shadows, saturation, vibrance, warmth, tint
+            case style, filter
             case quarterTurns, straighten, crop, trimStartMs, trimEndMs
         }
 
@@ -55,6 +58,8 @@ public struct EditRecipe: Codable, Sendable, Hashable {
             read(.vibrance, &vibrance)
             read(.warmth, &warmth)
             read(.tint, &tint)
+            style = try? container.decodeIfPresent(PhotographicStyle.self, forKey: .style)
+            filter = try? container.decodeIfPresent(PhotoFilter.self, forKey: .filter)
             read(.quarterTurns, &quarterTurns)
             read(.straighten, &straighten)
             crop = try? container.decodeIfPresent(Crop.self, forKey: .crop)
@@ -117,6 +122,16 @@ public struct EditRecipe: Codable, Sendable, Hashable {
     public var tint: Double {
         get { box.values.tint }
         set { change { $0.tint = newValue } }
+    }
+    /// Non-destructive photographic style (version 2).
+    public var style: PhotographicStyle? {
+        get { box.values.style }
+        set { change { $0.style = newValue } }
+    }
+    /// Non-destructive colour or monochrome filter (version 2).
+    public var filter: PhotoFilter? {
+        get { box.values.filter }
+        set { change { $0.filter = newValue } }
     }
     // Shape: quarter turns clockwise, straightening in degrees (-45…45), and the part kept
     // (0…1 of the turned and straightened picture).
@@ -185,7 +200,10 @@ public struct EditRecipe: Codable, Sendable, Hashable {
     }
 
     /// Nothing changed: the same as no edit.
-    public var isEmpty: Bool { self == EditRecipe() || self.withoutVersion == EditRecipe().withoutVersion }
+    public var isEmpty: Bool {
+        let normalized = fitted.withoutVersion
+        return normalized == EditRecipe().withoutVersion
+    }
 
     private var withoutVersion: EditRecipe {
         var copy = self
@@ -193,9 +211,11 @@ public struct EditRecipe: Codable, Sendable, Hashable {
         return copy
     }
 
-    /// Changes the light and colour (not the shape).
+    /// Changes the light, colour, photographic style or filter (not the shape).
     public var changesColour: Bool {
         [exposure, brightness, contrast, highlights, shadows, saturation, vibrance, warmth, tint].contains { $0 != 0 }
+            || (style.map { !$0.isDefault } ?? false)
+            || filter != nil
     }
 
     /// Everything within its range.
@@ -211,6 +231,11 @@ public struct EditRecipe: Codable, Sendable, Hashable {
         fitted.vibrance = clamp(vibrance)
         fitted.warmth = clamp(warmth)
         fitted.tint = clamp(tint)
+        if let style = style?.fitted, !style.isDefault {
+            fitted.style = style
+        } else {
+            fitted.style = nil
+        }
         fitted.quarterTurns = ((quarterTurns % 4) + 4) % 4
         fitted.straighten = clamp(straighten, 45)
         fitted.crop = crop?.fitted
@@ -223,7 +248,7 @@ public enum EditRenderer {
     /// The edited picture.
     public static func apply(_ recipe: EditRecipe, to image: CIImage) -> CIImage {
         let recipe = recipe.fitted
-        var output = image
+        var output = LookRenderer.apply(style: recipe.style, filter: nil, to: image)
         if recipe.exposure != 0 {
             let filter = CIFilter.exposureAdjust()
             filter.inputImage = output
@@ -261,6 +286,9 @@ public enum EditRenderer {
             filter.neutral = CIVector(x: 6500, y: 0)
             filter.targetNeutral = CIVector(x: 6500 - recipe.warmth * 2500, y: -recipe.tint * 60)
             output = filter.outputImage ?? output
+        }
+        if let photoFilter = recipe.filter {
+            output = LookRenderer.apply(style: nil, filter: photoFilter, to: output)
         }
         if recipe.quarterTurns != 0 {
             let orientation: CGImagePropertyOrientation = [.up, .right, .down, .left][recipe.quarterTurns]

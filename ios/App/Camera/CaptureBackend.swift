@@ -37,6 +37,8 @@ struct CaptureOptions: Equatable, Sendable {
     var lensCorrection: Bool
     var lockVideoCamera: Bool
     var lockVideoWhiteBalance: Bool
+    var style: PhotographicStyle?
+    var filter: PhotoFilter?
     var slowMotionRate: Int
     /// Seconds between pictures of a time-lapse; `nil` for automatic.
     var timeLapseInterval: Double?
@@ -55,6 +57,8 @@ struct CaptureOptions: Equatable, Sendable {
         lensCorrection = settings.lensCorrection
         lockVideoCamera = settings.lockVideoCamera
         lockVideoWhiteBalance = settings.lockVideoWhiteBalance
+        style = settings.photographicStyle
+        filter = settings.photoFilter
         slowMotionRate = settings.slowMotionRate
         timeLapseInterval = settings.timeLapseInterval > 0 ? settings.timeLapseInterval : nil
     }
@@ -81,6 +85,8 @@ struct CameraState: Equatable, Sendable {
     var availableResolutions: [PhotoResolution] = [.mp12]
     /// True when the camera detects a smudged lens (where supported by hardware).
     var lensSmudged = false
+    /// True when the custom Metal + Core Image viewfinder is active instead of the system layer.
+    var customPreviewActive = false
     /// What can be set by hand on this camera now; `nil` when nothing.
     var manualLimits: ManualLimits?
     /// The video format actually used (the wished one may not exist on this camera).

@@ -172,6 +172,8 @@ public enum TopBarControl: String, Codable, Sendable, CaseIterable, Identifiable
 public enum CameraDrawerItem: String, Sendable, Hashable, Identifiable {
     case flash
     case live
+    case style
+    case filter
     case exposure
     case aspectRatio
     case timer
@@ -242,7 +244,7 @@ public enum CameraControls {
         if isPhoto {
             var items: [CameraDrawerItem] = [.flash]
             if canLive { items.append(.live) }
-            items += [.exposure, .aspectRatio, .timer, .resolution]
+            items += [.style, .filter, .exposure, .aspectRatio, .timer, .resolution]
             if canRAW { items.append(.raw) }
             return items
         }
@@ -254,6 +256,10 @@ public enum CameraControls {
     public static func resetUnpreserved(in settings: AppSettings) -> AppSettings {
         var next = settings
         if !settings.preserveMode { next.keptMode = nil }
+        if !settings.preserveStyle {
+            next.photographicStyle = nil
+            next.photoFilter = nil
+        }
         if !settings.preserveExposure { next.keptExposureBias = 0 }
         if !settings.preserveLivePhoto { next.livePhotos = true }
         if !settings.preserveResolution {

@@ -52,9 +52,25 @@ final class LayoutTests: XCTestCase {
         app.buttons["camera-controls-toggle"].tap()
         settle()
         shot("camera-controls-photo")
-        app.buttons["drawer-exposure"].tap()
-        settle()
-        shot("camera-controls-exposure")
+        let drawer = app.descendants(matching: .any)["camera-drawer"]
+        let screenWidth = app.windows.firstMatch.frame.width
+        for (id, screen) in [
+            ("drawer-style", "camera-controls-style"),
+            ("drawer-filter", "camera-controls-filter"),
+            ("drawer-exposure", "camera-controls-exposure"),
+        ] {
+            let chip = app.buttons[id]
+            for _ in 0..<4 where chip.frame.maxX > screenWidth - 8 || chip.frame.minX < 0 {
+                let from = drawer.coordinate(
+                    withNormalizedOffset: CGVector(dx: chip.frame.minX < 0 ? 0.2 : 0.85, dy: 0.9))
+                let to = drawer.coordinate(
+                    withNormalizedOffset: CGVector(dx: chip.frame.minX < 0 ? 0.85 : 0.2, dy: 0.9))
+                from.press(forDuration: 0.02, thenDragTo: to)
+            }
+            chip.tap()
+            settle()
+            shot(screen)
+        }
         app.buttons["camera-controls-toggle"].tap()
         settle()
         app.buttons["zoom-1"].press(forDuration: 0.1, thenDragTo: app.buttons["zoom-0.5"])

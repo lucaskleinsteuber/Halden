@@ -6,7 +6,7 @@ import SwiftUI
 /// Future stages add Night, Photographic Styles, Portrait, Action and Audio items here.
 struct CameraDrawer: View {
     enum Panel: Hashable {
-        case exposure, aspectRatio, timer, resolution, videoFrameRate, timeLapseInterval
+        case style, filter, exposure, aspectRatio, timer, resolution, videoFrameRate, timeLapseInterval
     }
 
     let camera: CameraModel
@@ -37,6 +37,7 @@ struct CameraDrawer: View {
                 .padding(.horizontal, 12)
             }
             .frame(height: 48)
+            .accessibilityIdentifier("camera-drawer-chips")
         }
         .animation(.snappy(duration: 0.2), value: expanded)
         .accessibilityElement(children: .contain)
@@ -74,6 +75,30 @@ struct CameraDrawer: View {
                 }
                 camera.settingsChanged()
             }
+        }
+
+        // Photographic Style
+        let hasStyle = settings.photographicStyle.map { !$0.isDefault } ?? false
+        drawerChip(
+            symbol: "wand.and.stars",
+            text: hasStyle ? (settings.photographicStyle?.preset.title.uppercased() ?? "STYLE") : "STYLE",
+            active: hasStyle || expanded == .style,
+            label: hasStyle
+                ? "Photographic style \(settings.photographicStyle?.preset.title ?? "")" : "Photographic style",
+            id: "drawer-style"
+        ) {
+            expanded = expanded == .style ? nil : .style
+        }
+
+        // Photo Filter
+        drawerChip(
+            symbol: "camera.filters",
+            text: settings.photoFilter?.title.uppercased() ?? "FILTER",
+            active: settings.photoFilter != nil || expanded == .filter,
+            label: settings.photoFilter.map { "Filter \($0.title)" } ?? "Filter off",
+            id: "drawer-filter"
+        ) {
+            expanded = expanded == .filter ? nil : .filter
         }
 
         // Exposure compensation (EV -2...+2)
@@ -197,6 +222,22 @@ struct CameraDrawer: View {
     @ViewBuilder private func detailBar(for panel: Panel) -> some View {
         Group {
             switch panel {
+            case .style:
+                StylePadView(
+                    style: Binding(
+                        get: { settings.photographicStyle },
+                        set: { value in
+                            update { $0.photographicStyle = value }
+                            camera.settingsChanged()
+                        }))
+            case .filter:
+                FilterStripView(
+                    filter: Binding(
+                        get: { settings.photoFilter },
+                        set: { value in
+                            update { $0.photoFilter = value }
+                            camera.settingsChanged()
+                        }))
             case .exposure:
                 HStack(spacing: 10) {
                     Button {

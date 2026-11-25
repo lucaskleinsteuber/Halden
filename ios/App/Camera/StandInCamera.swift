@@ -1,3 +1,4 @@
+import CoreImage
 import HaldenKit
 import Observation
 import UIKit
@@ -15,7 +16,8 @@ final class StandInCamera: CaptureBackend {
         lensSmudged: ProcessInfo.processInfo.arguments.contains("-ui-testing-smudge"),
         manualLimits: ManualLimits(shutter: (1.0 / 8000)...1, iso: 50...3200, exposureBias: -8...8))
     private(set) var readings = CameraReadings(shutter: 1.0 / 120, iso: 100, kelvin: 5200, tint: 0, focus: 0.5)
-    @ObservationIgnored let previewView: UIView = StandInPreview()
+    @ObservationIgnored private let standInPreview = StandInPreview()
+    var previewView: UIView { standInPreview }
     @ObservationIgnored private var taken = 0
     @ObservationIgnored private var recording: (request: VideoRequest, started: Date)?
     @ObservationIgnored private var paused = false
@@ -25,9 +27,16 @@ final class StandInCamera: CaptureBackend {
 
     func prepare(mode: CameraMode, options video: CaptureOptions) {
         self.mode = mode
+        updatePreviewLook(mode: mode, options: video)
         if ProcessInfo.processInfo.arguments.contains("-ui-testing-smudge") {
             state.lensSmudged = true
         }
+    }
+
+    private func updatePreviewLook(mode: CameraMode, options video: CaptureOptions) {
+        let custom = mode == .photo && LookRenderer.needsCustomPreview(style: video.style, filter: video.filter)
+        state.customPreviewActive = custom
+        standInPreview.applyLook(style: mode == .photo ? video.style : nil, filter: mode == .photo ? video.filter : nil)
     }
 
     func start() {}
@@ -37,6 +46,7 @@ final class StandInCamera: CaptureBackend {
     func setMode(_ mode: CameraMode, options video: CaptureOptions) async {
         try? await Task.sleep(for: .milliseconds(250))
         self.mode = mode
+        updatePreviewLook(mode: mode, options: video)
         state.canLive = mode == .photo
         state.canRAW = mode == .photo
         state.availableResolutions = [.mp12, .mp24, .mp48]
@@ -166,14 +176,22 @@ final class StandInCamera: CaptureBackend {
     }
 }
 
-/// What the stand-in camera "sees".
+/// What the stand-in camera "sees", rendering active Photographic Styles and Filters with Core Image.
 final class StandInPreview: UIView {
     private let gradient = CAGradientLayer()
+    private let lookImageView = UIImageView()
+    private static let ciContext = CIContext()
 
     override init(frame: CGRect) {
         super.init(frame: frame)
         gradient.colors = [UIColor.systemTeal.cgColor, UIColor.systemIndigo.cgColor]
         layer.addSublayer(gradient)
+        lookImageView.contentMode = .scaleAspectFill
+        lookImageView.clipsToBounds = true
+        lookImageView.isHidden = true
+        lookImageView.frame = bounds
+        lookImageView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        addSubview(lookImageView)
         let label = UILabel()
         label.text = "Stand-in camera"
         label.textColor = .white.withAlphaComponent(0.8)
@@ -188,6 +206,31 @@ final class StandInPreview: UIView {
     }
 
     required init?(coder: NSCoder) { fatalError("not used") }
+
+    func applyLook(style: PhotographicStyle?, filter: PhotoFilter?) {
+        guard LookRenderer.needsCustomPreview(style: style, filter: filter) else {
+            lookImageView.isHidden = true
+            lookImageView.image = nil
+            return
+        }
+        let renderer = UIGraphicsImageRenderer(size: CGSize(width: 240, height: 320))
+        let base = renderer.image { ctx in
+            let colors = [UIColor.systemTeal.cgColor, UIColor.systemIndigo.cgColor] as CFArray
+            if let cgGradient = CGGradient(
+                colorsSpace: CGColorSpaceCreateDeviceRGB(), colors: colors, locations: [0, 1])
+            {
+                ctx.cgContext.drawLinearGradient(
+                    cgGradient, start: .zero, end: CGPoint(x: 0, y: 320), options: [])
+            }
+        }
+        if let ci = CIImage(image: base) {
+            let styled = LookRenderer.apply(style: style, filter: filter, to: ci)
+            if let cg = Self.ciContext.createCGImage(styled, from: styled.extent) {
+                lookImageView.image = UIImage(cgImage: cg)
+                lookImageView.isHidden = false
+            }
+        }
+    }
 
     override func layoutSubviews() {
         super.layoutSubviews()

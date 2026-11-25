@@ -82,9 +82,14 @@ public struct AppSettings: Codable, Sendable, Equatable {
     public var volumeUpForBurst = true
     /// Which controls are pinned to the camera's top bar.
     public var topBarControls = CameraControls.defaultTopBarControls
+    /// Active photographic style in the camera (`nil` or default standard = none).
+    public var photographicStyle: PhotographicStyle?
+    /// Active camera filter (`nil` = original).
+    public var photoFilter: PhotoFilter?
     // Preserve Settings
     public var preserveMode = false
     public var keptMode: String?
+    public var preserveStyle = false
     public var preserveExposure = false
     public var keptExposureBias = 0.0
     public var preserveLivePhoto = true
@@ -128,8 +133,9 @@ public struct AppSettings: Codable, Sendable, Equatable {
         case flash, showGrid, showLevel, mirrorFrontCamera, lensCorrection
         case livePhotos, slowMotionRate, timeLapseInterval
         case prioritizeFasterShooting, allowAudioPlayback, defaultFocalLength, volumeUpForBurst
-        case topBarControls
-        case preserveMode, keptMode, preserveExposure, keptExposureBias, preserveLivePhoto, preserveResolution
+        case topBarControls, photographicStyle, photoFilter
+        case preserveMode, keptMode, preserveStyle, preserveExposure, keptExposureBias, preserveLivePhoto,
+            preserveResolution
         case keepManualSettings, keptManual, tripKilometres, videoCopy, makeSmallCopies
         case locationAccuracyLimit, inaccurateLocation
         case locateScreenshots, screenshotPlaceMaxMinutes, locateScreenRecordings
@@ -171,8 +177,11 @@ public struct AppSettings: Codable, Sendable, Equatable {
         read(.volumeUpForBurst, into: &settings.volumeUpForBurst)
         read(.topBarControls, into: &settings.topBarControls)
         settings.topBarControls = CameraControls.sanitizedTopBar(settings.topBarControls)
+        read(.photographicStyle, into: &settings.photographicStyle)
+        read(.photoFilter, into: &settings.photoFilter)
         read(.preserveMode, into: &settings.preserveMode)
         read(.keptMode, into: &settings.keptMode)
+        read(.preserveStyle, into: &settings.preserveStyle)
         read(.preserveExposure, into: &settings.preserveExposure)
         read(.keptExposureBias, into: &settings.keptExposureBias)
         read(.preserveLivePhoto, into: &settings.preserveLivePhoto)

@@ -10,6 +10,15 @@ part of the first versions.
 
 ### Added
 
+- Photographic Styles, Filters and demand-driven Metal viewfinder (`MetalPreviewView`,
+  `PhotoLooks`, `StylePadView`, `FilterStripView`):
+  - Custom Core Image + Metal (`MTKView`) viewfinder runs only when a style, filter (or later
+    portrait/scopes) is active, falling back to `AVCaptureVideoPreviewLayer` otherwise.
+  - 15 Photographic Style presets with 2D Tone/Color control pad and Palette slider, plus 9
+    classic filters (Vivid/Dramatic warm & cool, Mono, Silvertone, Noir), available directly in
+    the camera control drawer and editable non-destructively afterwards in Edit › Looks.
+  - Edit recipe version 2 (`style` and `filter`) with server validation, history, `/sync`, and
+    Preserve Settings support (`preserveStyle`).
 - Camera gestures, bursts, recording controls and voice shortcuts:
   - Tap-to-focus now displays a sun exposure slider beside the focus square (drag up/down for EV
     −2…+2).

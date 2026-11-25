@@ -416,14 +416,18 @@ uses `estimated` and `false` uses `manual`); `title: null` and `description: nul
 slow-motion video (`0 <= slowFromMs < slowToMs`, `rate` from 0.01 to 1, 0.125 is eight times
 slower); `null` plays it as recorded. The file is never changed.
 
-`edit` is an edit as the apps set it (light, colour, turning, straightening, crop, trim), which
-they apply whenever they show or export the photo; the server keeps it as it is (a JSON object
-with a `version` of 1 or more, at most 16 KB, `422` otherwise) and never changes the file.
-`null` goes back to the original. The apps' fields (version 1): `exposure` (stops, -3…3),
-`brightness`, `contrast`, `highlights`, `shadows`, `saturation`, `vibrance`, `warmth`, `tint`
-(each -1…1), `quarterTurns` (clockwise), `straighten` (degrees), `crop` (`x`, `y`, `width`,
-`height`, 0…1 of the turned and straightened picture, from the top left), `trimStartMs`,
-`trimEndMs`. The asset object carries it as `edit`. `restore: ["takenAt", "location"]`
+`edit` is an edit as the apps set it (light, colour, photographic style, filter, turning,
+straightening, crop, trim), which they apply whenever they show or export the photo; the server
+keeps it as it is (a JSON object with a `version` of 1 or more, at most 16 KB, `422` otherwise)
+and never changes the file. `null` goes back to the original. Version 1 fields: `exposure`
+(stops, -3…3), `brightness`, `contrast`, `highlights`, `shadows`, `saturation`, `vibrance`,
+`warmth`, `tint` (each -1…1), `quarterTurns` (clockwise), `straighten` (degrees), `crop` (`x`,
+`y`, `width`, `height`, 0…1 of the turned and straightened picture, from the top left),
+`trimStartMs`, `trimEndMs`. Version 2 adds:
+- `style`: optional photographic style object `{ "preset": "amber", "tone": 0.25, "color": 0.4, "palette": 0.7 }` (`preset` 1–32 bytes, `tone` and `color` in `-1…1`, `palette` in `0…1`).
+- `filter`: optional filter name (`vivid`, `vividWarm`, `vividCool`, `dramatic`, `dramaticWarm`, `dramaticCool`, `mono`, `silvertone`, `noir`; 1–32 bytes).
+
+The asset object carries it as `edit`. `restore: ["takenAt", "location"]`
 drops corrections and shows the originals again. Answers with the asset.
 
 ### `POST /assets/location`
