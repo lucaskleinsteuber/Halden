@@ -75,6 +75,24 @@ the design comes after that. What works today is described below.
   (`isGeometricDistortionCorrectionEnabled`), hardware lens-smudge detection hints
   (`cameraLensSmudgeDetectionStatus`, dismissible banner), and optional camera-lens
   (`primaryConstituentDeviceSwitchingBehavior`) and white-balance locks while recording video.
+- **Cinematic Video, Action Mode, Audio & Live Scopes** (`VideoPro`, `LiveScopesOverlay`,
+  `CinematicEditorView`):
+  - **Cinematic Video**: dedicated **Cinematic** mode using iOS 26
+    `AVCaptureDeviceInput.isCinematicVideoCaptureEnabled` + `simulatedAperture` (`f/2.0–f/16`) and
+    required metadata object types (`requiredMetadataObjectTypesForCinematicVideoCapture`), with
+    tap-to-track focus via `setCinematicVideoTrackingFocus(at:focusMode:)`. Videos carry
+    `captureMode = "cinematic"` to the server and `/sync`. After capture, opening a Cinematic video
+    offers `CinematicEditorView` (`Cinematic.framework`: `CNAssetInfo`, `CNScript`, `CNDecision`)
+    to adjust f-stop and add tap-to-refocus transitions stored non-destructively in `EditRecipe`.
+  - **Action Mode**: enhanced stabilization (`AVCaptureVideoStabilizationMode.cinematicExtendedEnhanced`)
+    with automatic low-light guidance ("More light required.") when ISO is high and Preserve
+    Settings support (`preserveActionMode`).
+  - **Audio**: Stereo or Mono (`multichannelAudioMode`), Wind Noise Removal
+    (`isWindNoiseRemovalEnabled` when supported with multichannel audio), and AirPods / Bluetooth
+    HFP microphone routing (`AVAudioSession` `.allowBluetoothHFP` + preferred input).
+  - **Live Histogram & Waveform**: RGB + Luma histogram and horizontal Luma waveform (`LiveScopesOverlay`)
+    computed on demand from the Metal viewfinder frames (`LiveScopesAnalyzer`) when enabled in the
+    camera drawer or Settings › Camera, adding zero GPU overhead while off.
 - **Night Mode** (`NightMode`, `NightMath`, `TripodDetector`, `NightStacker`):
   - Automatically suggests Night Mode in dark scenes (`moon.stars.fill` badge and drawer slider):
     1–3 s handheld, or 10–30 s when CoreMotion (`TripodDetector`) detects the iPhone is mounted on

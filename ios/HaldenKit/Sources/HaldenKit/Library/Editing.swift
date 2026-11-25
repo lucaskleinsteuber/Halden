@@ -29,6 +29,8 @@ public struct EditRecipe: Codable, Sendable, Hashable {
         var filter: PhotoFilter? = nil
         var portraitAperture: Double? = nil
         var portraitLighting: PortraitLighting? = nil
+        var cinematicAperture: Double? = nil
+        var cinematicFocusPoints: [CinematicFocusPoint]? = nil
         var quarterTurns: Int = 0
         var straighten: Double = 0
         var crop: Crop? = nil
@@ -37,7 +39,7 @@ public struct EditRecipe: Codable, Sendable, Hashable {
 
         enum CodingKeys: String, CodingKey {
             case version, exposure, brightness, contrast, highlights, shadows, saturation, vibrance, warmth, tint
-            case style, filter, portraitAperture, portraitLighting
+            case style, filter, portraitAperture, portraitLighting, cinematicAperture, cinematicFocusPoints
             case quarterTurns, straighten, crop, trimStartMs, trimEndMs
         }
 
@@ -64,6 +66,9 @@ public struct EditRecipe: Codable, Sendable, Hashable {
             filter = try? container.decodeIfPresent(PhotoFilter.self, forKey: .filter)
             portraitAperture = try? container.decodeIfPresent(Double.self, forKey: .portraitAperture)
             portraitLighting = try? container.decodeIfPresent(PortraitLighting.self, forKey: .portraitLighting)
+            cinematicAperture = try? container.decodeIfPresent(Double.self, forKey: .cinematicAperture)
+            cinematicFocusPoints = try? container.decodeIfPresent(
+                [CinematicFocusPoint].self, forKey: .cinematicFocusPoints)
             read(.quarterTurns, &quarterTurns)
             read(.straighten, &straighten)
             crop = try? container.decodeIfPresent(Crop.self, forKey: .crop)
@@ -149,6 +154,19 @@ public struct EditRecipe: Codable, Sendable, Hashable {
     }
     public var hasPortraitEdit: Bool {
         portraitAperture != nil || (portraitLighting != nil && portraitLighting != .natural)
+    }
+    /// Simulated depth-of-field f-stop for Cinematic videos (2.0…16), editable after capture.
+    public var cinematicAperture: Double? {
+        get { box.values.cinematicAperture }
+        set { change { $0.cinematicAperture = newValue } }
+    }
+    /// User-chosen focus transition points for Cinematic videos.
+    public var cinematicFocusPoints: [CinematicFocusPoint]? {
+        get { box.values.cinematicFocusPoints }
+        set { change { $0.cinematicFocusPoints = newValue } }
+    }
+    public var hasCinematicEdit: Bool {
+        cinematicAperture != nil || !(cinematicFocusPoints?.isEmpty ?? true)
     }
     // Shape: quarter turns clockwise, straightening in degrees (-45…45), and the part kept
     // (0…1 of the turned and straightened picture).
@@ -256,6 +274,12 @@ public struct EditRecipe: Codable, Sendable, Hashable {
         }
         fitted.portraitAperture = portraitAperture.map(PortraitMath.clampedAperture)
         fitted.portraitLighting = portraitLighting == .natural ? nil : portraitLighting
+        fitted.cinematicAperture = cinematicAperture.map { CinematicRules.clampedAperture($0) }
+        if let pts = cinematicFocusPoints, !pts.isEmpty {
+            fitted.cinematicFocusPoints = pts.map(\.fitted).sorted { $0.timeMs < $1.timeMs }
+        } else {
+            fitted.cinematicFocusPoints = nil
+        }
         fitted.quarterTurns = ((quarterTurns % 4) + 4) % 4
         fitted.straighten = clamp(straighten, 45)
         fitted.crop = crop?.fitted

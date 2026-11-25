@@ -92,12 +92,27 @@ public struct AppSettings: Codable, Sendable, Equatable {
     public var portraitLighting = PortraitLighting.natural
     /// Night Mode setting (auto when dark, off, or manual duration in seconds).
     public var nightMode = NightModeSetting.auto
+    /// Action Mode enhanced stabilization in Video mode.
+    public var actionMode = false
+    /// Simulated aperture in Cinematic Video mode (f/2.0…f/16).
+    public var cinematicAperture = CinematicRules.defaultAperture
+    /// Video audio capture channel mode (Stereo / Mono).
+    public var audioChannelMode = AudioChannelMode.stereo
+    /// Wind noise removal when supported by hardware and multichannel audio.
+    public var windNoiseRemoval = true
+    /// Prefer connected AirPods / Bluetooth HFP microphone while recording video.
+    public var allowAirPodsMic = false
+    /// Live RGB + Luma histogram overlay in the camera viewfinder.
+    public var showHistogram = false
+    /// Live Luma waveform overlay in the camera viewfinder.
+    public var showWaveform = false
     // Preserve Settings
     public var preserveMode = false
     public var keptMode: String?
     public var preserveStyle = false
     public var preservePortraitZoom = false
     public var preserveNightMode = false
+    public var preserveActionMode = false
     public var preserveExposure = false
     public var keptExposureBias = 0.0
     public var preserveLivePhoto = true
@@ -142,7 +157,10 @@ public struct AppSettings: Codable, Sendable, Equatable {
         case livePhotos, slowMotionRate, timeLapseInterval
         case prioritizeFasterShooting, allowAudioPlayback, defaultFocalLength, volumeUpForBurst
         case topBarControls, photographicStyle, photoFilter, portraitAperture, portraitLighting, nightMode
-        case preserveMode, keptMode, preserveStyle, preservePortraitZoom, preserveNightMode, preserveExposure,
+        case actionMode, cinematicAperture, audioChannelMode, windNoiseRemoval, allowAirPodsMic, showHistogram,
+            showWaveform
+        case preserveMode, keptMode, preserveStyle, preservePortraitZoom, preserveNightMode, preserveActionMode,
+            preserveExposure,
             keptExposureBias,
             preserveLivePhoto, preserveResolution
         case keepManualSettings, keptManual, tripKilometres, videoCopy, makeSmallCopies
@@ -191,11 +209,19 @@ public struct AppSettings: Codable, Sendable, Equatable {
         read(.portraitAperture, into: &settings.portraitAperture)
         read(.portraitLighting, into: &settings.portraitLighting)
         read(.nightMode, into: &settings.nightMode)
+        read(.actionMode, into: &settings.actionMode)
+        read(.cinematicAperture, into: &settings.cinematicAperture)
+        read(.audioChannelMode, into: &settings.audioChannelMode)
+        read(.windNoiseRemoval, into: &settings.windNoiseRemoval)
+        read(.allowAirPodsMic, into: &settings.allowAirPodsMic)
+        read(.showHistogram, into: &settings.showHistogram)
+        read(.showWaveform, into: &settings.showWaveform)
         read(.preserveMode, into: &settings.preserveMode)
         read(.keptMode, into: &settings.keptMode)
         read(.preserveStyle, into: &settings.preserveStyle)
         read(.preservePortraitZoom, into: &settings.preservePortraitZoom)
         read(.preserveNightMode, into: &settings.preserveNightMode)
+        read(.preserveActionMode, into: &settings.preserveActionMode)
         read(.preserveExposure, into: &settings.preserveExposure)
         read(.keptExposureBias, into: &settings.keptExposureBias)
         read(.preserveLivePhoto, into: &settings.preserveLivePhoto)

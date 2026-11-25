@@ -87,7 +87,7 @@ final class LayoutTests: XCTestCase {
         settle()
         app.buttons["mode-photo"].tap()
         settle()
-        for mode in ["video", "slowMotion", "timeLapse"] {
+        for mode in ["video", "cinematic", "slowMotion", "timeLapse"] {
             app.buttons["mode-\(mode)"].tap()
             settle()
             shot("camera-\(mode)")
@@ -95,12 +95,34 @@ final class LayoutTests: XCTestCase {
                 app.buttons["camera-controls-toggle"].tap()
                 settle()
                 shot("camera-controls-video")
+                let scopesChip = app.buttons["drawer-scopes"]
+                for _ in 0..<5 where scopesChip.frame.maxX > screenWidth - 8 || scopesChip.frame.minX < 0 {
+                    let from = drawer.coordinate(
+                        withNormalizedOffset: CGVector(dx: scopesChip.frame.minX < 0 ? 0.2 : 0.85, dy: 0.9))
+                    let to = drawer.coordinate(
+                        withNormalizedOffset: CGVector(dx: scopesChip.frame.minX < 0 ? 0.85 : 0.2, dy: 0.9))
+                    from.press(forDuration: 0.02, thenDragTo: to)
+                }
+                scopesChip.tap()
+                settle(0.4)
+                app.buttons["drawer-scope-histogram"].tap()
+                app.buttons["drawer-scope-waveform"].tap()
+                settle(1.5)
+                shot("camera-scopes")
+                app.buttons["drawer-scope-histogram"].tap()
+                app.buttons["drawer-scope-waveform"].tap()
+                app.buttons["camera-controls-toggle"].tap()
+                settle()
+            } else if mode == "cinematic" {
+                app.buttons["camera-controls-toggle"].tap()
+                settle()
+                shot("camera-controls-cinematic")
                 app.buttons["camera-controls-toggle"].tap()
                 settle()
             }
         }
         // Back through the modes, each one beside the chosen one (the far ones are off screen).
-        for mode in ["slowMotion", "video", "photo"] {
+        for mode in ["slowMotion", "cinematic", "video", "photo"] {
             app.buttons["mode-\(mode)"].tap()
             settle(0.5)
         }

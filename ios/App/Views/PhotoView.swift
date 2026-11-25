@@ -14,6 +14,7 @@ struct PhotoView: View {
     @State private var problem: String?
     @State private var confirmDelete = false
     @State private var editingSlowMotion = false
+    @State private var editingCinematic = false
     @State private var addingToAlbum: ChosenPhotos?
     @State private var editing = false
     @State private var pickingBurst = false
@@ -107,6 +108,18 @@ struct PhotoView: View {
                         .accessibilityIdentifier("slow-motion")
                     }
                 }
+                if asset?.isCinematic == true {
+                    ToolbarSpacer(.flexible, placement: .bottomBar)
+                    ToolbarItem(placement: .bottomBar) {
+                        Button {
+                            editingCinematic = true
+                        } label: {
+                            Image(systemName: "f.cursive.circle")
+                        }
+                        .accessibilityLabel("Cinematic focus")
+                        .accessibilityIdentifier("cinematic-edit")
+                    }
+                }
                 if burstMembers.count > 1 {
                     ToolbarSpacer(.flexible, placement: .bottomBar)
                     ToolbarItem(placement: .bottomBar) {
@@ -157,6 +170,9 @@ struct PhotoView: View {
             }
             .sheet(isPresented: $editingSlowMotion) {
                 if let asset { SlowMotionEditor(asset: asset) }
+            }
+            .sheet(isPresented: $editingCinematic) {
+                if let asset { CinematicEditorView(asset: asset) }
             }
             .sheet(isPresented: $pickingBurst) {
                 if burstMembers.count > 1 { BurstPickerView(members: burstMembers) }
@@ -285,7 +301,10 @@ struct InfoView: View {
                     "Length", value: Duration.milliseconds(duration).formatted(.time(pattern: .minuteSecond)))
             }
             if let kind = asset.isLivePhoto
-                ? "Live Photo" : asset.isSlowMotion ? "Slow motion" : asset.isTimeLapse ? "Time-lapse" : nil
+                ? "Live Photo"
+                : asset.isCinematic
+                    ? "Cinematic"
+                    : asset.isSlowMotion ? "Slow motion" : asset.isTimeLapse ? "Time-lapse" : nil
             {
                 LabeledContent("Taken as", value: kind)
             }

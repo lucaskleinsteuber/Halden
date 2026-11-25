@@ -7,7 +7,7 @@ import SwiftUI
 struct CameraDrawer: View {
     enum Panel: Hashable {
         case night, aperture, lighting, style, filter, exposure, aspectRatio, timer, resolution, videoFrameRate,
-            timeLapseInterval
+            cinematicAperture, scopes, timeLapseInterval
     }
 
     let camera: CameraModel
@@ -29,6 +29,8 @@ struct CameraDrawer: View {
                         photoButtons
                     } else if camera.mode == .portrait {
                         portraitButtons
+                    } else if camera.mode == .cinematic {
+                        cinematicButtons
                     } else if camera.mode == .video {
                         videoButtons
                     } else if camera.mode == .slowMotion {
@@ -235,9 +237,30 @@ struct CameraDrawer: View {
         }
     }
 
-    // MARK: Video controls
+    // MARK: Video & Cinematic controls
+
+    @ViewBuilder private var cinematicButtons: some View {
+        drawerChip(
+            symbol: "f.cursive", text: CinematicRules.formatAperture(settings.cinematicAperture),
+            active: expanded == .cinematicAperture
+                || abs(settings.cinematicAperture - CinematicRules.defaultAperture) > 0.05,
+            label: "Cinematic depth \(CinematicRules.formatAperture(settings.cinematicAperture))",
+            id: "drawer-cinematic-aperture"
+        ) {
+            expanded = expanded == .cinematicAperture ? nil : .cinematicAperture
+        }
+        audioAndScopeChips
+    }
 
     @ViewBuilder private var videoButtons: some View {
+        drawerChip(
+            symbol: "figure.run", text: "ACTION", active: settings.actionMode,
+            label: settings.actionMode ? "Action Mode on" : "Action Mode off", id: "drawer-action"
+        ) {
+            update { $0.actionMode.toggle() }
+            camera.settingsChanged()
+        }
+
         drawerChip(
             symbol: nil, text: settings.videoResolution == .uhd4K ? "4K" : "HD",
             active: settings.videoResolution == .uhd4K,
@@ -271,6 +294,35 @@ struct CameraDrawer: View {
         ) {
             update { $0.autoLowLightFPS.toggle() }
             camera.settingsChanged()
+        }
+
+        audioAndScopeChips
+    }
+
+    @ViewBuilder private var audioAndScopeChips: some View {
+        drawerChip(
+            symbol: "waveform", text: settings.audioChannelMode.shortLabel,
+            active: settings.audioChannelMode == .mono,
+            label: "Audio \(settings.audioChannelMode.title)", id: "drawer-audio"
+        ) {
+            update { $0.audioChannelMode = $0.audioChannelMode == .stereo ? .mono : .stereo }
+            camera.settingsChanged()
+        }
+
+        drawerChip(
+            symbol: "wind", text: "WIND", active: settings.windNoiseRemoval,
+            label: settings.windNoiseRemoval ? "Wind noise removal on" : "Wind noise removal off", id: "drawer-wind"
+        ) {
+            update { $0.windNoiseRemoval.toggle() }
+            camera.settingsChanged()
+        }
+
+        let scopesOn = settings.showHistogram || settings.showWaveform
+        drawerChip(
+            symbol: "chart.bar.xaxis", text: "SCOPES", active: scopesOn || expanded == .scopes,
+            label: scopesOn ? "Live scopes on" : "Live scopes off", id: "drawer-scopes"
+        ) {
+            expanded = expanded == .scopes ? nil : .scopes
         }
     }
 
@@ -474,6 +526,46 @@ struct CameraDrawer: View {
                             camera.settingsChanged()
                             expanded = nil
                         }
+                    }
+                }
+
+            case .cinematicAperture:
+                HStack(spacing: 10) {
+                    Text(CinematicRules.formatAperture(settings.cinematicAperture))
+                        .font(.caption.bold().monospacedDigit())
+                        .foregroundStyle(.yellow)
+                        .frame(minWidth: 44, alignment: .leading)
+                    Slider(
+                        value: Binding(
+                            get: { settings.cinematicAperture },
+                            set: { value in
+                                update { $0.cinematicAperture = CinematicRules.clampedAperture(value) }
+                                camera.settingsChanged()
+                            }),
+                        in: CinematicRules.apertureRange
+                    )
+                    .tint(.yellow)
+                    .accessibilityLabel("Cinematic depth f-stop")
+                    .accessibilityIdentifier("drawer-cinematic-aperture-slider")
+                }
+                .frame(minHeight: 44)
+                .padding(.horizontal, 12)
+                .background(.black.opacity(0.65), in: .rect(cornerRadius: 12))
+                .padding(.horizontal, 12)
+
+            case .scopes:
+                optionRow {
+                    optionPill("Histogram", selected: settings.showHistogram, id: "drawer-scope-histogram") {
+                        update { $0.showHistogram.toggle() }
+                        camera.settingsChanged()
+                    }
+                    optionPill("Waveform", selected: settings.showWaveform, id: "drawer-scope-waveform") {
+                        update { $0.showWaveform.toggle() }
+                        camera.settingsChanged()
+                    }
+                    optionPill("AirPods Mic", selected: settings.allowAirPodsMic, id: "drawer-airpods-mic") {
+                        update { $0.allowAirPodsMic.toggle() }
+                        camera.settingsChanged()
                     }
                 }
 

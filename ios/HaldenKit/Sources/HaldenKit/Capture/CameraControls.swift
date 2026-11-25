@@ -266,6 +266,7 @@ public enum CameraControls {
             next.portraitLighting = .natural
         }
         if !settings.preserveNightMode { next.nightMode = .auto }
+        if !settings.preserveActionMode { next.actionMode = false }
         if !settings.preserveExposure { next.keptExposureBias = 0 }
         if !settings.preserveLivePhoto { next.livePhotos = true }
         if !settings.preserveResolution {

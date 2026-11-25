@@ -166,6 +166,15 @@ struct CameraScreen<Gallery: View>: View {
             }
         }
         .aspectRatio(ratio, contentMode: .fit)
+        .overlay(alignment: .topTrailing) {
+            if state.ready, let scopes = camera.backend.liveScopes, settings.showHistogram || settings.showWaveform {
+                LiveScopesOverlay(
+                    data: scopes, showHistogram: settings.showHistogram, showWaveform: settings.showWaveform
+                )
+                .padding(.top, fullFrame ? Self.topBarHeight + 56 : 12)
+                .padding(.trailing, 12)
+            }
+        }
         .overlay {
             if state.ready {
                 if camera.isNightCapturing {
@@ -243,7 +252,18 @@ struct CameraScreen<Gallery: View>: View {
                 .padding(.top, 8)
                 .accessibilityIdentifier("lens-smudge-hint")
             }
-            if camera.mode == .portrait, let hint = state.portraitHint {
+            if camera.mode == .video
+                && ActionModeRules.needsMoreLight(actionMode: settings.actionMode, iso: camera.backend.readings.iso)
+            {
+                Label(ActionModeRules.lowLightHint, systemImage: "figure.run")
+                    .font(.caption.bold())
+                    .foregroundStyle(.black)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 6)
+                    .background(.yellow, in: .capsule)
+                    .padding(.top, 8)
+                    .accessibilityIdentifier("action-low-light-hint")
+            } else if camera.mode == .portrait, let hint = state.portraitHint {
                 Text(hint.rawValue)
                     .font(.caption.bold())
                     .foregroundStyle(.black)
@@ -627,6 +647,17 @@ struct CameraScreen<Gallery: View>: View {
         } else if camera.mode.records {
             Menu {
                 switch camera.mode {
+                case .cinematic:
+                    Picker("Depth of field", selection: videoSetting(\.cinematicAperture)) {
+                        ForEach([2.0, 2.8, 4.0, 5.6, 8.0, 11.0, 16.0], id: \.self) { f in
+                            Text(CinematicRules.formatAperture(f)).tag(f)
+                        }
+                    }
+                    Picker("Audio", selection: videoSetting(\.audioChannelMode)) {
+                        ForEach(AudioChannelMode.allCases) { channel in
+                            Text(channel.title).tag(channel)
+                        }
+                    }
                 case .slowMotion:
                     Picker("Frame rate", selection: videoSetting(\.slowMotionRate)) {
                         Text("240 fps").tag(240)
@@ -1009,14 +1040,15 @@ extension CameraScreen where Gallery == EmptyView {
 }
 
 extension CameraMode {
-    /// The order on the screen, as in Apple's camera.
-    static let strip: [CameraMode] = [.timeLapse, .slowMotion, .video, .photo, .portrait]
+    /// The order on the screen, as in Apple's camera (`video` stays immediately left of `photo`).
+    static let strip: [CameraMode] = [.timeLapse, .slowMotion, .cinematic, .video, .photo, .portrait]
 
     var title: String {
         switch self {
         case .photo: "Photo"
         case .portrait: "Portrait"
         case .video: "Video"
+        case .cinematic: "Cinematic"
         case .slowMotion: "Slo-mo"
         case .timeLapse: "Time-lapse"
         }
@@ -1027,6 +1059,7 @@ extension CameraMode {
         case .photo: "Take a photo"
         case .portrait: "Take a portrait"
         case .video: "Record a video"
+        case .cinematic: "Record cinematic video"
         case .slowMotion: "Record slow motion"
         case .timeLapse: "Record a time-lapse"
         }

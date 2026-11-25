@@ -340,6 +340,30 @@ struct CameraSettings: View {
                         "Allow audio playback",
                         "Let music or podcasts keep playing while recording video.")
                 }
+                Picker(selection: app.setting(\.audioChannelMode)) {
+                    ForEach(AudioChannelMode.allCases) { mode in
+                        Text(mode.title).tag(mode)
+                    }
+                } label: {
+                    Explained("Record sound", "Stereo captures directional sound; Mono uses a single channel.")
+                }
+                .accessibilityIdentifier("settings-audio-channel")
+                Toggle(isOn: app.setting(\.windNoiseRemoval)) {
+                    Explained("Wind noise removal", "Reduce wind rumble during stereo video capture when supported.")
+                }
+                .accessibilityIdentifier("settings-wind-noise")
+                Toggle(isOn: app.setting(\.allowAirPodsMic)) {
+                    Explained("AirPods microphone", "Record video audio through connected AirPods or Bluetooth mic.")
+                }
+                .accessibilityIdentifier("settings-airpods-mic")
+                Toggle(isOn: app.setting(\.showHistogram)) {
+                    Explained("Live histogram", "Show RGB and luminance exposure distribution in the viewfinder.")
+                }
+                .accessibilityIdentifier("settings-show-histogram")
+                Toggle(isOn: app.setting(\.showWaveform)) {
+                    Explained("Live waveform", "Show horizontal luminance levels across the frame in the viewfinder.")
+                }
+                .accessibilityIdentifier("settings-show-waveform")
                 Toggle(isOn: app.setting(\.lockVideoCamera)) {
                     Explained(
                         "Lock camera",
@@ -432,6 +456,12 @@ struct PreserveCameraSettingsView: View {
                         "Keep your Night Mode off or duration choice instead of resetting to Auto.")
                 }
                 .accessibilityIdentifier("preserve-night")
+                Toggle(isOn: app.setting(\.preserveActionMode)) {
+                    Explained(
+                        "Action mode",
+                        "Keep Action Mode stabilization on instead of resetting when the camera closes.")
+                }
+                .accessibilityIdentifier("preserve-action")
                 Toggle(isOn: app.setting(\.preserveExposure)) {
                     Explained("Exposure adjustment", "Keep the EV offset instead of resetting to 0.")
                 }

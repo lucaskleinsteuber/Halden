@@ -3,10 +3,10 @@ import HaldenKit
 import UIKit
 
 enum CameraMode: String, CaseIterable, Sendable {
-    case photo, portrait, video, slowMotion, timeLapse
+    case photo, portrait, video, cinematic, slowMotion, timeLapse
 
     /// Everything except still modes (photo, portrait) is recorded with start/stop.
-    var records: Bool { self == .video || self == .slowMotion || self == .timeLapse }
+    var records: Bool { self == .video || self == .cinematic || self == .slowMotion || self == .timeLapse }
 
     /// Still-photo capture modes (4:3 / 1:1 / 16:9 viewfinder).
     var isStill: Bool { self == .photo || self == .portrait }
@@ -14,6 +14,7 @@ enum CameraMode: String, CaseIterable, Sendable {
     /// What the server calls videos taken this way.
     var captureMode: String? {
         switch self {
+        case .cinematic: "cinematic"
         case .slowMotion: "slowmo"
         case .timeLapse: "timelapse"
         default: nil
@@ -44,6 +45,13 @@ struct CaptureOptions: Equatable, Sendable {
     var filter: PhotoFilter?
     var portraitAperture: Double
     var portraitLighting: PortraitLighting
+    var actionMode: Bool
+    var cinematicAperture: Double
+    var audioChannelMode: AudioChannelMode
+    var windNoiseRemoval: Bool
+    var allowAirPodsMic: Bool
+    var showHistogram: Bool
+    var showWaveform: Bool
     var slowMotionRate: Int
     /// Seconds between pictures of a time-lapse; `nil` for automatic.
     var timeLapseInterval: Double?
@@ -66,6 +74,13 @@ struct CaptureOptions: Equatable, Sendable {
         filter = settings.photoFilter
         portraitAperture = settings.portraitAperture
         portraitLighting = settings.portraitLighting
+        actionMode = settings.actionMode
+        cinematicAperture = settings.cinematicAperture
+        audioChannelMode = settings.audioChannelMode
+        windNoiseRemoval = settings.windNoiseRemoval
+        allowAirPodsMic = settings.allowAirPodsMic
+        showHistogram = settings.showHistogram
+        showWaveform = settings.showWaveform
         slowMotionRate = settings.slowMotionRate
         timeLapseInterval = settings.timeLapseInterval > 0 ? settings.timeLapseInterval : nil
     }
@@ -100,6 +115,10 @@ struct CameraState: Equatable, Sendable {
     var subjectDetected = false
     /// Live distance / lighting guidance in Portrait mode.
     var portraitHint: PortraitHint?
+    /// True when the active camera supports Cinematic Video capture (iOS 26+).
+    var canCinematic = false
+    /// True when hardware wind noise removal is available on the active microphone input.
+    var canWindNoiseRemoval = false
     /// What can be set by hand on this camera now; `nil` when nothing.
     var manualLimits: ManualLimits?
     /// The video format actually used (the wished one may not exist on this camera).
@@ -159,6 +178,8 @@ protocol CaptureBackend: AnyObject {
     var state: CameraState { get }
     /// ISO, shutter, white balance and focus as the camera has them now (a few times a second).
     var readings: CameraReadings { get }
+    /// Live RGB+Luma histogram and luma waveform data when enabled (`nil` when scopes are off).
+    var liveScopes: LiveScopesData? { get }
     /// Shows what the camera sees.
     var previewView: UIView { get }
     /// Gets everything ready without starting, so the picture is there the moment the camera

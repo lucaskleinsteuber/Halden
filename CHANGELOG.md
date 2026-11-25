@@ -10,6 +10,18 @@ part of the first versions.
 
 ### Added
 
+- Cinematic Video, Action Mode, video audio controls and Live Histogram/Waveform (`VideoPro`,
+  `LiveScopesOverlay`, `CinematicEditorView`):
+  - New **Cinematic** video mode using iOS 26 `isCinematicVideoCaptureEnabled`, simulated aperture
+    (`f/2.0–f/16`), tap-to-track focus, server `captureMode = "cinematic"` support, and a
+    post-capture focus & depth editor backed by `Cinematic.framework` (`CNAssetInfo`, `CNScript`,
+    `CNDecision`).
+  - **Action Mode** stabilization (`cinematicExtendedEnhanced`) with low-light warning and
+    Preserve Settings support (`preserveActionMode`).
+  - **Audio controls**: Stereo/Mono (`multichannelAudioMode`), Wind Noise Removal
+    (`isWindNoiseRemovalEnabled`), and AirPods/Bluetooth microphone routing.
+  - **Live Histogram & Waveform**: on-demand RGB + Luma histogram and Luma waveform overlay driven
+    by the Metal viewfinder.
 - Night Mode (`NightMode`, `TripodDetector`, `NightStacker`):
   - Automatic low-light moon indicator and control-drawer duration slider (1–3 s handheld, up to
     30 s when CoreMotion detects a tripod; Off / Auto / manual), plus Preserve Settings support

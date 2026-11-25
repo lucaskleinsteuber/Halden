@@ -263,6 +263,7 @@ public struct LocalAsset: Codable, Sendable, Equatable, Identifiable, FetchableR
     public var isVideo: Bool { kind == "video" }
     public var isSlowMotion: Bool { isVideo && captureMode == "slowmo" }
     public var isTimeLapse: Bool { isVideo && captureMode == "timelapse" }
+    public var isCinematic: Bool { isVideo && captureMode == "cinematic" }
     /// A photo with a short video, taken as one.
     public var isLivePhoto: Bool { !isVideo && (pairedVideoFile != nil || pairedVideoSha256 != nil) }
     public var hasLocation: Bool { latitude != nil && longitude != nil }

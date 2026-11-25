@@ -1,4 +1,5 @@
 import AVFoundation
+import CoreImage
 import HaldenKit
 import ImageIO
 import Observation
@@ -21,7 +22,9 @@ final class DeviceCamera: CaptureBackend {
     @ObservationIgnored private var smudgeObservation: NSKeyValueObservation?
     @ObservationIgnored private var smudgeRelay: Relay<Bool>?
     private(set) var readings = CameraReadings()
+    private(set) var liveScopes: LiveScopesData?
     @ObservationIgnored private var readingsWatch: ReadingsWatch?
+    @ObservationIgnored private var scopesRelay: Relay<LiveScopesData?>?
     @ObservationIgnored private var configured = false
     @ObservationIgnored private var mode = CameraMode.photo
     @ObservationIgnored private var video: CaptureOptions?
@@ -40,6 +43,11 @@ final class DeviceCamera: CaptureBackend {
         readingsWatch = ReadingsWatch { [weak self] readings in
             if self?.readings != readings { self?.readings = readings }
         }
+        let scopesRelay = Relay<LiveScopesData?> { [weak self] scopes in
+            if self?.liveScopes != scopes { self?.liveScopes = scopes }
+        }
+        self.scopesRelay = scopesRelay
+        core.scopesChanged = { scopes in scopesRelay.send(scopes) }
     }
 
     static var allowed: Bool { AVCaptureDevice.authorizationStatus(for: .video) == .authorized }
@@ -91,8 +99,8 @@ final class DeviceCamera: CaptureBackend {
     func setMode(_ mode: CameraMode, options video: CaptureOptions) async {
         self.mode = mode
         self.video = video
-        // Sound for videos and Live Photos; without the microphone they are silent.
-        let sound = mode == .video || mode == .slowMotion || (mode == .photo && video.live)
+        // Sound for videos, Cinematic and Live Photos; without the microphone they are silent.
+        let sound = mode == .video || mode == .cinematic || mode == .slowMotion || (mode == .photo && video.live)
         if sound, AVCaptureDevice.authorizationStatus(for: .audio) == .notDetermined {
             _ = await AVCaptureDevice.requestAccess(for: .audio)
         }
@@ -338,6 +346,10 @@ final class CaptureCore: NSObject, @unchecked Sendable {
     private var observers: [NSObjectProtocol] = []
     /// Gets every new state (and the camera, when it changed).
     var changed: (@Sendable (CameraState, Carry<AVCaptureDevice>?) -> Void)?
+    /// Delivers throttled live histogram/waveform snapshots when enabled.
+    var scopesChanged: (@Sendable (LiveScopesData?) -> Void)?
+    private let scopeLock = NSLock()
+    private var lastScopeTime: Double = 0
 
     init(metalView: MetalPreviewView) {
         self.metalView = metalView
@@ -482,23 +494,55 @@ final class CaptureCore: NSObject, @unchecked Sendable {
         }
     }
 
+    private var wantsScopes: Bool {
+        mode != .timeLapse && (video?.showHistogram == true || video?.showWaveform == true)
+    }
+
     private var needsMetalPreview: Bool {
+        if wantsScopes { return true }
         guard mode.isStill else { return false }
         return LookRenderer.needsCustomPreview(
             style: video?.style, filter: video?.filter, isPortrait: mode == .portrait)
     }
 
+    private func sampleScopes(_ image: CIImage) {
+        let now = ProcessInfo.processInfo.systemUptime
+        let shouldRun = scopeLock.withLock { () -> Bool in
+            guard now - lastScopeTime >= 0.12 else { return false }
+            lastScopeTime = now
+            return true
+        }
+        guard shouldRun else { return }
+        let data = LiveScopesAnalyzer.analyze(image)
+        scopesChanged?(data)
+    }
+
     /// Photo: the photo output in the chosen resolution and prioritization (no movie output so
     /// Live Photos work), plus metadata detection for automatic depth on people/pets.
     /// Portrait: photo + Metal preview (+ synchronized depth when supported).
-    /// Video: movie + photo output (Live Photos off) for photo-while-recording.
+    /// Cinematic: iOS 26 `isCinematicVideoCaptureEnabled` + required metadata output.
+    /// Video: movie + photo output (Live Photos off) for photo-while-recording, Action Mode & audio.
     private func apply(mode: CameraMode, on device: AVCaptureDevice) {
         session.automaticallyConfiguresCaptureDeviceForWideColor = mode.isStill
-        configureAudioSession(allowPlayback: video?.allowAudioPlayback == true, needsAudio: mode != .timeLapse)
+        if mode != .cinematic, let input, input.isCinematicVideoCaptureEnabled {
+            input.isCinematicVideoCaptureEnabled = false
+        }
+        configureAudioSession(
+            allowPlayback: video?.allowAudioPlayback == true,
+            allowAirPodsMic: video?.allowAirPodsMic == true,
+            needsAudio: mode != .timeLapse)
+        var scopeObserver: (@Sendable (CIImage) -> Void)? = nil
+        if wantsScopes {
+            scopeObserver = { [weak self] frame in
+                self?.sampleScopes(frame)
+            }
+        }
+        if !wantsScopes { scopesChanged?(nil) }
         metalView.configure(
             style: mode.isStill ? video?.style : nil, filter: mode.isStill ? video?.filter : nil,
             portraitAperture: mode == .portrait ? (video?.portraitAperture ?? PortraitMath.defaultAperture) : nil,
-            portraitLighting: mode == .portrait ? video?.portraitLighting : nil)
+            portraitLighting: mode == .portrait ? video?.portraitLighting : nil,
+            frameObserver: scopeObserver)
         switch mode {
         case .photo:
             var outputs: [AVCaptureOutput] = [photoOutput, metadataOutput]
@@ -569,23 +613,41 @@ final class CaptureCore: NSObject, @unchecked Sendable {
                 previewOutput.setSampleBufferDelegate(previewRelay, queue: previewRelay.queue)
             }
             state.videoFormat = nil
-        case .video, .slowMotion:
+        case .video, .cinematic, .slowMotion:
             // Disable Live Photos before adding `movieOutput`, then keep `photoOutput` attached in
             // `.video` mode so users can snap still photos while recording.
             photoOutput.isLivePhotoCaptureEnabled = false
-            use(mode == .video ? [movieOutput, photoOutput] : [movieOutput])
+            var outputs: [AVCaptureOutput] =
+                switch mode {
+                case .video: [movieOutput, photoOutput]
+                case .cinematic: [movieOutput, metadataOutput]
+                default: [movieOutput]
+                }
+            if wantsScopes { outputs.append(previewOutput) }
+            use(outputs)
             addMicrophone()
+            configureAudioInput()
             if let video {
                 if mode == .slowMotion {
                     applyVideoFormat(
                         sizes: [(1920, 1080)], rate: Double(video.slowMotionRate), hdr: false,
                         autoLowLightFPS: false, on: device)
+                } else if mode == .cinematic {
+                    applyCinematicFormat(video: video, on: device)
                 } else {
                     applyVideoFormat(
                         sizes: video.resolution == .uhd4K ? [(3840, 2160), (1920, 1080)] : [(1920, 1080)],
                         rate: Double(video.frameRate), hdr: video.hdr, autoLowLightFPS: video.autoLowLightFPS,
                         on: device)
+                    if video.actionMode, let base = state.videoFormat {
+                        state.videoFormat = "\(base) · Action"
+                    }
                 }
+            }
+            if wantsScopes, let connection = previewOutput.connection(with: .video) {
+                if connection.isVideoRotationAngleSupported(90) { connection.videoRotationAngle = 90 }
+                applyMirroring(on: connection, mirror: side == .front)
+                previewOutput.setSampleBufferDelegate(previewRelay, queue: previewRelay.queue)
             }
             if mode == .video,
                 let largest = device.activeFormat.supportedMaxPhotoDimensions.max(by: {
@@ -599,7 +661,8 @@ final class CaptureCore: NSObject, @unchecked Sendable {
                     movieOutput.setOutputSettings([AVVideoCodecKey: AVVideoCodecType.hevc], for: connection)
                 }
                 if connection.isVideoStabilizationSupported {
-                    connection.preferredVideoStabilizationMode = .auto
+                    connection.preferredVideoStabilizationMode =
+                        (mode == .video && video?.actionMode == true) ? .cinematicExtendedEnhanced : .auto
                 }
             }
         case .timeLapse:
@@ -696,17 +759,80 @@ final class CaptureCore: NSObject, @unchecked Sendable {
         }
     }
 
-    /// Lets music or podcasts keep playing while filming when `allowPlayback` is on.
-    private func configureAudioSession(allowPlayback: Bool, needsAudio: Bool) {
+    /// Configures iOS 26 Cinematic Video capture format, required metadata object types and
+    /// simulated aperture (`AVCaptureDeviceInput.isCinematicVideoCaptureEnabled`).
+    private func applyCinematicFormat(video: CaptureOptions, on device: AVCaptureDevice) {
+        let cinematicFormats = device.formats.filter(\.isCinematicVideoCaptureSupported)
+        if let chosen = cinematicFormats.first(where: {
+            let size = CMVideoFormatDescriptionGetDimensions($0.formatDescription)
+            return size.width == 1920 && size.height == 1080
+        }) ?? cinematicFormats.first,
+            (try? device.lockForConfiguration()) != nil
+        {
+            device.activeFormat = chosen
+            if let range = chosen.videoFrameRateRangeForCinematicVideo {
+                let fps = min(30.0, range.maxFrameRate)
+                let frame = CMTime(value: 1, timescale: CMTimeScale(max(1, Int(fps.rounded()))))
+                device.activeVideoMinFrameDuration = frame
+                device.activeVideoMaxFrameDuration = frame
+            }
+            device.unlockForConfiguration()
+        }
+        if session.outputs.contains(metadataOutput) {
+            let required = metadataOutput.requiredMetadataObjectTypesForCinematicVideoCapture
+            let available = Set(metadataOutput.availableMetadataObjectTypes)
+            metadataOutput.metadataObjectTypes = required.filter { available.contains($0) }
+        }
+        let format = device.activeFormat
+        let aperture = CinematicRules.clampedAperture(
+            video.cinematicAperture,
+            min: Double(max(format.minSimulatedAperture, 2.0)),
+            max: Double(max(format.maxSimulatedAperture, 2.0)))
+        if let input, input.isCinematicVideoCaptureSupported {
+            input.isCinematicVideoCaptureEnabled = true
+            input.simulatedAperture = Float(aperture)
+            state.videoFormat = "Cinematic · \(CinematicRules.formatAperture(aperture))"
+        } else {
+            applyVideoFormat(sizes: [(1920, 1080)], rate: 30, hdr: false, autoLowLightFPS: false, on: device)
+            state.videoFormat = "Cinematic · \(CinematicRules.formatAperture(video.cinematicAperture))"
+        }
+    }
+
+    /// Configures Stereo/Mono multichannel audio and Wind Noise Removal on the active microphone.
+    private func configureAudioInput() {
+        guard let audioInput else { return }
+        let wantStereo = (video?.audioChannelMode ?? .stereo) == .stereo
+        if wantStereo && audioInput.isMultichannelAudioModeSupported(.stereo) {
+            audioInput.multichannelAudioMode = .stereo
+        } else if audioInput.isMultichannelAudioModeSupported(.none) {
+            audioInput.multichannelAudioMode = .none
+        }
+        // Wind noise removal requires multichannelAudioMode != .none on iOS 18+/26+.
+        if audioInput.isWindNoiseRemovalSupported {
+            audioInput.isWindNoiseRemovalEnabled =
+                (video?.windNoiseRemoval ?? true) && audioInput.multichannelAudioMode != .none
+        }
+    }
+
+    /// Lets music or podcasts keep playing while filming and/or routes audio from AirPods / Bluetooth HFP.
+    private func configureAudioSession(allowPlayback: Bool, allowAirPodsMic: Bool, needsAudio: Bool) {
         guard needsAudio else {
             session.automaticallyConfiguresApplicationAudioSession = true
             return
         }
-        if allowPlayback {
+        if allowPlayback || allowAirPodsMic {
             session.automaticallyConfiguresApplicationAudioSession = false
             let audio = AVAudioSession.sharedInstance()
-            try? audio.setCategory(
-                .playAndRecord, mode: .videoRecording, options: [.mixWithOthers, .defaultToSpeaker, .allowBluetoothHFP])
+            var options: AVAudioSession.CategoryOptions = [.defaultToSpeaker, .allowBluetoothHFP]
+            if allowPlayback { options.insert(.mixWithOthers) }
+            try? audio.setCategory(.playAndRecord, mode: .videoRecording, options: options)
+            if allowAirPodsMic,
+                let bluetooth = audio.availableInputs?.first(where: { $0.portType == .bluetoothHFP })
+            {
+                try? audio.setPreferredInput(bluetooth)
+            } else {
+                try? audio.setPreferredInput(nil)
+            }
             try? audio.setActive(true)
         } else {
             session.automaticallyConfiguresApplicationAudioSession = true
@@ -841,6 +967,8 @@ final class CaptureCore: NSObject, @unchecked Sendable {
         described.subjectDetected = state.subjectDetected
         described.portraitHint =
             mode == .portrait ? PortraitMath.hint(distanceMeters: nil, iso: Double(device.iso)) : nil
+        described.canCinematic = device.formats.contains(where: \.isCinematicVideoCaptureSupported)
+        described.canWindNoiseRemoval = audioInput?.isWindNoiseRemovalSupported ?? false
         described.manualLimits = limits(of: device)
         described.focusLocked = state.focusLocked
         described.videoFormat = state.videoFormat
@@ -910,12 +1038,15 @@ final class CaptureCore: NSObject, @unchecked Sendable {
         {
             device.whiteBalanceMode = .continuousAutoWhiteBalance
         }
-        if let focus = set.focus {
-            device.setFocusModeLocked(lensPosition: Float(focus))
-        } else if device.focusMode == .locked, !state.focusLocked,
-            device.isFocusModeSupported(.continuousAutoFocus)
-        {
-            device.focusMode = .continuousAutoFocus
+        let cinematicActive = input?.isCinematicVideoCaptureEnabled == true
+        if !cinematicActive {
+            if let focus = set.focus {
+                device.setFocusModeLocked(lensPosition: Float(focus))
+            } else if device.focusMode == .locked, !state.focusLocked,
+                device.isFocusModeSupported(.continuousAutoFocus)
+            {
+                device.focusMode = .continuousAutoFocus
+            }
         }
     }
 
@@ -923,6 +1054,17 @@ final class CaptureCore: NSObject, @unchecked Sendable {
     /// What is set by hand stays.
     func focus(at point: CGPoint, lock: Bool) {
         guard let device, (try? device.lockForConfiguration()) != nil else { return }
+        if input?.isCinematicVideoCaptureEnabled == true {
+            // While Cinematic Video capture is enabled, changing `device.focusMode` throws
+            // NSInvalidArgumentException; use the dedicated Cinematic tracking focus API instead.
+            device.setCinematicVideoTrackingFocus(at: point, focusMode: lock ? .strong : .weak)
+            device.unlockForConfiguration()
+            if state.focusLocked != lock {
+                state.focusLocked = lock
+                publish(device: nil)
+            }
+            return
+        }
         if manual.focus == nil {
             if device.isFocusPointOfInterestSupported { device.focusPointOfInterest = point }
             let focusMode: AVCaptureDevice.FocusMode = lock ? .autoFocus : .continuousAutoFocus

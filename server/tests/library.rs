@@ -424,7 +424,7 @@ async fn slow_motion_keeps_its_slow_part_next_to_the_original() {
         .await;
     let other = Uuid::new_v4().to_string();
     let mut unknown = taken(1_795_443_730_000, None);
-    unknown["captureMode"] = json!("cinematic");
+    unknown["captureMode"] = json!("unknown_mode");
     api.upload(
         &token,
         &other,
@@ -1071,5 +1071,44 @@ async fn edit_recipe_v2_style_and_filter_sync_and_keep_history() {
             refused.body
         );
     }
+    api.stop().await;
+}
+
+/// Cinematic video captureMode is accepted on videos, carried through sync, and ignored on photos.
+#[tokio::test]
+async fn cinematic_capture_mode_is_kept_on_videos_and_synced() {
+    let api = Api::start().await;
+    let token = owner(&api).await;
+    let video = Uuid::new_v4().to_string();
+    let mut meta = taken(1_795_443_730_000, None);
+    meta["captureMode"] = json!("cinematic");
+    api.upload(
+        &token,
+        &video,
+        &random_bytes(512),
+        "video/quicktime",
+        meta.clone(),
+    )
+    .await;
+
+    let photo = Uuid::new_v4().to_string();
+    api.upload(&token, &photo, &random_bytes(256), "image/heic", meta)
+        .await;
+
+    let got = api.get(&format!("/api/v1/assets/{video}"), &token).await;
+    assert_eq!(got.status, 200);
+    assert_eq!(got.body["captureMode"], "cinematic");
+
+    let synced = api.get("/api/v1/sync?since=0", &token).await;
+    let found = synced.body["assets"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|a| a["id"] == video.as_str())
+        .unwrap();
+    assert_eq!(found["captureMode"], "cinematic");
+
+    let photo_got = api.get(&format!("/api/v1/assets/{photo}"), &token).await;
+    assert_eq!(photo_got.body["captureMode"], Value::Null);
     api.stop().await;
 }

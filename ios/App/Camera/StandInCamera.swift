@@ -16,11 +16,15 @@ final class StandInCamera: CaptureBackend {
         lensSmudged: ProcessInfo.processInfo.arguments.contains("-ui-testing-smudge"),
         canDepth: true,
         subjectDetected: ProcessInfo.processInfo.arguments.contains("-ui-testing-subject"),
+        canCinematic: true,
+        canWindNoiseRemoval: true,
         manualLimits: ManualLimits(shutter: (1.0 / 8000)...1, iso: 50...3200, exposureBias: -8...8))
     private(set) var readings =
         ProcessInfo.processInfo.arguments.contains("-ui-testing-night")
+            || ProcessInfo.processInfo.arguments.contains("-ui-testing-low-light")
         ? CameraReadings(shutter: 1.0 / 15, iso: 2000, kelvin: 4800, tint: 0, focus: 0.5)
         : CameraReadings(shutter: 1.0 / 120, iso: 100, kelvin: 5200, tint: 0, focus: 0.5)
+    private(set) var liveScopes: LiveScopesData?
     @ObservationIgnored private let standInPreview = StandInPreview()
     var previewView: UIView { standInPreview }
     @ObservationIgnored private var taken = 0
@@ -39,10 +43,11 @@ final class StandInCamera: CaptureBackend {
     }
 
     private func updatePreviewLook(mode: CameraMode, options video: CaptureOptions) {
-        let custom =
-            mode.isStill
-            && LookRenderer.needsCustomPreview(
-                style: video.style, filter: video.filter, isPortrait: mode == .portrait)
+        let scopesOn = video.showHistogram || video.showWaveform
+        liveScopes = scopesOn ? LiveScopesAnalyzer.sample() : nil
+        let custom = LookRenderer.needsCustomPreview(
+            style: mode.isStill ? video.style : nil, filter: mode.isStill ? video.filter : nil,
+            isPortrait: mode == .portrait, showScopes: scopesOn)
         state.customPreviewActive = custom
         standInPreview.applyLook(
             style: mode.isStill ? video.style : nil, filter: mode.isStill ? video.filter : nil,
@@ -71,7 +76,9 @@ final class StandInCamera: CaptureBackend {
         state.videoFormat =
             switch mode {
             case .photo, .portrait: nil
-            case .video: "\(video.resolution == .uhd4K ? "4K" : "1080p") · \(fpsText)\(hdrSuffix)\(autoSuffix)"
+            case .video:
+                "\(video.resolution == .uhd4K ? "4K" : "1080p") · \(fpsText)\(hdrSuffix)\(autoSuffix)\(video.actionMode ? " · Action" : "")"
+            case .cinematic: "Cinematic · \(CinematicRules.formatAperture(video.cinematicAperture))"
             case .slowMotion: "1080p · \(video.slowMotionRate) fps"
             case .timeLapse: video.timeLapseInterval.map { "every \(CameraMode.intervalText($0))" } ?? "Auto"
             }

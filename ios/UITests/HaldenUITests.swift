@@ -461,6 +461,64 @@ final class HaldenUITests: XCTestCase {
         XCTAssertTrue(app.switches["preserve-night"].waitForExistence(timeout: 5), "night mode preserve toggle")
     }
 
+    /// Cinematic Video mode, Action Mode low-light hint, Stereo/Mono & Wind audio controls,
+    /// live Histogram/Waveform HUD, and Preserve Action Mode setting.
+    @MainActor
+    func testCinematicActionAudioAndScopes() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-ui-testing-signed-in", "-ui-testing-library", "5", "-ui-testing-low-light"]
+        app.launch()
+        XCTAssertTrue(app.buttons["shutter"].waitForExistence(timeout: 30))
+
+        // Video mode: enable Action Mode -> low-light hint appears, toggle Stereo/Mono, Wind, and Scopes.
+        app.buttons["mode-video"].tap()
+        XCTAssertTrue(app.buttons["camera-controls-toggle"].waitForExistence(timeout: 5))
+        app.buttons["camera-controls-toggle"].tap()
+        XCTAssertTrue(app.buttons["drawer-action"].waitForExistence(timeout: 5))
+        app.buttons["drawer-action"].tap()
+        XCTAssertTrue(
+            app.descendants(matching: .any)["action-low-light-hint"].waitForExistence(timeout: 5),
+            "Action Mode shows low-light hint when ISO is high")
+
+        // Scroll drawer to reach Audio, Wind and Scopes chips.
+        let drawer = app.descendants(matching: .any)["camera-drawer"]
+        let screenWidth = app.windows.firstMatch.frame.width
+        for chipId in ["drawer-audio", "drawer-wind", "drawer-scopes"] {
+            let chip = app.buttons[chipId]
+            for _ in 0..<5 where chip.frame.maxX > screenWidth - 8 || chip.frame.minX < 0 {
+                let from = drawer.coordinate(
+                    withNormalizedOffset: CGVector(dx: chip.frame.minX < 0 ? 0.2 : 0.85, dy: 0.9))
+                let to = drawer.coordinate(
+                    withNormalizedOffset: CGVector(dx: chip.frame.minX < 0 ? 0.85 : 0.2, dy: 0.9))
+                from.press(forDuration: 0.02, thenDragTo: to)
+            }
+            chip.tap()
+        }
+        XCTAssertTrue(app.buttons["drawer-scope-histogram"].waitForExistence(timeout: 5))
+        app.buttons["drawer-scope-histogram"].tap()
+        app.buttons["drawer-scope-waveform"].tap()
+        XCTAssertTrue(app.descendants(matching: .any)["live-histogram"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.descendants(matching: .any)["live-waveform"].waitForExistence(timeout: 5))
+        app.buttons["camera-controls-toggle"].tap()
+
+        // Switch to Cinematic mode: aperture drawer slider adjusts f-stop.
+        app.buttons["mode-cinematic"].tap()
+        XCTAssertTrue(app.buttons["Record cinematic video"].waitForExistence(timeout: 5))
+        app.buttons["camera-controls-toggle"].tap()
+        XCTAssertTrue(app.buttons["drawer-cinematic-aperture"].waitForExistence(timeout: 5))
+        app.buttons["drawer-cinematic-aperture"].tap()
+        let slider = app.sliders["drawer-cinematic-aperture-slider"]
+        XCTAssertTrue(slider.waitForExistence(timeout: 5))
+        slider.adjust(toNormalizedSliderPosition: 0.3)
+
+        // Settings › Camera › Preserve Settings includes Action mode.
+        let tabs = Tabs(app)
+        tabs.buttons["Settings"].tap()
+        app.buttons["camera-settings"].tap()
+        app.buttons["camera-preserve-settings"].tap()
+        XCTAssertTrue(app.switches["preserve-action"].waitForExistence(timeout: 5))
+    }
+
     /// Fifty thousand photos scroll without waiting for pictures.
     @MainActor
     func testTheGridScrollsThroughFiftyThousandPhotos() {
