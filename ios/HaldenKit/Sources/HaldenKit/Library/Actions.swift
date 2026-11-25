@@ -112,7 +112,7 @@ public struct Actions: Sendable {
         asset.altitude = location?.altitude
         asset.locationAccuracy = nil
         asset.heading = nil
-        asset.locationSource = location.map { $0.estimated ? "estimated" : "manual" }
+        asset.locationSource = location?.resolvedSource
     }
 
     func record(

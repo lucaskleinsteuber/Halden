@@ -335,6 +335,36 @@ struct PlaceSettings: View {
                     "Every photo keeps how precisely its place was known, its height and which way the camera looked. A place older than a minute is never used."
                 )
             }
+            Section {
+                Toggle(isOn: app.setting(\.locateScreenshots)) {
+                    Explained(
+                        "Give screenshots a place",
+                        "Screenshots have no GPS of their own; Halden can estimate where they were taken.")
+                }
+                .accessibilityIdentifier("locate-screenshots")
+                if app.settings.locateScreenshots {
+                    Picker(selection: app.setting(\.screenshotPlaceMaxMinutes)) {
+                        ForEach([5, 15, 30, 60, 120], id: \.self) { minutes in
+                            Text("\(minutes) min").tag(minutes)
+                        }
+                    } label: {
+                        Explained(
+                            "Use this iPhone's place up to",
+                            "When a screenshot is older than this, Halden uses the nearest photo within two hours.")
+                    }
+                    .accessibilityIdentifier("screenshot-max-age")
+                    Toggle(isOn: app.setting(\.locateScreenRecordings)) {
+                        Explained("Screen recordings", "Give screen recordings an estimated place the same way.")
+                    }
+                    .accessibilityIdentifier("locate-screen-recordings")
+                }
+            } header: {
+                Text("Screenshots")
+            } footer: {
+                Text(
+                    "Stored in Halden only and marked as estimated; Apple Photos is never changed. Uses your current place only while Halden is open."
+                )
+            }
         }
         .navigationTitle("Place")
     }

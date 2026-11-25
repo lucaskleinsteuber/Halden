@@ -61,7 +61,8 @@ pub struct Location {
     pub accuracy_meters: Option<f64>,
     pub heading: Option<f64>,
     /// `client` (the phone's location service), `exif` (from the file), `manual` (corrected by
-    /// hand) or `estimated` (taken from a neighbouring photo).
+    /// hand), `estimated` (taken from a neighbouring photo) or `device` (where the phone was, e.g.
+    /// for a screenshot).
     pub source: String,
 }
 

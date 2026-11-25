@@ -80,6 +80,15 @@
             return items
         }
 
+        public func items(withIdentifiers identifiers: [String]) async -> [PhotoItem] {
+            guard !identifiers.isEmpty else { return [] }
+            var items: [PhotoItem] = []
+            PHAsset.fetchAssets(withLocalIdentifiers: identifiers, options: nil).enumerateObjects { asset, _, _ in
+                if let item = Self.item(asset) { items.append(item) }
+            }
+            return items
+        }
+
         static func item(_ asset: PHAsset) -> PhotoItem? {
             let kind: PhotoItem.Kind
             switch asset.mediaType {
@@ -98,7 +107,10 @@
             }
             return PhotoItem(
                 localIdentifier: asset.localIdentifier, kind: kind,
-                isLivePhoto: asset.mediaSubtypes.contains(.photoLive), creationDate: asset.creationDate,
+                isLivePhoto: asset.mediaSubtypes.contains(.photoLive),
+                isScreenshot: asset.mediaSubtypes.contains(.photoScreenshot),
+                isScreenRecording: asset.mediaSubtypes.contains(.videoScreenRecording),
+                creationDate: asset.creationDate,
                 location: location, width: asset.pixelWidth, height: asset.pixelHeight,
                 durationMs: kind == .video ? Int64((asset.duration * 1000).rounded()) : nil)
         }

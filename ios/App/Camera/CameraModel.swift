@@ -299,6 +299,7 @@ final class LocationTracker: NSObject, CLLocationManagerDelegate {
     private let manager = CLLocationManager()
     private(set) var reading: PlaceReading?
     private(set) var compass: CompassReading?
+    private var oneShot: [CheckedContinuation<PlaceReading?, Never>] = []
 
     override init() {
         super.init()
@@ -324,13 +325,52 @@ final class LocationTracker: NSObject, CLLocationManagerDelegate {
         manager.stopUpdatingHeading()
     }
 
+    /// A fresh reading right now, without asking for permission (returns `nil` when not allowed
+    /// or no fix arrives in time). Used when taking over recent screenshots while the app is open.
+    func currentReading(timeout: Duration = .seconds(4)) async -> PlaceReading? {
+        let now = Date()
+        if let reading, abs(now.timeIntervalSince(reading.measuredAt)) <= CapturePlace.maxAge { return reading }
+        if let last = manager.location, last.horizontalAccuracy >= 0,
+            abs(now.timeIntervalSince(last.timestamp)) <= CapturePlace.maxAge
+        {
+            let fresh = PlaceReading(
+                latitude: last.coordinate.latitude, longitude: last.coordinate.longitude, altitude: last.altitude,
+                horizontalAccuracy: last.horizontalAccuracy, verticalAccuracy: last.verticalAccuracy,
+                measuredAt: last.timestamp)
+            reading = fresh
+            return fresh
+        }
+        let status = manager.authorizationStatus
+        guard status == .authorizedWhenInUse || status == .authorizedAlways else { return nil }
+        return await withCheckedContinuation { continuation in
+            oneShot.append(continuation)
+            if oneShot.count == 1 {
+                manager.requestLocation()
+                Task { @MainActor [weak self] in
+                    try? await Task.sleep(for: timeout)
+                    self?.finishOneShot(with: nil)
+                }
+            }
+        }
+    }
+
+    private func finishOneShot(with reading: PlaceReading?) {
+        guard !oneShot.isEmpty else { return }
+        let waiters = oneShot
+        oneShot = []
+        for waiter in waiters { waiter.resume(returning: reading) }
+    }
+
     nonisolated func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
         guard let last = locations.last else { return }
         let reading = PlaceReading(
             latitude: last.coordinate.latitude, longitude: last.coordinate.longitude, altitude: last.altitude,
             horizontalAccuracy: last.horizontalAccuracy, verticalAccuracy: last.verticalAccuracy,
             measuredAt: last.timestamp)
-        MainActor.assumeIsolated { self.reading = reading }
+        MainActor.assumeIsolated {
+            self.reading = reading
+            self.finishOneShot(with: reading)
+        }
     }
 
     nonisolated func locationManager(_ manager: CLLocationManager, didUpdateHeading heading: CLHeading) {
@@ -343,5 +383,7 @@ final class LocationTracker: NSObject, CLLocationManagerDelegate {
         MainActor.assumeIsolated { compass = reading }
     }
 
-    nonisolated func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {}
+    nonisolated func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {
+        MainActor.assumeIsolated { self.finishOneShot(with: nil) }
+    }
 }

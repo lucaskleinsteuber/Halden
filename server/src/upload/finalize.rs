@@ -259,38 +259,58 @@ async fn record(
     journal::placed(&mut tx, entry).await?;
     let seq = assets::next_seq(&mut tx).await?;
     if row.role() == UploadRole::Original {
-        let location = client
-            .location
-            .as_ref()
-            .map(|l| {
-                (
-                    l.latitude,
-                    l.longitude,
-                    l.altitude,
-                    l.horizontal_accuracy,
-                    l.heading,
-                    "client",
-                )
-            })
-            .or_else(|| {
-                Some((
-                    file.latitude?,
-                    file.longitude?,
-                    file.altitude,
-                    None,
-                    None,
-                    "exif",
-                ))
-            });
+        let client_source = client.location.as_ref().and_then(|l| l.source.as_deref());
+        // `device` and `estimated` are guesses (e.g. for screenshots without GPS), never original
+        // camera readings: keep the original location empty (or from EXIF if the file had one) and
+        // store the guess next to it as a correction.
+        let guessed_source = client_source.filter(|s| matches!(*s, "device" | "estimated"));
+        let original_location = if guessed_source.is_none() {
+            client
+                .location
+                .as_ref()
+                .map(|l| {
+                    (
+                        l.latitude,
+                        l.longitude,
+                        l.altitude,
+                        l.horizontal_accuracy,
+                        l.heading,
+                        "client",
+                    )
+                })
+                .or_else(|| {
+                    Some((
+                        file.latitude?,
+                        file.longitude?,
+                        file.altitude,
+                        None,
+                        None,
+                        "exif",
+                    ))
+                })
+        } else {
+            file.latitude
+                .zip(file.longitude)
+                .map(|(lat, lon)| (lat, lon, file.altitude, None, None, "exif"))
+        };
+        let edit_location = match (
+            original_location.is_none(),
+            guessed_source,
+            &client.location,
+        ) {
+            (true, Some(source), Some(l)) => Some((l.latitude, l.longitude, l.altitude, source)),
+            _ => None,
+        };
         let width = client.width.or(file.width);
         let height = client.height.or(file.height);
         let duration = client.duration_ms.or(file.duration_ms);
         sqlx::query(
             "INSERT INTO assets (id, user_id, kind, taken_at, tz_offset_min, taken_at_source, \
                  width, height, duration_ms, camera_make, camera_model, lens, latitude, longitude, \
-                 altitude, location_accuracy_m, heading, location_source, exif_json, client_json, \
+                 altitude, location_accuracy_m, heading, location_source, edit_latitude, \
+                 edit_longitude, edit_altitude, edit_location_source, exif_json, client_json, \
                  capture_mode, created_at, updated_at, seq) \
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         )
         .bind(&row.asset_id)
         .bind(&user.id)
@@ -304,12 +324,16 @@ async fn record(
         .bind(&file.make)
         .bind(&file.model)
         .bind(&file.lens)
-        .bind(location.map(|l| l.0))
-        .bind(location.map(|l| l.1))
-        .bind(location.and_then(|l| l.2))
-        .bind(location.and_then(|l| l.3))
-        .bind(location.and_then(|l| l.4))
-        .bind(location.map(|l| l.5))
+        .bind(original_location.map(|l| l.0))
+        .bind(original_location.map(|l| l.1))
+        .bind(original_location.and_then(|l| l.2))
+        .bind(original_location.and_then(|l| l.3))
+        .bind(original_location.and_then(|l| l.4))
+        .bind(original_location.map(|l| l.5))
+        .bind(edit_location.map(|l| l.0))
+        .bind(edit_location.map(|l| l.1))
+        .bind(edit_location.and_then(|l| l.2))
+        .bind(edit_location.map(|l| l.3))
         .bind(exif_json(file))
         .bind(serde_json::to_string(client).ok())
         .bind(

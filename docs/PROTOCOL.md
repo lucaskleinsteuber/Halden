@@ -267,7 +267,7 @@ taken (`[storage] path_template`). Two photos from the same second get `_2`, `_3
     "timeZone": "Europe/Berlin",
     "location": { "latitude": 50.5558, "longitude": 9.6808, "altitude": 261.0,
                   "horizontalAccuracy": 4.5, "verticalAccuracy": 3.0,
-                  "heading": 271.5, "headingAccuracy": 10.0 },
+                  "heading": 271.5, "headingAccuracy": 10.0, "source": "client" },
     "width": 4032, "height": 3024, "durationMs": null,
     "originalFilename": "IMG_0001.HEIC",
     "captureMode": null
@@ -285,7 +285,10 @@ taken (`[storage] path_template`). Two photos from the same second get `_2`, `_3
   `timelapse`; it becomes the asset's `captureMode`. Other values are kept but not used.
 - `metadata` is optional and every field in it too. Unknown fields are kept but not used. When the
   device doesn't say when or where, the server reads it from the file (EXIF, QuickTime); for the
-  time the order is device, file, upload time.
+  time the order is device, file, upload time. `location.source` is optional: `client` (default,
+  measured when taken), `device` (where the device was shortly after, e.g. for a screenshot) or
+  `estimated` (taken from a neighbouring photo); `device` and `estimated` are stored as estimated
+  corrections so the original location stays empty unless the file itself has GPS.
 
 Answers:
 
@@ -368,7 +371,8 @@ recorded.
 
 `takenAt`, `timeZoneOffsetMinutes` and `location` are the *effective* values: a correction if
 there is one, otherwise the original. `takenAtSource` is then `manual`; `location.source` is
-`manual` or `estimated`. `title` and `description` are `null` until set.
+`manual`, `estimated` or `device` (where the phone was, e.g. for a screenshot). `title` and
+`description` are `null` until set.
 
 ### `GET /assets/{id}`
 
@@ -393,7 +397,7 @@ Corrections. The original values are never changed; every correction is kept in 
 {
   "takenAt": 1795440130000,
   "timeZoneOffsetMinutes": 120,
-  "location": { "latitude": 48.137, "longitude": 11.575, "altitude": null, "estimated": false },
+  "location": { "latitude": 48.137, "longitude": 11.575, "altitude": null, "estimated": false, "source": "manual" },
   "title": "Munich",
   "description": null,
   "playback": { "slowFromMs": 1000, "slowToMs": 6000, "rate": 0.125 },
@@ -403,7 +407,8 @@ Corrections. The original values are never changed; every correction is kept in 
 ```
 
 Every field is optional. `location: null` removes the place (the original stays stored but is not
-shown); `title: null` and `description: null` remove them. `playback` sets the slow part of a
+shown); `location.source` may be `manual`, `estimated` or `device` (when omitted, `estimated: true`
+uses `estimated` and `false` uses `manual`); `title: null` and `description: null` remove them. `playback` sets the slow part of a
 slow-motion video (`0 <= slowFromMs < slowToMs`, `rate` from 0.01 to 1, 0.125 is eight times
 slower); `null` plays it as recorded. The file is never changed.
 

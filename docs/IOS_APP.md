@@ -167,6 +167,13 @@ the design comes after that. What works today is described below.
     are backed up, found through the library's persistent change history, so also what was
     added while Halden wasn't running. Live Photos come with their video (uploaded after the
     photo as the asset's `paired_video`). Time and place come from Apple Photos.
+  - **Screenshots and screen recordings** (`ScreenshotPlace`, Settings › Place): when imported
+    without a place, screenshots (and screen recordings, configurable) get an estimated place in
+    Halden only (Apple Photos stays untouched): this iPhone's current place (`device`) if taken
+    within the configured window (default 30 min) while Halden is open, else the place of the
+    nearest photo within two hours (`estimated`). Existing unlocated screenshots in Halden get
+    a one-time pass using the nearby-photo rule. Full screen and Info show "Where your iPhone
+    was" or "From a photo nearby", and the map marks them with a dashed frame.
   - Deleted there: into Halden's trash, restorable. Deleted everywhere in Halden: deleted there
     too, after the system asks.
   - Photos taken with Halden are saved there too and linked, so they never come back as new.

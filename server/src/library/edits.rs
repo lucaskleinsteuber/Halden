@@ -11,7 +11,7 @@ use crate::{
     library::assets::{self, Asset, AssetRow, Location, asset_columns},
 };
 
-/// A location set by hand or taken from a suggestion.
+/// A location set by hand, taken from a suggestion, or from the device's place (e.g. screenshots).
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct NewLocation {
@@ -21,6 +21,9 @@ pub struct NewLocation {
     /// True when it came from a suggestion: shown as "estimated".
     #[serde(default)]
     pub estimated: bool,
+    /// Optional explicit source: `manual`, `estimated` or `device`. Overrides `estimated` when set.
+    #[serde(default)]
+    pub source: Option<String>,
 }
 
 impl NewLocation {
@@ -31,7 +34,22 @@ impl NewLocation {
         {
             return Err("The location is outside the valid range.".into());
         }
+        if let Some(source) = self.source.as_deref()
+            && !matches!(source, "manual" | "estimated" | "device")
+        {
+            return Err("location.source must be manual, estimated or device.".into());
+        }
         Ok(())
+    }
+
+    pub fn resolved_source(&self) -> &'static str {
+        match self.source.as_deref() {
+            Some("device") => "device",
+            Some("estimated") => "estimated",
+            Some("manual") => "manual",
+            _ if self.estimated => "estimated",
+            _ => "manual",
+        }
     }
 }
 
@@ -253,7 +271,7 @@ async fn apply(
     }
     match &correction.location {
         Some(Some(new)) => {
-            let source = if new.estimated { "estimated" } else { "manual" };
+            let source = new.resolved_source();
             sqlx::query(
                 "UPDATE assets SET edit_latitude = ?, edit_longitude = ?, edit_altitude = ?, \
                      edit_location_source = ?, location_hidden = 0 WHERE id = ?",
@@ -524,7 +542,8 @@ macro_rules! concat_candidate {
                  taken_at FROM assets \
              WHERE user_id = ?1 AND taken_at BETWEEN ?2 AND ?3 AND id <> ?4 \
                AND location_hidden = 0 AND deleted_at IS NULL \
-               AND (edit_latitude IS NOT NULL OR latitude IS NOT NULL) ",
+               AND (edit_latitude IS NOT NULL OR latitude IS NOT NULL) \
+               AND coalesce(edit_location_source, '') NOT IN ('estimated', 'device') ",
             $order
         )
     };

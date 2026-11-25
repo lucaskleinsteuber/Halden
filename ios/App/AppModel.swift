@@ -422,6 +422,12 @@ final class AppModel {
                 var reachable = true
                 do {
                     try await Syncer(database: database, client: client).run()
+                    if let currentSettings = self?.settings,
+                        (try? await self?.photos.locateExistingScreenshots(settings: currentSettings, client: client))
+                            ?? 0 > 0
+                    {
+                        _ = await actions.send(with: client)
+                    }
                     let me = try await client.me()
                     self?.backup = me.backup
                     if let days = me.trashDays { self?.trashDays = days }
@@ -863,16 +869,27 @@ final class AppModel {
         }
     }
 
+    /// Current iPhone place when Halden is active in the foreground (never in UI tests).
+    private func currentDeviceReading() async -> PlaceReading? {
+        guard !ProcessInfo.processInfo.arguments.contains("-ui-testing"),
+            UIApplication.shared.applicationState == .active
+        else { return nil }
+        return await camera.location.currentReading()
+    }
+
     /// What is new in Apple Photos comes in; what was deleted there goes to the trash here.
     func takeOverPhotos() {
         guard connection != nil else { return }
         let settings = settings
-        Task {
-            guard let result = try? await photos.takeOverChanges(settings: settings), result.added + result.trashed > 0
-            else { return }
-            working?.cancel()
-            working = nil
-            work()
+        Task { [weak self] in
+            guard let self else { return }
+            let result = try? await self.photos.takeOverChanges(settings: settings) { @Sendable [weak self] in
+                await self?.currentDeviceReading()
+            }
+            guard let result, result.added + result.trashed > 0 else { return }
+            self.working?.cancel()
+            self.working = nil
+            self.work()
         }
     }
 
@@ -891,7 +908,12 @@ final class AppModel {
                 _ = await SystemPhotoLibrary.ask(everything: true)
             }
             while true {
-                guard let (count, done) = try? await photos.importExisting(limit: 50) else { break }
+                let step = try? await photos.importExisting(
+                    limit: 50, settings: settings,
+                    currentPlace: { @Sendable in
+                        await self.currentDeviceReading()
+                    })
+                guard let (count, done) = step else { break }
                 photosImport.imported += count
                 if count > 0 { work() }
                 if done {

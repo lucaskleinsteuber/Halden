@@ -10,6 +10,10 @@ public struct PhotoItem: Sendable, Equatable {
     public var kind: Kind
     /// A Live Photo: a photo with a short video.
     public var isLivePhoto: Bool
+    /// Captured as a screenshot (no GPS of its own).
+    public var isScreenshot: Bool
+    /// Captured as a screen recording (no GPS of its own).
+    public var isScreenRecording: Bool
     public var creationDate: Date?
     public var location: ClientLocation?
     public var width: Int
@@ -17,12 +21,15 @@ public struct PhotoItem: Sendable, Equatable {
     public var durationMs: Int64?
 
     public init(
-        localIdentifier: String, kind: Kind, isLivePhoto: Bool = false, creationDate: Date?,
-        location: ClientLocation? = nil, width: Int, height: Int, durationMs: Int64? = nil
+        localIdentifier: String, kind: Kind, isLivePhoto: Bool = false, isScreenshot: Bool = false,
+        isScreenRecording: Bool = false, creationDate: Date?, location: ClientLocation? = nil, width: Int,
+        height: Int, durationMs: Int64? = nil
     ) {
         self.localIdentifier = localIdentifier
         self.kind = kind
         self.isLivePhoto = isLivePhoto
+        self.isScreenshot = isScreenshot
+        self.isScreenRecording = isScreenRecording
         self.creationDate = creationDate
         self.location = location
         self.width = width
@@ -73,6 +80,9 @@ public protocol PhotoLibrary: Sendable {
     /// Items created after `date` (all with `nil`), oldest first, at most `limit`: the import of
     /// what was there before Halden.
     func items(after date: Date?, limit: Int) async throws -> [PhotoItem]
+    /// Looks up specific items by their Apple Photos local identifiers (e.g. to recognise
+    /// previously imported screenshots).
+    func items(withIdentifiers identifiers: [String]) async -> [PhotoItem]
     /// The item's original file, and for a Live Photo its video too (second).
     func export(_ item: PhotoItem, into folder: URL) async throws -> [ExportedFile]
     /// Adds a photo or video file (a photo with `pairedVideo` as a Live Photo); returns its

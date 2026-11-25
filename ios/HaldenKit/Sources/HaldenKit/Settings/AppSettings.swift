@@ -70,6 +70,13 @@ public struct AppSettings: Codable, Sendable, Equatable {
     // Place
     public var locationAccuracyLimit = 50.0
     public var inaccurateLocation = InaccurateLocation.mark
+    /// Screenshots (and screen recordings) without GPS get an estimated place in Halden.
+    public var locateScreenshots = true
+    /// Use this iPhone's current place for screenshots taken within this many minutes; older ones
+    /// take the place of the nearest photo within two hours.
+    public var screenshotPlaceMaxMinutes = 30
+    /// Give screen recordings an estimated place the same way as screenshots.
+    public var locateScreenRecordings = true
 
     // Apple Photos
     /// Photos and videos from other apps (Apple's camera, screenshots, …) come into Halden.
@@ -85,8 +92,9 @@ public struct AppSettings: Codable, Sendable, Equatable {
         case uploadOverCellular, videosOnlyOnWiFi, onlyOnHomeNetwork, keepLocalCopies, photoFormat
         case videoResolution, videoFrameRate, videoHDR, flash, showGrid, livePhotos, slowMotionRate
         case timeLapseInterval, keepManualSettings, keptManual, tripKilometres, videoCopy, makeSmallCopies
-        case locationAccuracyLimit
-        case inaccurateLocation, importFromPhotos, saveToPhotos, syncDeletionsWithPhotos
+        case locationAccuracyLimit, inaccurateLocation
+        case locateScreenshots, screenshotPlaceMaxMinutes, locateScreenRecordings
+        case importFromPhotos, saveToPhotos, syncDeletionsWithPhotos
     }
 
     public init(from decoder: Decoder) throws {
@@ -116,6 +124,9 @@ public struct AppSettings: Codable, Sendable, Equatable {
         read(.makeSmallCopies, into: &settings.makeSmallCopies)
         read(.locationAccuracyLimit, into: &settings.locationAccuracyLimit)
         read(.inaccurateLocation, into: &settings.inaccurateLocation)
+        read(.locateScreenshots, into: &settings.locateScreenshots)
+        read(.screenshotPlaceMaxMinutes, into: &settings.screenshotPlaceMaxMinutes)
+        read(.locateScreenRecordings, into: &settings.locateScreenRecordings)
         read(.importFromPhotos, into: &settings.importFromPhotos)
         read(.saveToPhotos, into: &settings.saveToPhotos)
         read(.syncDeletionsWithPhotos, into: &settings.syncDeletionsWithPhotos)

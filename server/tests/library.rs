@@ -654,6 +654,125 @@ async fn photos_without_a_place_get_one_suggested() {
     api.stop().await;
 }
 
+/// Screenshots without GPS can carry the device's place (`device`) or a nearby photo's place
+/// (`estimated`), kept as an estimated location without pretending the file had GPS.
+#[tokio::test]
+async fn device_location_source_is_stored_and_synced() {
+    let api = Api::start().await;
+    let token = owner(&api).await;
+    let at = 1_795_443_730_000;
+    let screenshot = Uuid::new_v4().to_string();
+    let mut metadata = taken(at, Some((50.55, 9.68)));
+    metadata["location"]["source"] = json!("device");
+    api.upload(
+        &token,
+        &screenshot,
+        &random_bytes(120),
+        "image/png",
+        metadata,
+    )
+    .await;
+
+    let path = format!("/api/v1/assets/{screenshot}");
+    let detail = api.get(&path, &token).await;
+    assert_eq!(detail.status, 200, "{}", detail.body);
+    assert_eq!(detail.body["location"]["latitude"], 50.55);
+    assert_eq!(detail.body["location"]["longitude"], 9.68);
+    assert_eq!(detail.body["location"]["source"], "device");
+    assert!(
+        detail.body["original"]["location"].is_null(),
+        "a guessed place does not become the file's original location"
+    );
+
+    // Sync carries `device`, and the screenshot isn't listed as missing a place.
+    let synced = api.get("/api/v1/sync?since=0", &token).await;
+    let found = synced.body["assets"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|a| a["id"] == screenshot.as_str())
+        .unwrap();
+    assert_eq!(found["location"]["source"], "device");
+    let missing = api.get("/api/v1/assets/without-location", &token).await;
+    assert!(missing.body["assets"].as_array().unwrap().is_empty());
+
+    // An estimated (`device`) location is not used as a suggestion for another unlocated photo.
+    let unlocated = Uuid::new_v4().to_string();
+    api.upload(
+        &token,
+        &unlocated,
+        &random_bytes(121),
+        "image/png",
+        taken(at + 5 * MINUTE_MS, None),
+    )
+    .await;
+    let suggestion = api
+        .get(
+            &format!("/api/v1/assets/{unlocated}/location-suggestion"),
+            &token,
+        )
+        .await;
+    assert!(suggestion.body["suggestion"].is_null());
+
+    // `PATCH` and `POST /assets/location` accept `source: "device"` too, and reject unknown ones.
+    let patched = api
+        .call(
+            Method::PATCH,
+            &format!("/api/v1/assets/{unlocated}"),
+            Some(&token),
+            Some(json!({ "location": { "latitude": 48.13, "longitude": 11.57, "source": "device" } })),
+        )
+        .await;
+    assert_eq!(patched.status, 200, "{}", patched.body);
+    assert_eq!(patched.body["location"]["source"], "device");
+
+    let bad_patch = api
+        .call(
+            Method::PATCH,
+            &format!("/api/v1/assets/{unlocated}"),
+            Some(&token),
+            Some(
+                json!({ "location": { "latitude": 48.13, "longitude": 11.57, "source": "bogus" } }),
+            ),
+        )
+        .await;
+    assert_eq!(
+        (bad_patch.status, bad_patch.error()),
+        (422, "validation_failed")
+    );
+
+    // Unknown source on upload is rejected.
+    let bad_upload = api
+        .post(
+            "/api/v1/uploads",
+            Some(&token),
+            json!({
+                "assetId": Uuid::new_v4(),
+                "size": 10,
+                "sha256": sha_hex(&[0u8; 10]),
+                "mimeType": "image/png",
+                "metadata": { "location": { "latitude": 50.0, "longitude": 9.0, "source": "bogus" } }
+            }),
+        )
+        .await;
+    assert_eq!(
+        (bad_upload.status, bad_upload.error()),
+        (422, "validation_failed")
+    );
+
+    // Restoring the location removes the guessed place because there was no original GPS.
+    let restored = api
+        .call(
+            Method::PATCH,
+            &path,
+            Some(&token),
+            Some(json!({ "restore": ["location"] })),
+        )
+        .await;
+    assert!(restored.body["location"].is_null());
+    api.stop().await;
+}
+
 #[tokio::test]
 async fn the_server_makes_thumbnails_the_phone_did_not_send() {
     let api = Api::start_with(|config| config.jobs.thumbnail_delay_minutes = 0).await;

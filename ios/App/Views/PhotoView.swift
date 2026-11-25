@@ -27,10 +27,20 @@ struct PhotoView: View {
 
     private var asset: LocalAsset? { app.asset(current) }
 
+    /// Shown under the date when the place was estimated (for a screenshot or from a photo nearby).
+    private var estimatedPlaceNote: String {
+        switch asset?.locationSource {
+        case "device": "Where your iPhone was"
+        case "estimated": "From a photo nearby"
+        default: ""
+        }
+    }
+
     var body: some View {
         ViewerPager(assets: assets, start: start, app: app) { current = $0 }
             .ignoresSafeArea()
             .navigationTitle(asset.map { TakenAt.text($0.takenAt, offset: $0.timeZoneOffsetMinutes) } ?? "")
+            .navigationSubtitle(estimatedPlaceNote)
             .navigationBarTitleDisplayMode(.inline)
             // Full screen: the tab bar would cover the middle of the bottom bar.
             .toolbar(.hidden, for: .tabBar)
@@ -242,6 +252,7 @@ struct InfoView: View {
                 }
                 if let heading = asset.heading { LabeledContent("Facing", value: "\(Int(heading.rounded()))°") }
                 LabeledContent("Place from", value: Self.source(asset.locationSource))
+                    .accessibilityIdentifier("info-place-source")
             } else {
                 LabeledContent("Place", value: "none")
             }
@@ -334,9 +345,10 @@ struct InfoView: View {
     static func source(_ source: String?) -> String {
         switch source {
         case "client": "this iPhone"
+        case "device": "where your iPhone was (estimated)"
         case "exif": "the file"
         case "manual": "corrected"
-        case "estimated": "estimated from a photo nearby"
+        case "estimated": "from a photo nearby (estimated)"
         case "upload": "the time of upload"
         default: source ?? "unknown"
         }

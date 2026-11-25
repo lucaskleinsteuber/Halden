@@ -257,6 +257,9 @@ public struct LocalAsset: Codable, Sendable, Equatable, Identifiable, FetchableR
     /// A photo with a short video, taken as one.
     public var isLivePhoto: Bool { !isVideo && (pairedVideoFile != nil || pairedVideoSha256 != nil) }
     public var hasLocation: Bool { latitude != nil && longitude != nil }
+    /// The place was estimated (from a photo nearby in time or where the iPhone was), not measured
+    /// for this file.
+    public var hasEstimatedLocation: Bool { locationSource == "estimated" || locationSource == "device" }
 
     public init(
         id: String, kind: String, takenAt: Int64, timeZoneOffsetMinutes: Int? = nil,

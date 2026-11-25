@@ -8,6 +8,16 @@ part of the first versions.
 
 ## 25.11.2026
 
+### Added
+
+- Screenshots and screen recordings without GPS get an estimated place in Halden only (Apple
+  Photos stays unchanged): this iPhone's current place (new server location source `device`)
+  when taken within 30 minutes while Halden is open, otherwise the place of the nearest photo
+  within two hours (`estimated`); existing unlocated screenshots get a one-time pass on sync.
+  Full screen and Info show "Where your iPhone was" or "From a photo nearby", the map marks
+  them as estimated, and Settings › Place lets you configure whether screenshots and screen
+  recordings get a place and the maximum age.
+
 ### Fixed
 
 - The tab bar (Camera, Photos, Settings) is visible in the camera again, with clear space above

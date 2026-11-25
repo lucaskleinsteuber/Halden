@@ -94,6 +94,12 @@ final class LayoutTests: XCTestCase {
         XCTAssertTrue(app.buttons["share"].waitForExistence(timeout: 10))
         settle()
         shot("photo")
+        // Next photo has an estimated device place (subtitle under the date).
+        app.swipeLeft()
+        settle()
+        shot("photo-estimated-place")
+        app.swipeRight()
+        settle()
         if app.buttons["edit"].exists {
             app.buttons["edit"].tap()
             settle(1.5)

@@ -176,11 +176,14 @@ public struct ClientLocation: Codable, Sendable, Equatable {
     public var verticalAccuracy: Double?
     public var heading: Double?
     public var headingAccuracy: Double?
+    /// `nil` or `client` (measured when taken), `device` (where the phone was, e.g. for a
+    /// screenshot) or `estimated` (from a photo nearby in time).
+    public var source: String?
 
     public init(
         latitude: Double, longitude: Double, altitude: Double? = nil,
         horizontalAccuracy: Double? = nil, verticalAccuracy: Double? = nil,
-        heading: Double? = nil, headingAccuracy: Double? = nil
+        heading: Double? = nil, headingAccuracy: Double? = nil, source: String? = nil
     ) {
         self.latitude = latitude
         self.longitude = longitude
@@ -189,6 +192,7 @@ public struct ClientLocation: Codable, Sendable, Equatable {
         self.verticalAccuracy = verticalAccuracy
         self.heading = heading
         self.headingAccuracy = headingAccuracy
+        self.source = source
     }
 }
 
@@ -227,18 +231,27 @@ public enum Change<Value: Codable & Sendable & Equatable>: Sendable, Equatable {
     case clear
 }
 
-/// A place given by hand or accepted from a suggestion (`estimated`).
+/// A place given by hand, accepted from a suggestion (`estimated`) or from the device (`device`).
 public struct CorrectedLocation: Codable, Sendable, Equatable {
     public var latitude: Double
     public var longitude: Double
     public var altitude: Double?
     public var estimated: Bool
+    /// Explicit source (`manual`, `estimated` or `device`); when `nil`, `estimated` chooses.
+    public var source: String?
 
-    public init(latitude: Double, longitude: Double, altitude: Double? = nil, estimated: Bool = false) {
+    public var resolvedSource: String {
+        source ?? (estimated ? "estimated" : "manual")
+    }
+
+    public init(
+        latitude: Double, longitude: Double, altitude: Double? = nil, estimated: Bool = false, source: String? = nil
+    ) {
         self.latitude = latitude
         self.longitude = longitude
         self.altitude = altitude
         self.estimated = estimated
+        self.source = source
     }
 }
 

@@ -262,6 +262,13 @@ public final class APIClient: Sendable {
         return page.assets
     }
 
+    /// Suggested place for one asset (nearest photo in time within the server's window).
+    public func locationSuggestion(for id: String) async throws -> PlaceSuggestion? {
+        struct Answer: Decodable { var suggestion: PlaceSuggestion? }
+        let answer: Answer = try await get("assets/\(id)/location-suggestion")
+        return answer.suggestion
+    }
+
     /// A file of an asset (`original`, `preview`, `converted`, …) downloaded to `destination`,
     /// without holding it in memory. Returns its type.
     @discardableResult

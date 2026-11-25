@@ -51,6 +51,44 @@ final class HaldenUITests: XCTestCase {
         XCTAssertTrue(app.buttons["shutter"].waitForExistence(timeout: 5))
     }
 
+    /// Place settings toggle screenshot locating and full-screen shows estimated device place.
+    @MainActor
+    func testScreenshotPlaceSettingsAndEstimatedIndicator() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-ui-testing-signed-in", "-ui-testing-library", "30"]
+        app.launch()
+        let tabs = Tabs(app)
+        XCTAssertTrue(tabs.waitForExistence(timeout: 10))
+        tabs.buttons["Settings"].tap()
+        app.buttons["place-settings"].tap()
+        XCTAssertTrue(app.navigationBars["Place"].waitForExistence(timeout: 10))
+        let toggle = app.switches["locate-screenshots"]
+        for _ in 0..<4 where !toggle.isHittable { app.swipeUp() }
+        XCTAssertTrue(toggle.waitForExistence(timeout: 5))
+        XCTAssertEqual(toggle.value as? String, "1")
+        let recordings = app.switches["locate-screen-recordings"]
+        for _ in 0..<4 where !recordings.exists { app.swipeUp() }
+        XCTAssertTrue(recordings.exists)
+        toggle.switches.firstMatch.tap()
+        XCTAssertTrue(recordings.waitForNonExistence(timeout: 5), "sub-options hide when off")
+        toggle.switches.firstMatch.tap()
+        XCTAssertTrue(recordings.waitForExistence(timeout: 5), "sub-options return when on")
+
+        tabs.buttons["Photos"].tap()
+        let grid = app.collectionViews["library-grid"]
+        XCTAssertTrue(grid.waitForExistence(timeout: 10))
+        grid.cells["photo-00000000-0000-4000-8000-000000000002"].tap()
+        XCTAssertTrue(app.staticTexts["Where your iPhone was"].waitForExistence(timeout: 10))
+        app.buttons["info"].tap()
+        let source = app.descendants(matching: .any)
+            .matching(
+                NSPredicate(format: "label CONTAINS 'where your iPhone was' OR value CONTAINS 'where your iPhone was'")
+            )
+            .firstMatch
+        for _ in 0..<4 where !source.exists { app.swipeUp() }
+        XCTAssertTrue(source.waitForExistence(timeout: 10))
+    }
+
     /// The lens buttons glide, dragging them gives the dial, swiping over the picture changes
     /// the mode, and the video format can be changed right on the camera.
     @MainActor

@@ -38,7 +38,7 @@ enum UITestWorld {
                     let b = Double((index &* 104_729) % 10_000) / 10_000
                     asset.latitude = 38 + a * 16
                     asset.longitude = -5 + b * 25
-                    asset.locationSource = index % 13 == 0 ? "estimated" : "client"
+                    asset.locationSource = index % 19 == 2 ? "device" : (index % 13 == 0 ? "estimated" : "client")
                 }
                 try asset.insert(db)
             }

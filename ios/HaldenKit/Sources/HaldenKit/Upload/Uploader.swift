@@ -41,7 +41,7 @@ public actor Uploader {
             asset.altitude = place.altitude
             asset.locationAccuracy = place.horizontalAccuracy
             asset.heading = place.heading
-            asset.locationSource = "client"
+            asset.locationSource = place.source ?? "client"
         }
         let item = UploadItem(
             assetId: asset.id, file: fileName, mimeType: mimeType, size: size, sha256: nil,

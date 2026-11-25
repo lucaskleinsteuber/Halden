@@ -122,6 +122,10 @@ pub struct ClientLocation {
     /// Compass direction the camera pointed, 0–360 degrees from north.
     pub heading: Option<f64>,
     pub heading_accuracy: Option<f64>,
+    /// Optional source: `client` (default), `device` (where the phone was, e.g. for a screenshot)
+    /// or `estimated` (from a neighbouring photo).
+    #[serde(default)]
+    pub source: Option<String>,
     #[serde(flatten)]
     pub other: Map<String, Value>,
 }
@@ -156,6 +160,11 @@ impl ClientMetadata {
                     .is_some_and(|h| !(0.0..=360.0).contains(&h))
             {
                 return Err("The location has invalid accuracy, altitude or heading.".into());
+            }
+            if let Some(source) = location.source.as_deref()
+                && !matches!(source, "client" | "device" | "estimated")
+            {
+                return Err("location.source must be client, device or estimated.".into());
             }
         }
         if self.time_zone.as_ref().is_some_and(|z| z.len() > 64)

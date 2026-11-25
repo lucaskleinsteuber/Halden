@@ -118,7 +118,7 @@ extension LocalAsset {
     public var mapPoint: MapClusters.Point? {
         guard let latitude, let longitude else { return nil }
         return MapClusters.Point(
-            id: id, latitude: latitude, longitude: longitude, takenAt: takenAt, estimated: locationSource == "estimated"
+            id: id, latitude: latitude, longitude: longitude, takenAt: takenAt, estimated: hasEstimatedLocation
         )
     }
 }

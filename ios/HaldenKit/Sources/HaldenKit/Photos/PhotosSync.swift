@@ -18,6 +18,7 @@ public actor PhotosSync {
 
     static let tokenKey = "photosChangeToken"
     static let importKey = "photosImportedUpTo"
+    static let existingScreenshotsKey = "screenshotsLocatedOnce"
 
     public init(library: any PhotoLibrary, database: HaldenDatabase, files: FileLocations) {
         self.library = library
@@ -28,14 +29,21 @@ public actor PhotosSync {
     /// Takes over what changed in Apple Photos since the last time. The first time it only notes
     /// where Apple Photos stands.
     @discardableResult
-    public func takeOverChanges(settings: AppSettings) async throws -> (added: Int, trashed: Int) {
+    public func takeOverChanges(
+        settings: AppSettings, now: Date = Date(), currentPlace: (@Sendable () async -> PlaceReading?)? = nil
+    ) async throws -> (added: Int, trashed: Int) {
         guard settings.importFromPhotos || settings.syncDeletionsWithPhotos, saving == 0, await library.mayRead()
         else { return (0, 0) }
         let changes = try await library.changes(since: try database.meta(Self.tokenKey))
         var added = 0
         if settings.importFromPhotos {
+            let needsPlace = changes.added.contains {
+                ScreenshotPlace.eligible($0, settings: settings)
+                    && ScreenshotPlace.withinDeviceWindow($0, now: now, settings: settings)
+            }
+            let reading = needsPlace ? await currentPlace?() : nil
             for item in changes.added {
-                if try await take(item) { added += 1 }
+                if try await take(item, settings: settings, now: now, deviceReading: reading) { added += 1 }
             }
         }
         var trashed = 0
@@ -57,19 +65,80 @@ public actor PhotosSync {
 
     /// Imports what was in Apple Photos before, oldest first, `limit` at a time. Returns how many
     /// came in and whether everything is done.
-    public func importExisting(limit: Int = 50) async throws -> (imported: Int, done: Bool) {
+    public func importExisting(
+        limit: Int = 50, settings: AppSettings = AppSettings(), now: Date = Date(),
+        currentPlace: (@Sendable () async -> PlaceReading?)? = nil
+    ) async throws -> (imported: Int, done: Bool) {
         guard await library.mayRead() else { return (0, true) }
         let after = try database.meta(Self.importKey).flatMap { Double(String(decoding: $0, as: UTF8.self)) }
             .map { Date(timeIntervalSince1970: $0) }
         let items = try await library.items(after: after, limit: limit)
+        let needsPlace = items.contains {
+            ScreenshotPlace.eligible($0, settings: settings)
+                && ScreenshotPlace.withinDeviceWindow($0, now: now, settings: settings)
+        }
+        let reading = needsPlace ? await currentPlace?() : nil
         var imported = 0
         for item in items {
-            if try await take(item) { imported += 1 }
+            if try await take(item, settings: settings, now: now, deviceReading: reading) { imported += 1 }
             if let date = item.creationDate {
                 try database.setMeta(Self.importKey, Data(String(date.timeIntervalSince1970).utf8))
             }
         }
         return (imported, items.count < limit)
+    }
+
+    /// Gives previously imported screenshots (and screen recordings, when enabled) without a place
+    /// an estimated place from the nearest photo within two hours. Runs once; Apple Photos stays
+    /// unchanged.
+    @discardableResult
+    public func locateExistingScreenshots(
+        settings: AppSettings, client: APIClient? = nil, force: Bool = false
+    ) async throws -> Int {
+        guard settings.locateScreenshots, await library.mayRead() else { return 0 }
+        if !force, try database.meta(Self.existingScreenshotsKey) != nil { return 0 }
+        struct LinkedMissing: FetchableRecord, Decodable {
+            var assetId: String
+            var localIdentifier: String
+            var takenAt: Int64
+            var backedUp: Bool
+        }
+        let missing = try await database.writer.read { db in
+            try LinkedMissing.fetchAll(
+                db,
+                sql: """
+                    SELECT a.id AS assetId, l.localIdentifier, a.takenAt, a.backedUp
+                    FROM asset a JOIN photosLink l ON l.assetId = a.id
+                    WHERE a.latitude IS NULL AND a.trashedAt IS NULL AND a.deletedAt IS NULL
+                    """)
+        }
+        let items = await library.items(withIdentifiers: missing.map(\.localIdentifier))
+        let byIdentifier = Dictionary(uniqueKeysWithValues: items.map { ($0.localIdentifier, $0) })
+        let actions = Actions(database: database)
+        var located = 0
+        for candidate in missing {
+            guard let item = byIdentifier[candidate.localIdentifier],
+                ScreenshotPlace.eligible(item, settings: settings)
+            else { continue }
+            var place: CorrectedLocation?
+            if let client, candidate.backedUp,
+                let suggestion = try? await client.locationSuggestion(for: candidate.assetId)
+            {
+                place = CorrectedLocation(
+                    latitude: suggestion.latitude, longitude: suggestion.longitude, estimated: true)
+            } else if let nearby = try ScreenshotPlace.nearestLocation(
+                in: database, near: candidate.takenAt, excluding: candidate.assetId)
+            {
+                place = CorrectedLocation(
+                    latitude: nearby.latitude, longitude: nearby.longitude, altitude: nearby.altitude, estimated: true)
+            }
+            if let place {
+                try actions.correct(candidate.assetId, AssetCorrection(location: .set(place)))
+                located += 1
+            }
+        }
+        try database.setMeta(Self.existingScreenshotsKey, Data("1".utf8))
+        return located
     }
 
     /// How far the import of the library from before got (`nil`: not started).
@@ -80,7 +149,10 @@ public actor PhotosSync {
 
     /// One item into Halden, unless it came in before: its files next to Halden's own, into the
     /// library and the upload queue, linked.
-    func take(_ item: PhotoItem) async throws -> Bool {
+    func take(
+        _ item: PhotoItem, settings: AppSettings = AppSettings(), now: Date = Date(),
+        deviceReading: PlaceReading? = nil
+    ) async throws -> Bool {
         if try isLinked(item.localIdentifier) { return false }
         let id = UUID().uuidString.lowercased()
         let folder = FileManager.default.temporaryDirectory.appendingPathComponent("photos-\(id)", isDirectory: true)
@@ -90,9 +162,11 @@ public actor PhotosSync {
         guard let main = exported.first else { return false }
         let name = "\(id).\(Self.fileExtension(main))"
         try FileManager.default.moveItem(at: main.url, to: files.original(name))
+        let estimated = try ScreenshotPlace.resolve(
+            for: item, now: now, deviceReading: deviceReading, database: database, settings: settings)
         var metadata = UploadMetadata(
             takenAt: item.creationDate.map { Int64(($0.timeIntervalSince1970 * 1000).rounded()) },
-            timeZoneOffsetMinutes: nil, timeZone: nil, location: item.location, width: item.width,
+            timeZoneOffsetMinutes: nil, timeZone: nil, location: item.location ?? estimated, width: item.width,
             height: item.height, durationMs: item.durationMs, originalFilename: main.originalFilename)
         if let date = item.creationDate {
             // Apple Photos keeps the moment, not the zone: the zone of this iPhone then.
