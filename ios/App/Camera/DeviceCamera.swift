@@ -82,16 +82,19 @@ final class DeviceCamera: CaptureBackend {
         core.run { $0.stopRunning() }
     }
 
-    func setMode(_ mode: CameraMode, options video: CaptureOptions) {
+    func setMode(_ mode: CameraMode, options video: CaptureOptions) async {
         self.mode = mode
         self.video = video
-        Task {
-            // Sound for videos and Live Photos; without the microphone they are silent.
-            let sound = mode == .video || mode == .slowMotion || (mode == .photo && video.live)
-            if sound, AVCaptureDevice.authorizationStatus(for: .audio) == .notDetermined {
-                _ = await AVCaptureDevice.requestAccess(for: .audio)
+        // Sound for videos and Live Photos; without the microphone they are silent.
+        let sound = mode == .video || mode == .slowMotion || (mode == .photo && video.live)
+        if sound, AVCaptureDevice.authorizationStatus(for: .audio) == .notDetermined {
+            _ = await AVCaptureDevice.requestAccess(for: .audio)
+        }
+        await withCheckedContinuation { (done: CheckedContinuation<Void, Never>) in
+            core.run { core in
+                core.change(mode: mode, video: video)
+                done.resume()
             }
-            core.run { $0.change(mode: mode, video: video) }
         }
     }
 
@@ -544,7 +547,8 @@ final class CaptureCore: NSObject, @unchecked Sendable {
             let shown = (switchOver.doubleValue * multiplier * 10).rounded() / 10
             if shown > 1.05, !presets.contains(where: { abs($0 - shown) < 0.15 }) { presets.append(shown) }
         }
-        let highest = min(Double(device.maxAvailableVideoZoomFactor) * multiplier, max(10, (presets.max() ?? 1) * 5))
+        let highest = Zoom.highest(
+            device: Double(device.maxAvailableVideoZoomFactor) * multiplier, cap: max(10, (presets.max() ?? 1) * 5))
         described.presets = presets.filter { $0 <= highest }.sorted()
         described.zoomRange = lowest...max(lowest, highest)
         described.zoom = Double(device.videoZoomFactor) * multiplier

@@ -53,7 +53,7 @@ struct EditView: View {
             .toolbarBackground(.visible, for: .navigationBar)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { dismiss() }
+                    Button("Cancel") { dismiss() }.accessibilityIdentifier("edit-cancel")
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Done") {

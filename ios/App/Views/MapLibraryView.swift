@@ -21,8 +21,9 @@ struct MapLibraryView: View {
                     Button("\(missing) without a place", systemImage: "mappin.slash", action: withoutPlace)
                         .font(.footnote)
                         .buttonStyle(.bordered)
+                        .controlSize(.large)
                         .background(.regularMaterial, in: .capsule)
-                        .padding(.bottom, 100)
+                        .padding(.bottom, 150)
                         .accessibilityIdentifier("map-without-place")
                 }
             }
@@ -35,6 +36,8 @@ struct MapLibraryView: View {
 
 /// The map itself (MapKit), with a group's picture and count as its pin.
 struct PhotoMap: UIViewRepresentable {
+    /// The room the library's floating switcher takes above the tab bar.
+    static let switcherHeight: CGFloat = 52
     let points: [MapClusters.Point]
     let pipeline: ImagePipeline
     let assets: (String) -> LocalAsset?
@@ -45,6 +48,9 @@ struct PhotoMap: UIViewRepresentable {
         map.delegate = context.coordinator
         map.pointOfInterestFilter = .excludingAll
         map.showsCompass = true
+        // Apple's logo and "Legal" must stay visible: above the Library/Albums/Map switcher that
+        // floats over the map's lower edge.
+        map.layoutMargins.bottom = Self.switcherHeight
         map.register(GroupPin.self, forAnnotationViewWithReuseIdentifier: GroupPin.reuse)
         return map
     }

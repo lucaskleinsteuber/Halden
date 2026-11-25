@@ -1,7 +1,9 @@
 import CoreLocation
 import Foundation
 import HaldenKit
+import ImageIO
 import Observation
+import SwiftUI
 
 /// The camera screen's logic: photo and video, self-timer, flash and torch, and what each photo
 /// or video knows about itself (time, place, direction). The camera itself is a
@@ -22,6 +24,14 @@ final class CameraModel {
     private(set) var shots = 0
     /// ISO, shutter, white balance, focus and exposure compensation set by hand.
     private(set) var manual = ManualSettings()
+    /// While the camera changes mode (or video format): the picture is blurred and still, as in
+    /// Apple's camera, so the switch doesn't flicker.
+    private(set) var switching = false
+    /// The zoom asked for, which the lens buttons show at once.
+    private var zoomShown = ZoomShown()
+    /// The photo just taken, small, for the button left of the shutter: there at once, before
+    /// the library has made its thumbnail.
+    private(set) var lastShot: CGImage?
 
     @ObservationIgnored let location = LocationTracker()
     @ObservationIgnored var settings: () -> AppSettings = { AppSettings() }
@@ -32,6 +42,7 @@ final class CameraModel {
     @ObservationIgnored private var countdownTask: Task<Void, Never>?
     @ObservationIgnored private var video: (request: VideoRequest, place: ClientLocation?)?
     @ObservationIgnored private var applied: CaptureOptions?
+    @ObservationIgnored private var switches = 0
 
     init(backend: any CaptureBackend) {
         self.backend = backend
@@ -47,6 +58,45 @@ final class CameraModel {
     }
 
     var recording: Bool { recordingSince != nil }
+
+    /// The zoom to show: the one asked for (at once), or the camera's when something else moved it.
+    var zoom: Double {
+        zoomShown.value(device: backend.state.zoom, at: ProcessInfo.processInfo.systemUptime)
+    }
+
+    /// Zoom as shown (0.5, 1, 2, …), within what the camera offers. `glide` for the lens buttons.
+    func zoom(to factor: Double, glide: Bool) {
+        let range = backend.state.zoomRange
+        let target = min(max(factor, range.lowerBound), range.upperBound)
+        zoomShown.ask(target, at: ProcessInfo.processInfo.systemUptime)
+        backend.zoom(to: target, glide: glide)
+    }
+
+    func flip() {
+        zoomShown.forget()
+        backend.flip()
+    }
+
+    /// Hands a mode or format to the camera; meanwhile the picture is blurred. It clears again
+    /// once the camera has the new one and a frame later, at the earliest when the frame has
+    /// changed its shape on the screen.
+    private func change(to mode: CameraMode, options: CaptureOptions) {
+        switches += 1
+        let mine = switches
+        switching = true
+        Task {
+            let started = ContinuousClock.now
+            await backend.setMode(mode, options: options)
+            let left = Self.switchAtLeast - (ContinuousClock.now - started)
+            try? await Task.sleep(for: max(left, .zero) + Self.firstFrame)
+            if mine == switches { switching = false }
+        }
+    }
+
+    /// How long the frame takes to change between 4:3 and 16:9 on the screen.
+    static let switchAtLeast = Duration.milliseconds(280)
+    /// About how long the camera takes to show a picture again after a change.
+    static let firstFrame = Duration.milliseconds(120)
 
     /// At app start, so the picture is there at once when the camera opens.
     func prepare() {
@@ -88,7 +138,7 @@ final class CameraModel {
         let options = CaptureOptions(settings())
         guard options != applied, !recording else { return }
         applied = options
-        backend.setMode(mode, options: options)
+        change(to: mode, options: options)
     }
 
     /// The next mode to the right (1) or left (-1) on the screen, as after a swipe.
@@ -119,7 +169,7 @@ final class CameraModel {
         self.mode = mode
         let options = CaptureOptions(settings())
         applied = options
-        backend.setMode(mode, options: options)
+        change(to: mode, options: options)
     }
 
     func setTorch(_ on: Bool) {
@@ -172,11 +222,32 @@ final class CameraModel {
                 return
             }
             problem = nil
+            let data = photo.data
+            if let small = await Task.detached(operation: { Self.small(data) }).value {
+                withAnimation(.snappy(duration: 0.25)) { lastShot = small }
+            }
             var metadata = Self.metadata(at: now, place: place)
             metadata.width = photo.width
             metadata.height = photo.height
             keepPhoto?(photo, metadata)
         }
+    }
+
+    /// The library shows the newest photo itself now.
+    func forgetLastShot() {
+        lastShot = nil
+    }
+
+    /// A photo's picture at button size (from the embedded thumbnail when there is one).
+    nonisolated static func small(_ data: Data) -> CGImage? {
+        guard let source = CGImageSourceCreateWithData(data as CFData, nil) else { return nil }
+        let options: [CFString: Any] = [
+            kCGImageSourceCreateThumbnailFromImageIfAbsent: true,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceThumbnailMaxPixelSize: 180,
+            kCGImageSourceShouldCacheImmediately: true,
+        ]
+        return CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary)
     }
 
     private func startRecording() {

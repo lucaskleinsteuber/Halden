@@ -107,10 +107,12 @@ protocol CaptureBackend: AnyObject {
     func prepare(mode: CameraMode, options: CaptureOptions)
     func start()
     func stop()
-    func setMode(_ mode: CameraMode, options: CaptureOptions)
+    /// Returns once the camera works in the new mode.
+    func setMode(_ mode: CameraMode, options: CaptureOptions) async
     func flip()
     /// Zoom as shown (0.5, 1, 2, …). `glide` for the lens buttons (about 0.3 s for any
-    /// distance); otherwise it follows a finger closely. `state.zoom` follows the camera.
+    /// distance); otherwise it follows a finger closely. `state.zoom` follows the camera (the
+    /// screen shows `CameraModel.zoom`, the zoom asked for).
     func zoom(to factor: Double, glide: Bool)
     /// A point in `previewView`. `lock` keeps focus and exposure until the next tap.
     func focus(at point: CGPoint, lock: Bool)

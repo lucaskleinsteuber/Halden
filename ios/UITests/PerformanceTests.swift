@@ -42,7 +42,7 @@ final class PerformanceTests: XCTestCase {
         let app = XCUIApplication()
         app.launchArguments = ["-ui-testing-signed-in", "-ui-testing-library", "50000"]
         app.launch()
-        let tabs = app.tabBars.firstMatch
+        let tabs = Tabs(app)
         XCTAssertTrue(tabs.waitForExistence(timeout: 60))
         tabs.buttons["Photos"].tap()
         let grid = app.collectionViews["library-grid"]
@@ -64,7 +64,7 @@ final class PerformanceTests: XCTestCase {
         let app = XCUIApplication()
         app.launchArguments = ["-ui-testing-signed-in", "-ui-testing-library", "50000"]
         app.launch()
-        let tabs = app.tabBars.firstMatch
+        let tabs = Tabs(app)
         XCTAssertTrue(tabs.waitForExistence(timeout: 60))
         tabs.buttons["Photos"].tap()
         app.segmentedControls["photos-section"].buttons["Map"].tap()

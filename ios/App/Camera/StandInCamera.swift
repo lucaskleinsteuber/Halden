@@ -26,7 +26,9 @@ final class StandInCamera: CaptureBackend {
     func start() {}
     func stop() {}
 
-    func setMode(_ mode: CameraMode, options video: CaptureOptions) {
+    /// Takes about as long as the real camera to change its format.
+    func setMode(_ mode: CameraMode, options video: CaptureOptions) async {
+        try? await Task.sleep(for: .milliseconds(250))
         self.mode = mode
         state.canLive = mode == .photo
         state.videoFormat =

@@ -6,6 +6,40 @@ The server and the iPhone app have version numbers of their own (semantic versio
 from 0.1.0 on 25.11.2026; a heading names the versions released that day. Everything before is
 part of the first versions.
 
+## 25.11.2026 – App 0.1.0
+
+### Added
+
+- Layout tests (`ios/UITests/LayoutTests.swift`, `ios/layout-tests.sh`): every screen is checked
+  for something cut off by the edge of the screen, controls on top of each other, buttons
+  smaller than 44×44 points and buttons or texts that can't be seen (too little contrast, such
+  as white on white), on the smallest and the biggest iPhone and with big text, keeping a
+  screenshot of each screen.
+
+### Changed
+
+- The camera uses the whole screen, without the tab bar, like Apple's camera. The last photo
+  opens full screen with "All Photos" to the library, which has the tab bar back to the camera
+  and the settings.
+- Zoom: the lens buttons show the zoom asked for at once (a tap on "2" says "2×" while the
+  picture glides) and one highlight glides to the chosen lens; the highest zoom is a round
+  number. The lens buttons lie on the picture's lower edge again.
+- Changing between photo and video blurs the picture for a moment while the camera changes its
+  format, and the frame glides into its new shape.
+- Library, Albums and Map are switched with a switcher floating above the tab bar, as in
+  Apple's Photos.
+
+### Fixed
+
+- Zoom counted up on the old lens button and then jumped, and ended at 9.9 instead of 10.
+- The last photo beside the shutter stayed black until the library had its thumbnail; it now
+  shows the photo just taken at once.
+- In the library, the Library/Albums/Map switcher was cut off at the left edge and lay under
+  "Select".
+- In slow motion, the video format on top lay over the self-timer button.
+- The full-screen photo opened from the camera had invisible (white on white) buttons.
+- Small buttons in the camera (modes, manual values, video format) are now big enough to hit.
+
 ## 25.11.2026 – Server 0.1.0
 
 ### Added

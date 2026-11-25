@@ -49,6 +49,8 @@ final class AppModel {
     private(set) var unconfirmedDevices = 0
     /// Goes up when something (a control, the lock-screen camera) asks for the camera.
     private(set) var cameraRequests = 0
+    /// Goes up when the library should come to the front (from the camera, which has no tab bar).
+    private(set) var photosRequests = 0
 
     let database: HaldenDatabase
     let files: FileLocations
@@ -827,6 +829,10 @@ final class AppModel {
     /// Shows the camera tab.
     func showCamera() {
         cameraRequests += 1
+    }
+
+    func showPhotos() {
+        photosRequests += 1
     }
 
     private func backgroundUploadEnded() {

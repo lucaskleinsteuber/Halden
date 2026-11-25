@@ -36,17 +36,26 @@ the design comes after that. What works today is described below.
   Photos and videos come out upright however the phone is held. The camera is set up when the
   app starts, all on a queue of its own, so its picture is there at once and the screen never
   waits for it.
-- **Camera screen**: laid out like Apple's camera. On top flash (or the light), self-timer,
-  grid and Live Photo, for videos the format in the middle. The picture as it will be taken: 4:3
-  under the top bar for photos, 16:9 for videos. Below the zoom buttons, the modes (also changed
-  by swiping over the picture) and the shutter between the last photo (opens it) and the button
-  that turns the camera around. Nothing moves when the mode changes.
-- **Zoom** (`Zoom`): in doublings, as people know it. A lens button glides there in 0.3 s
-  however far it is (`ramp(toVideoZoomFactor:withRate:)`), pinching and the dial follow the
-  finger with a quick ramp, so steps between touches don't show. The number shown is the
-  camera's real zoom as it changes (observed on the device), never the target. Dragging the
-  zoom buttons sideways turns them into a dial with a mark at every lens; a light tick when a
-  lens is passed.
+- **Camera screen**: laid out like Apple's camera, on the whole screen without the tab bar. On
+  top flash (or the light), self-timer, grid and Live Photo, for videos the format in the middle
+  (in the room between the buttons). The picture as it will be taken: 4:3 under the top bar for
+  photos, 16:9 for videos. The modes start where the 4:3 picture ends, so the zoom buttons lie on
+  its lower edge; below them the modes (also changed by swiping over the picture) and the
+  shutter between the last photo and the button that turns the camera around. Nothing moves
+  when the mode changes: the picture blurs for a moment (`SwitchBlur`) while the camera changes
+  its format and the frame glides into its new shape. Every control is at least 44×44 points.
+- **Last photo**: the photo just taken shows at once (from the capture itself), otherwise the
+  newest one in the library (its thumbnail, or its own file when the thumbnail isn't made yet).
+  A tap opens it full screen; "All Photos" leads on to the library, which has the tab bar back
+  to the camera and the settings. With no photos yet it leads to the library at once.
+- **Zoom** (`Zoom`, `ZoomShown`): in doublings, as people know it. A lens button glides there in
+  0.3 s however far it is (`ramp(toVideoZoomFactor:withRate:)`), pinching and the dial follow
+  the finger with a quick ramp, so steps between touches don't show. The buttons show the zoom
+  asked for at once (a tap on "2" says "2×" while the picture glides), and one highlight glides
+  to the chosen lens; the camera's own zoom shows only when something else changed it. The
+  highest zoom is a round number (`Zoom.highest`: a camera that stops at 9.94 offers 10).
+  Dragging the zoom buttons sideways turns them into a dial with a mark at every lens; a light
+  tick when a lens is passed.
 - **Live Photos** (on by default, like Apple's camera; the button on top or Settings ›
   Camera): the photo and 1.5 s of video with sound before and after, taken together by
   `AVCapturePhotoOutput` with the same content identifier, the video with place and time. The
@@ -86,6 +95,9 @@ the design comes after that. What works today is described below.
   main thread), then into the library and the upload queue. The shutter never waits.
 - **Simulator and UI tests**: the simulator has no camera; there, and in the UI tests, a
   stand-in camera behaves like the real one and delivers made-up photos and short videos.
+- **Library, Albums, Map**: the Photos tab switches between them with a switcher that floats
+  above the tab bar, as in Apple's Photos; "Select" and the menu (without place, trash,
+  uploads) are top right.
 - **Albums** (Photos › Albums): made, renamed, sorted, given a cover and deleted (the photos
   stay); photos go in from the library ("Add to album" for the chosen ones or one full screen)
   and come out in the album. All of it shows at once and reaches the server when it can (an
@@ -239,6 +251,17 @@ reaches it on 127.0.0.1) and stops it afterwards; extra arguments go to `xcodebu
 `-only-testing:HaldenUITests/HaldenUITests/testTheGridScrollsThroughFiftyThousandPhotos`.
 Started with `-ui-testing-library 50000`, the app fills its database with that many photos
 instead of connecting.
+
+The layout of every screen is checked by `UITests/LayoutTests.swift`: nothing cut off by the
+edge of the screen, no controls on top of each other, our buttons at least 44×44 points, and no
+button or text that can't be seen (too little contrast on the screenshot, such as white on
+white). It runs with the other UI tests, and on its own, without a server, on the smallest and
+the biggest iPhone, each also with big text, keeping a screenshot of every screen in
+`Local/screens/<date>/`:
+
+```sh
+ios/layout-tests.sh
+```
 
 Measurements (launch, the camera's start, memory and processor while scrolling through 50,000
 photos) run only on purpose:

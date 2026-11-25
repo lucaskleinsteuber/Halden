@@ -24,6 +24,7 @@ struct RootView: View {
             }
         }
         .onChange(of: model.cameraRequests) { screen = .camera }
+        .onChange(of: model.photosRequests) { screen = .photos }
         // The camera control, or "Open Halden" in the lock-screen camera.
         .onReceive(NotificationCenter.default.publisher(for: .haldenOpenCamera)) { _ in model.showCamera() }
         .onContinueUserActivity(NSUserActivityTypeLockedCameraCapture) { _ in model.showCamera() }

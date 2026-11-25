@@ -23,7 +23,7 @@ final class HaldenUITests: XCTestCase {
         let app = XCUIApplication()
         app.launchArguments = ["-ui-testing-signed-in"]
         app.launch()
-        let tabs = app.tabBars.firstMatch
+        let tabs = Tabs(app)
         XCTAssertTrue(tabs.waitForExistence(timeout: 10))
         tabs.buttons["Photos"].tap()
         XCTAssertTrue(app.navigationBars["Library"].waitForExistence(timeout: 5))
@@ -68,6 +68,16 @@ final class HaldenUITests: XCTestCase {
         XCTAssertEqual(live.label, "Live Photo on")
         XCTAssertEqual(app.buttons["zoom-1"].value as? String, "1×")
         two.tap()
+        // The button shows the zoom asked for at once; the old one doesn't count up on the way.
+        XCTAssertEqual(two.value as? String, "2×")
+        XCTAssertEqual(app.buttons["zoom-1"].value as? String, "")
+
+        // Two fingers all the way: the end is a round 10×.
+        let picture = app.descendants(matching: .any)["camera-preview"].firstMatch
+        picture.pinch(withScale: 30, velocity: 10)
+        expectation(for: NSPredicate(format: "value == '10×'"), evaluatedWith: two)
+        waitForExpectations(timeout: 5)
+        two.tap()
         expectation(for: NSPredicate(format: "value == '2×'"), evaluatedWith: two)
         waitForExpectations(timeout: 5)
 
@@ -99,7 +109,7 @@ final class HaldenUITests: XCTestCase {
         app.buttons["manual"].tap()
         XCTAssertTrue(iso.waitForNonExistence(timeout: 5))
 
-        let preview = app.descendants(matching: .any)["camera-preview"]
+        let preview = app.descendants(matching: .any)["camera-preview"].firstMatch
         preview.swipeRight()
         XCTAssertTrue(app.buttons["Record a video"].waitForExistence(timeout: 5), "swiped to video")
         XCTAssertTrue(app.buttons["mode-video"].isSelected)
@@ -118,7 +128,7 @@ final class HaldenUITests: XCTestCase {
         let app = XCUIApplication()
         app.launchArguments = ["-ui-testing-signed-in", "-ui-testing-library", "50000"]
         app.launch()
-        let tabs = app.tabBars.firstMatch
+        let tabs = Tabs(app)
         XCTAssertTrue(tabs.waitForExistence(timeout: 60))
         tabs.buttons["Photos"].tap()
         let grid = app.collectionViews["library-grid"]
@@ -156,7 +166,7 @@ final class HaldenUITests: XCTestCase {
         let app = XCUIApplication()
         app.launchArguments = ["-ui-testing-signed-in", "-ui-testing-library", "50000"]
         app.launch()
-        let tabs = app.tabBars.firstMatch
+        let tabs = Tabs(app)
         XCTAssertTrue(tabs.waitForExistence(timeout: 60))
         tabs.buttons["Photos"].tap()
         app.segmentedControls["photos-section"].buttons["Map"].tap()
@@ -194,7 +204,7 @@ final class HaldenUITests: XCTestCase {
         app.launchArguments = ["-ui-testing", "-ui-testing-sign-in"]
         app.launchEnvironment = ["HALDEN_TEST_SERVER": server, "HALDEN_TEST_PASSWORD": password]
         app.launch()
-        let tabs = app.tabBars.firstMatch
+        let tabs = Tabs(app)
         XCTAssertTrue(tabs.waitForExistence(timeout: 60), "signed in")
         tabs.buttons["Camera"].tap()
         let shutter = app.buttons["shutter"]
@@ -260,7 +270,7 @@ final class HaldenUITests: XCTestCase {
         app.launchArguments = ["-ui-testing", "-ui-testing-sign-in"]
         app.launchEnvironment = ["HALDEN_TEST_SERVER": server, "HALDEN_TEST_PASSWORD": password]
         app.launch()
-        let tabs = app.tabBars.firstMatch
+        let tabs = Tabs(app)
         XCTAssertTrue(tabs.waitForExistence(timeout: 60), "signed in")
         tabs.buttons["Camera"].tap()
         let shutter = app.buttons["shutter"]
@@ -317,7 +327,7 @@ final class HaldenUITests: XCTestCase {
         app.launchArguments = ["-ui-testing", "-ui-testing-sign-in"]
         app.launchEnvironment = ["HALDEN_TEST_SERVER": server, "HALDEN_TEST_PASSWORD": password]
         app.launch()
-        let tabs = app.tabBars.firstMatch
+        let tabs = Tabs(app)
         XCTAssertTrue(tabs.waitForExistence(timeout: 60), "signed in")
         tabs.buttons["Camera"].tap()
         XCTAssertTrue(app.buttons["shutter"].waitForExistence(timeout: 10))
@@ -384,7 +394,7 @@ final class HaldenUITests: XCTestCase {
         app.launchArguments = ["-ui-testing", "-ui-testing-sign-in"]
         app.launchEnvironment = ["HALDEN_TEST_SERVER": server, "HALDEN_TEST_PASSWORD": password]
         app.launch()
-        let tabs = app.tabBars.firstMatch
+        let tabs = Tabs(app)
         XCTAssertTrue(tabs.waitForExistence(timeout: 60), "signed in")
         tabs.buttons["Camera"].tap()
         XCTAssertTrue(app.buttons["shutter"].waitForExistence(timeout: 10))
@@ -431,7 +441,7 @@ final class HaldenUITests: XCTestCase {
         app.launchArguments = ["-ui-testing", "-ui-testing-sign-in"]
         app.launchEnvironment = ["HALDEN_TEST_SERVER": server, "HALDEN_TEST_PASSWORD": password]
         app.launch()
-        let tabs = app.tabBars.firstMatch
+        let tabs = Tabs(app)
         XCTAssertTrue(tabs.waitForExistence(timeout: 60), "signed in")
         tabs.buttons["Camera"].tap()
         XCTAssertTrue(app.buttons["shutter"].waitForExistence(timeout: 10))
@@ -455,7 +465,10 @@ final class HaldenUITests: XCTestCase {
         app.navigationBars.buttons.firstMatch.tap()
 
         tabs.buttons["Settings"].tap()
-        app.buttons["shared-links"].tap()
+        // Further down on a small iPhone.
+        let sharedLinks = app.buttons["shared-links"]
+        for _ in 0..<6 where !sharedLinks.isHittable { app.swipeUp() }
+        sharedLinks.tap()
         let link = app.descendants(matching: .any).matching(identifier: "shared-link").firstMatch
         XCTAssertTrue(link.waitForExistence(timeout: 10), "listed")
         link.swipeLeft()
@@ -476,7 +489,7 @@ final class HaldenUITests: XCTestCase {
         app.launchArguments = ["-ui-testing", "-ui-testing-sign-in"]
         app.launchEnvironment = ["HALDEN_TEST_SERVER": server, "HALDEN_TEST_PASSWORD": password]
         app.launch()
-        let tabs = app.tabBars.firstMatch
+        let tabs = Tabs(app)
         XCTAssertTrue(tabs.waitForExistence(timeout: 60), "signed in")
         tabs.buttons["Camera"].tap()
         XCTAssertTrue(app.buttons["shutter"].waitForExistence(timeout: 10))
@@ -523,7 +536,7 @@ final class HaldenUITests: XCTestCase {
         app.launchArguments = ["-ui-testing", "-ui-testing-sign-in"]
         app.launchEnvironment = ["HALDEN_TEST_SERVER": server, "HALDEN_TEST_PASSWORD": password]
         app.launch()
-        let tabs = app.tabBars.firstMatch
+        let tabs = Tabs(app)
         XCTAssertTrue(tabs.waitForExistence(timeout: 60), "signed in")
         tabs.buttons["Camera"].tap()
         XCTAssertTrue(app.buttons["shutter"].waitForExistence(timeout: 10))
@@ -582,7 +595,7 @@ final class HaldenUITests: XCTestCase {
         app.launchArguments = ["-ui-testing", "-ui-testing-sign-in"]
         app.launchEnvironment = ["HALDEN_TEST_SERVER": server, "HALDEN_TEST_PASSWORD": password]
         app.launch()
-        let tabs = app.tabBars.firstMatch
+        let tabs = Tabs(app)
         XCTAssertTrue(tabs.waitForExistence(timeout: 60), "signed in")
         tabs.buttons["Settings"].tap()
         app.buttons["photos-settings"].tap()
@@ -619,7 +632,7 @@ final class HaldenUITests: XCTestCase {
         app.launchArguments = ["-ui-testing", "-ui-testing-sign-in"]
         app.launchEnvironment = ["HALDEN_TEST_SERVER": server, "HALDEN_TEST_PASSWORD": password]
         app.launch()
-        let tabs = app.tabBars.firstMatch
+        let tabs = Tabs(app)
         XCTAssertTrue(tabs.waitForExistence(timeout: 60), "signed in")
         tabs.buttons["Settings"].tap()
         let back = { app.navigationBars.buttons.firstMatch.tap() }
@@ -748,7 +761,7 @@ final class HaldenUITests: XCTestCase {
         app.secureTextFields["password"].tap()
         app.secureTextFields["password"].typeText(password)
         app.buttons["sign-in"].tap()
-        let tabs = app.tabBars.firstMatch
+        let tabs = Tabs(app)
         XCTAssertTrue(tabs.waitForExistence(timeout: 20), "signed in")
         tabs.buttons["Settings"].tap()
         let name = app.descendants(matching: .any)

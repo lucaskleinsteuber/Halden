@@ -25,6 +25,8 @@ struct CameraScreen<Gallery: View>: View {
     @State private var manualValue: ManualPanel.Value?
     /// The focus is being turned by hand: the picture bigger, to see what is sharp.
     @State private var focusing = false
+    /// The highlight that glides between the lens buttons.
+    @Namespace private var lens
 
     private var state: CameraState { camera.backend.state }
     static var topBarHeight: CGFloat { 44 }
@@ -72,8 +74,8 @@ struct CameraScreen<Gallery: View>: View {
                         camera.backend.focus(at: point, lock: true)
                     },
                     pinch: { scale, began in
-                        if began { pinchStart = state.zoom }
-                        camera.backend.zoom(
+                        if began { pinchStart = camera.zoom }
+                        camera.zoom(
                             to: Zoom.pinched(from: pinchStart, scale: scale, in: state.zoomRange), glide: false)
                     },
                     swipe: { towardsLeft in camera.switchMode(by: towardsLeft ? 1 : -1) }
@@ -100,6 +102,8 @@ struct CameraScreen<Gallery: View>: View {
                             .allowsHitTesting(false)
                     }
                 }
+                // While the mode changes: blurred and still, as in Apple's camera.
+                .overlay { SwitchBlur(on: camera.switching).allowsHitTesting(false) }
                 .scaleEffect(focusing ? 2.5 : 1)
                 .clipped()
                 .animation(.easeOut(duration: 0.2), value: focusing)
@@ -116,9 +120,24 @@ struct CameraScreen<Gallery: View>: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: photo ? .top : .center)
         .padding(.top, photo ? Self.topBarHeight : 0)
         .ignoresSafeArea(edges: photo ? [] : .all)
+        // The frame glides into its new shape under the blur.
+        .animation(.snappy(duration: 0.28), value: photo)
     }
 
+    /// Laid out like Apple's camera: the modes start where the 4:3 picture ends, so the lens
+    /// buttons lie on its lower edge; what room is left goes below the shutter.
     private var controls: some View {
+        GeometryReader { geometry in
+            let below = geometry.size.height - Self.topBarHeight - geometry.size.width * 4 / 3
+            let rest = max(below - Self.modeHeight - Self.shutterHeight, 0)
+            controlStack.padding(.bottom, rest)
+        }
+    }
+
+    static var modeHeight: CGFloat { 44 }
+    static var shutterHeight: CGFloat { 92 }
+
+    private var controlStack: some View {
         VStack(spacing: 0) {
             topBar
             Spacer(minLength: 0)
@@ -135,9 +154,9 @@ struct CameraScreen<Gallery: View>: View {
                     .padding(.bottom, 4)
                     .transition(.opacity)
             }
-            zoomControl.frame(height: 64)
-            modeStrip.frame(height: 34)
-            shutterRow.frame(height: 92)
+            zoomControl.frame(height: 56)
+            modeStrip.frame(height: Self.modeHeight)
+            shutterRow.frame(height: Self.shutterHeight)
         }
         .foregroundStyle(.white)
         .tint(.white)
@@ -149,14 +168,16 @@ struct CameraScreen<Gallery: View>: View {
         HStack(spacing: 0) {
             lightButton.frame(width: 44, height: 44)
             manualButton.frame(width: 44, height: 44)
-            Spacer(minLength: 0)
-            HStack(spacing: 6) {
+            // In the middle, with the room left between the buttons (never on top of them).
+            Color.clear
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .overlay { topMiddle }
+            HStack(spacing: 2) {
                 timerButton.frame(height: 44)
                 gridButton.frame(width: 44, height: 44)
                 liveButton.frame(width: 44, height: 44)
             }
         }
-        .overlay { topMiddle }
         .font(.title3)
         .frame(height: Self.topBarHeight)
         .padding(.horizontal, 12)
@@ -298,9 +319,13 @@ struct CameraScreen<Gallery: View>: View {
             } label: {
                 Text(state.videoFormat ?? "Video")
                     .font(.caption.bold())
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
                     .padding(.horizontal, 8)
                     .padding(.vertical, 4)
                     .background(.black.opacity(0.4), in: .capsule)
+                    .frame(minWidth: 44, minHeight: 44)
+                    .contentShape(.rect)
             }
             .accessibilityIdentifier("video-format")
         }
@@ -328,35 +353,47 @@ struct CameraScreen<Gallery: View>: View {
 
     /// The lens buttons; dragged sideways they become a dial, like in Apple's camera.
     private var zoomControl: some View {
-        let active = Zoom.activePreset(for: state.zoom, presets: state.presets)
+        let zoom = camera.zoom
+        let active = Zoom.activePreset(for: zoom, presets: state.presets)
         return ZStack {
             if dialShown {
-                ZoomDial(zoom: state.zoom, range: state.zoomRange, presets: state.presets)
+                ZoomDial(zoom: zoom, range: state.zoomRange, presets: state.presets)
                     .transition(.opacity.combined(with: .scale(scale: 0.9, anchor: .bottom)))
             } else {
-                HStack(spacing: 6) {
+                HStack(spacing: 0) {
                     ForEach(state.presets, id: \.self) { preset in
                         let isActive = active == preset
                         Button {
-                            camera.backend.zoom(to: preset, glide: true)
+                            camera.zoom(to: preset, glide: true)
                         } label: {
-                            Text(isActive ? Zoom.text(state.zoom) + "×" : Zoom.text(preset))
-                                .font(.system(size: 12, weight: .bold).monospacedDigit())
-                                .lineLimit(1)
-                                .minimumScaleFactor(0.7)
-                                .foregroundStyle(isActive ? .yellow : .white)
-                                .frame(width: 38, height: 38)
-                                .background(.black.opacity(0.5), in: .circle)
-                                .scaleEffect(isActive ? 1 : 0.78)
+                            ZStack {
+                                // One highlight that glides to the chosen lens.
+                                if isActive {
+                                    Circle().fill(.black.opacity(0.55))
+                                        .matchedGeometryEffect(id: "lens", in: lens)
+                                        .frame(width: 38, height: 38)
+                                } else {
+                                    Circle().fill(.black.opacity(0.3)).frame(width: 28, height: 28)
+                                }
+                                Text(isActive ? Zoom.text(zoom) + "×" : Zoom.text(preset))
+                                    .font(.system(size: isActive ? 12 : 10, weight: .bold).monospacedDigit())
+                                    .lineLimit(1)
+                                    .minimumScaleFactor(0.7)
+                                    .foregroundStyle(isActive ? .yellow : .white)
+                                    .frame(width: 36)
+                                    .contentTransition(.numericText(value: isActive ? zoom : preset))
+                            }
+                            .frame(width: 44, height: 44)
+                            .contentShape(.circle)
                         }
                         .accessibilityLabel("Zoom \(Zoom.text(preset))")
-                        .accessibilityValue(isActive ? Zoom.text(state.zoom) + "×" : "")
+                        .accessibilityValue(isActive ? Zoom.text(zoom) + "×" : "")
                         .accessibilityIdentifier("zoom-\(Zoom.text(preset))")
                     }
                 }
-                .padding(4)
+                .padding(.horizontal, 2)
                 .background(.black.opacity(0.25), in: .capsule)
-                .animation(.snappy(duration: 0.25), value: active)
+                .animation(.snappy(duration: 0.28), value: active)
                 .transition(.opacity)
             }
         }
@@ -377,12 +414,12 @@ struct CameraScreen<Gallery: View>: View {
         DragGesture(minimumDistance: 10)
             .onChanged { drag in
                 if dialStart == nil {
-                    dialStart = state.zoom
+                    dialStart = camera.zoom
                     dialShown = true
                 }
                 let zoom = Zoom.dialed(
-                    from: dialStart ?? state.zoom, points: -drag.translation.width, in: state.zoomRange)
-                camera.backend.zoom(to: zoom, glide: false)
+                    from: dialStart ?? camera.zoom, points: -drag.translation.width, in: state.zoomRange)
+                camera.zoom(to: zoom, glide: false)
             }
             .onEnded { _ in
                 dialStart = nil
@@ -406,7 +443,8 @@ struct CameraScreen<Gallery: View>: View {
                     Text(mode.title.uppercased())
                         .font(.footnote.weight(.semibold))
                         .foregroundStyle(mode == camera.mode ? .yellow : .white)
-                        .frame(width: width, height: 34)
+                        .frame(width: width, height: 44)
+                        .contentShape(.rect)
                 }
                 .disabled(camera.recording)
                 .accessibilityAddTraits(mode == camera.mode ? .isSelected : [])
@@ -428,7 +466,7 @@ struct CameraScreen<Gallery: View>: View {
             shutterButton
             Spacer()
             Button {
-                camera.backend.flip()
+                camera.flip()
             } label: {
                 Image(systemName: "arrow.triangle.2.circlepath")
                     .font(.title3.weight(.semibold))
@@ -586,17 +624,22 @@ struct CameraPreviewHost: UIViewRepresentable {
         preview.autoresizingMask = [.flexibleWidth, .flexibleHeight]
         host.addSubview(preview)
         let coordinator = context.coordinator
-        host.addGestureRecognizer(
-            UITapGestureRecognizer(target: coordinator, action: #selector(Coordinator.tapped(_:))))
+        coordinator.host = host
+        var recognizers: [UIGestureRecognizer] = [
+            UITapGestureRecognizer(target: coordinator, action: #selector(Coordinator.tapped(_:))),
+            UIPinchGestureRecognizer(target: coordinator, action: #selector(Coordinator.pinched(_:))),
+        ]
         let press = UILongPressGestureRecognizer(target: coordinator, action: #selector(Coordinator.held(_:)))
         press.minimumPressDuration = 0.6
-        host.addGestureRecognizer(press)
-        host.addGestureRecognizer(
-            UIPinchGestureRecognizer(target: coordinator, action: #selector(Coordinator.pinched(_:))))
+        recognizers.append(press)
         for direction in [UISwipeGestureRecognizer.Direction.left, .right] {
             let swipe = UISwipeGestureRecognizer(target: coordinator, action: #selector(Coordinator.swiped(_:)))
             swipe.direction = direction
-            host.addGestureRecognizer(swipe)
+            recognizers.append(swipe)
+        }
+        for recognizer in recognizers {
+            recognizer.delegate = coordinator
+            host.addGestureRecognizer(recognizer)
         }
         return host
     }
@@ -612,8 +655,16 @@ struct CameraPreviewHost: UIViewRepresentable {
     func makeCoordinator() -> Coordinator { Coordinator(parent: self) }
 
     @MainActor
-    final class Coordinator: NSObject {
+    final class Coordinator: NSObject, UIGestureRecognizerDelegate {
         var parent: CameraPreviewHost
+        weak var host: UIView?
+
+        /// Only touches on the picture itself: a drag on a slider or the zoom buttons lying over
+        /// the picture is theirs, not a swipe to the next mode.
+        func gestureRecognizer(_ recognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
+            guard let host, let view = touch.view else { return true }
+            return view === host || view.isDescendant(of: host)
+        }
 
         init(parent: CameraPreviewHost) {
             self.parent = parent
@@ -637,6 +688,28 @@ struct CameraPreviewHost: UIViewRepresentable {
             case .changed: parent.pinch(Double(gesture.scale), false)
             default: break
             }
+        }
+    }
+}
+
+/// The blur over the picture while the camera changes mode, as in Apple's camera: fades in
+/// quickly, out a little slower.
+struct SwitchBlur: UIViewRepresentable {
+    let on: Bool
+
+    func makeUIView(context: Context) -> UIVisualEffectView {
+        let view = UIVisualEffectView(effect: nil)
+        // Only to look at: touches go on to the picture and the controls.
+        view.isUserInteractionEnabled = false
+        return view
+    }
+
+    func updateUIView(_ view: UIVisualEffectView, context: Context) {
+        let blurred = view.effect != nil
+        guard blurred != on else { return }
+        let effect: UIVisualEffect? = on ? UIBlurEffect(style: .systemUltraThinMaterialDark) : nil
+        UIView.animate(withDuration: on ? 0.12 : 0.3, delay: 0, options: [.beginFromCurrentState]) {
+            view.effect = effect
         }
     }
 }

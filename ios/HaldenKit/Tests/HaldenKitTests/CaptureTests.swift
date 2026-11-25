@@ -240,4 +240,29 @@ import UniformTypeIdentifiers
         #expect(Zoom.activePreset(for: 0.99999, presets: [0.5, 1, 2]) == 1)
         #expect(Zoom.text(0.5) == "0.5" && Zoom.text(1) == "1" && Zoom.text(2.44) == "2.4" && Zoom.text(9.96) == "10")
     }
+
+    /// The screen ends on a round number: 10, not 9.9.
+    @Test func theHighestZoomIsARoundNumber() {
+        #expect(Zoom.highest(device: 9.94, cap: 10) == 10)
+        #expect(Zoom.highest(device: 61.875, cap: 10) == 10)
+        #expect(Zoom.highest(device: 6.6, cap: 10) == 6)
+        #expect(Zoom.highest(device: 1.87, cap: 10) == 1.8)
+        #expect(Zoom.highest(device: 0.8, cap: 10) == 1)
+        #expect(Zoom.highest(device: 0, cap: 10) == 10)
+    }
+
+    /// A tap on "2" shows "2×" at once; the camera's own value only when something else moved it.
+    @Test func theButtonsShowTheZoomAskedFor() {
+        var shown = ZoomShown()
+        #expect(shown.value(device: 1, at: 0) == 1, "nothing asked: the camera's")
+        shown.ask(2, at: 10)
+        #expect(shown.value(device: 1.1, at: 10.05) == 2, "on its way: the goal")
+        #expect(shown.value(device: 1.99, at: 10.3) == 2)
+        #expect(shown.value(device: 2, at: 60) == 2, "there: still the goal")
+        shown.ask(10, at: 70)
+        #expect(shown.value(device: 9.94, at: 90) == 10, "a hair short of the limit counts as there")
+        #expect(shown.value(device: 3, at: 90) == 3, "moved by something else later: the camera's")
+        shown.forget()
+        #expect(shown.value(device: 1, at: 90.1) == 1)
+    }
 }

@@ -47,14 +47,18 @@ struct PhotosView: View {
             }
             .navigationTitle(section.rawValue)
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .principal) {
+            // Library, Albums, Map: floating above the tab bar, as in Apple's Photos (in the
+            // title bar it had no room beside "Select" on a small iPhone).
+            .safeAreaInset(edge: .bottom) {
+                if selection == nil {
                     Picker("Show", selection: $section) {
                         ForEach(Section.allCases, id: \.self) { Text($0.rawValue).tag($0) }
                     }
                     .pickerStyle(.segmented)
-                    .frame(width: 260)
-                    .disabled(selection != nil)
+                    .fixedSize()
+                    .padding(4)
+                    .glassEffect(.regular, in: .capsule)
+                    .padding(.bottom, 6)
                     .accessibilityIdentifier("photos-section")
                 }
             }

@@ -19,6 +19,7 @@
 		3AAF8055F9AD167AAA48A7AB /* TimeLapseRecorder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 627A73F43AA825EA877229B8 /* TimeLapseRecorder.swift */; };
 		3DAEFCB4BCCF0F1420801D9D /* PhotoView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CCDEB459ACF35A5382B17B06 /* PhotoView.swift */; };
 		41B53AF02D73AB8EE6107451 /* HaldenWidgets.swift in Sources */ = {isa = PBXBuildFile; fileRef = C021AAFC98EA6F297083D1E9 /* HaldenWidgets.swift */; };
+		423C29A696E7F844F445ADA2 /* LayoutTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A956D2E7B37916DA28E53461 /* LayoutTests.swift */; };
 		442C9FD29309011799EB92F9 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 80A08A19CFB7DE203B87EE2F /* SettingsView.swift */; };
 		49FC6542BD2AE2DE9BB10B29 /* HaldenUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 330BB49007FE4A8212AE2A53 /* HaldenUITests.swift */; };
 		51C75A4A2FFC3A6FD5E5C868 /* SharedLinksView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 37372CD04EF8CBD01FB101B4 /* SharedLinksView.swift */; };
@@ -47,6 +48,7 @@
 		B74A92ED5F56E522A006E68D /* MapLibraryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CF10462761DAD01DC9A3FAFA /* MapLibraryView.swift */; };
 		C5BEB796768D84CB9050598F /* Viewer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B4EC6EBA149179462421878 /* Viewer.swift */; };
 		C6F2BAB2216CDFB906390167 /* HaldenApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5C56DCD1A8AC3F879F869CCE /* HaldenApp.swift */; };
+		C87619A9E2728B46FBADC85E /* Tabs.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0EBFF35F8FF61BA023B3B43B /* Tabs.swift */; };
 		D02EC56937064A49FA03124A /* AccountViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = C9042D37089100C0A5DBF4C6 /* AccountViews.swift */; };
 		D190BA231FC90D7AF3D76836 /* UploadActivity.swift in Sources */ = {isa = PBXBuildFile; fileRef = 62E1A8A22DAC6A515A2252D0 /* UploadActivity.swift */; };
 		D5399A90556FBEC26C5A5648 /* TrashView.swift in Sources */ = {isa = PBXBuildFile; fileRef = EC66D3547031D67063F9441E /* TrashView.swift */; };
@@ -113,6 +115,7 @@
 
 /* Begin PBXFileReference section */
 		0E09071DF9BF3412A74CE12D /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+		0EBFF35F8FF61BA023B3B43B /* Tabs.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Tabs.swift; sourceTree = "<group>"; };
 		0F17118A2396C5FD041B1729 /* NetworkWatcher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NetworkWatcher.swift; sourceTree = "<group>"; };
 		11DCCBE9E6F18A02FCC7FE6E /* PerformanceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PerformanceTests.swift; sourceTree = "<group>"; };
 		167446EF95B9BA95A0B76FA7 /* PhotosWatcher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotosWatcher.swift; sourceTree = "<group>"; };
@@ -143,6 +146,7 @@
 		8B87BE49FB107498769D1FDA /* Base.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Base.xcconfig; sourceTree = "<group>"; };
 		8C8F6CBCE5F738CE28E84C59 /* UITestWorld.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UITestWorld.swift; sourceTree = "<group>"; };
 		9B4EC6EBA149179462421878 /* Viewer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Viewer.swift; sourceTree = "<group>"; };
+		A956D2E7B37916DA28E53461 /* LayoutTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LayoutTests.swift; sourceTree = "<group>"; };
 		AE56A441B2CFDD9C6F0A36EE /* CameraScreen.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraScreen.swift; sourceTree = "<group>"; };
 		B3DC81E0143A53F37F02DDAE /* WithoutPlaceView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WithoutPlaceView.swift; sourceTree = "<group>"; };
 		B5DE17A5A6B072AE573A3107 /* LibraryGrid.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LibraryGrid.swift; sourceTree = "<group>"; };
@@ -313,7 +317,9 @@
 			isa = PBXGroup;
 			children = (
 				330BB49007FE4A8212AE2A53 /* HaldenUITests.swift */,
+				A956D2E7B37916DA28E53461 /* LayoutTests.swift */,
 				11DCCBE9E6F18A02FCC7FE6E /* PerformanceTests.swift */,
+				0EBFF35F8FF61BA023B3B43B /* Tabs.swift */,
 			);
 			path = UITests;
 			sourceTree = "<group>";
@@ -531,7 +537,9 @@
 			buildActionMask = 2147483647;
 			files = (
 				49FC6542BD2AE2DE9BB10B29 /* HaldenUITests.swift in Sources */,
+				423C29A696E7F844F445ADA2 /* LayoutTests.swift in Sources */,
 				6BBB5CD4E7E10F304D97B71F /* PerformanceTests.swift in Sources */,
+				C87619A9E2728B46FBADC85E /* Tabs.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

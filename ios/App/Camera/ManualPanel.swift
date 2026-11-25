@@ -31,7 +31,7 @@ struct ManualPanel: View {
         if let limits = state.manualLimits {
             VStack(spacing: 8) {
                 if let chosen { slider(for: chosen, limits: limits).transition(.opacity) }
-                HStack(spacing: 6) {
+                HStack(spacing: 2) {
                     ForEach(Value.allCases) { value in
                         if available(value, limits) { chip(value) }
                     }
@@ -86,7 +86,11 @@ struct ManualPanel: View {
                 .padding(.horizontal, 8)
                 .frame(height: 28)
                 .background(
-                    chosen == value ? Color.white.opacity(0.3) : Color.black.opacity(0.5), in: .capsule)
+                    chosen == value ? Color.white.opacity(0.3) : Color.black.opacity(0.5), in: .capsule
+                )
+                // Small to look at, big enough to hit.
+                .frame(minWidth: 44, minHeight: 44)
+                .contentShape(.rect)
         }
         .accessibilityLabel(text(value))
         .accessibilityValue(set ? "set" : "automatic")

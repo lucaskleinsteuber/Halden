@@ -69,8 +69,50 @@ public enum Zoom {
         return rounded == rounded.rounded() ? String(Int(rounded)) : String(format: "%.1f", rounded)
     }
 
+    /// The highest zoom offered: the camera's own limit (`device`, as shown) up to `cap`, tidied
+    /// so the screen ends on a round number. A camera that stops a hair short of the cap (9.94
+    /// for 10) gets the cap: asked for 10, it goes as far as it can, which nobody can tell apart.
+    public static func highest(device: Double, cap: Double) -> Double {
+        guard device > 0 else { return cap }
+        if device >= cap * 0.98 { return cap }
+        if device >= 2 { return device.rounded(.down) }
+        return max((device * 10).rounded(.down) / 10, 1)
+    }
+
     static func clamp(_ value: Double, to range: ClosedRange<Double>) -> Double {
         min(max(value, range.lowerBound), range.upperBound)
+    }
+}
+
+/// What the zoom buttons show, as in Apple's camera: the zoom asked for (a tap on a lens, a
+/// finger, the dial) at once, not the camera's own on its way there, which would count up on the
+/// old button and then jump. The camera's own value shows only when something else changed it.
+public struct ZoomShown: Equatable, Sendable {
+    /// The zoom asked for last, if it still counts.
+    public private(set) var asked: Double?
+    private var askedAt: TimeInterval = 0
+
+    /// How long the camera gets to reach a zoom before its own value counts again.
+    public static let patience: TimeInterval = 1
+
+    public init() {}
+
+    public mutating func ask(_ zoom: Double, at time: TimeInterval) {
+        asked = zoom
+        askedAt = time
+    }
+
+    /// The camera changed by itself (another lens, the other side, another mode).
+    public mutating func forget() {
+        asked = nil
+    }
+
+    /// The zoom to show while the camera is at `device`.
+    public func value(device: Double, at time: TimeInterval) -> Double {
+        guard let asked, asked > 0, device > 0 else { return device }
+        // On its way, or there (a camera may stop a hair short of its limit).
+        if time - askedAt < Self.patience || abs(log2(device / asked)) < 0.03 { return asked }
+        return device
     }
 }
 
