@@ -36,18 +36,19 @@ the design comes after that. What works today is described below.
   Photos and videos come out upright however the phone is held. The camera is set up when the
   app starts, all on a queue of its own, so its picture is there at once and the screen never
   waits for it.
-- **Camera screen**: laid out like Apple's camera, on the whole screen without the tab bar. On
-  top flash (or the light), self-timer, grid and Live Photo, for videos the format in the middle
-  (in the room between the buttons). The picture as it will be taken: 4:3 under the top bar for
-  photos, 16:9 for videos. The modes start where the 4:3 picture ends, so the zoom buttons lie on
-  its lower edge; below them the modes (also changed by swiping over the picture) and the
+- **Camera screen**: laid out like Apple's camera, with the tab bar (Camera, Photos, Settings)
+  visible at the bottom and clear space between it and the shutter row. On top flash (or the
+  light), self-timer, grid and Live Photo, for videos the format in the middle (in the room
+  between the buttons). The picture as it will be taken: 4:3 under the top bar for photos, 16:9
+  for videos. The modes start where the 4:3 picture ends when space allows, so the zoom buttons
+  lie on its lower edge; below them the modes (also changed by swiping over the picture) and the
   shutter between the last photo and the button that turns the camera around. Nothing moves
   when the mode changes: the picture blurs for a moment (`SwitchBlur`) while the camera changes
   its format and the frame glides into its new shape. Every control is at least 44×44 points.
 - **Last photo**: the photo just taken shows at once (from the capture itself), otherwise the
   newest one in the library (its thumbnail, or its own file when the thumbnail isn't made yet).
-  A tap opens it full screen; "All Photos" leads on to the library, which has the tab bar back
-  to the camera and the settings. With no photos yet it leads to the library at once.
+  A tap opens it full screen, with "All Photos" leading on to the library; with no photos yet
+  it opens the library at once.
 - **Zoom** (`Zoom`, `ZoomShown`): in doublings, as people know it. A lens button glides there in
   0.3 s however far it is (`ramp(toVideoZoomFactor:withRate:)`), pinching and the dial follow
   the finger with a quick ramp, so steps between touches don't show. The buttons show the zoom

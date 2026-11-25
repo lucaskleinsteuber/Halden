@@ -1,8 +1,8 @@
 import HaldenKit
 import SwiftUI
 
-/// The app's camera tab: the whole screen, without the tab bar, like Apple's camera. The way to
-/// the library is the last photo left of the shutter.
+/// The app's camera tab, with the tab bar at the bottom to reach Photos and Settings. The last
+/// photo left of the shutter opens full screen with "All Photos" to the library.
 struct CameraView: View {
     @Environment(AppModel.self) private var app
 
@@ -12,7 +12,7 @@ struct CameraView: View {
         } gallery: {
             LastPhotoButton(camera: app.camera)
         }
-        .toolbar(.hidden, for: .tabBar)
+        .toolbarColorScheme(.dark, for: .tabBar)
     }
 }
 

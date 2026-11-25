@@ -6,6 +6,13 @@ The server and the iPhone app have version numbers of their own (semantic versio
 from 0.1.0 on 25.11.2026; a heading names the versions released that day. Everything before is
 part of the first versions.
 
+## 25.11.2026
+
+### Fixed
+
+- The tab bar (Camera, Photos, Settings) is visible in the camera again, with clear space above
+  it so the shutter row never crowds or overlaps it.
+
 ## 25.11.2026 – App 0.1.0
 
 ### Added

@@ -125,17 +125,19 @@ struct CameraScreen<Gallery: View>: View {
     }
 
     /// Laid out like Apple's camera: the modes start where the 4:3 picture ends, so the lens
-    /// buttons lie on its lower edge; what room is left goes below the shutter.
+    /// buttons lie on its lower edge; what room is left goes below the shutter, always leaving at
+    /// least `bottomGap` above the bottom safe area (the floating tab bar).
     private var controls: some View {
         GeometryReader { geometry in
             let below = geometry.size.height - Self.topBarHeight - geometry.size.width * 4 / 3
-            let rest = max(below - Self.modeHeight - Self.shutterHeight, 0)
+            let rest = max(below - Self.modeHeight - Self.shutterHeight, Self.bottomGap)
             controlStack.padding(.bottom, rest)
         }
     }
 
     static var modeHeight: CGFloat { 44 }
-    static var shutterHeight: CGFloat { 92 }
+    static var shutterHeight: CGFloat { 84 }
+    static var bottomGap: CGFloat { 16 }
 
     private var controlStack: some View {
         VStack(spacing: 0) {

@@ -42,6 +42,7 @@ final class LayoutTests: XCTestCase {
         // The camera, in every mode and with what opens on it.
         let shutter = app.buttons["shutter"]
         XCTAssertTrue(shutter.waitForExistence(timeout: 30))
+        XCTAssertTrue(app.tabBars.firstMatch.waitForExistence(timeout: 5), "the tab bar is visible in the camera")
         settle()
         shot("camera-photo")
         app.buttons["manual"].tap()
@@ -206,7 +207,8 @@ final class LayoutTests: XCTestCase {
                 file: file, line: line)
         }
 
-        // 2. Controls on top of each other.
+        // 2. Controls on top of each other (tab bar buttons may only touch each other, never
+        // camera or screen controls).
         let controls = visible.filter { Self.controls.contains($0.type) && !$0.scrolls }
         for (index, one) in controls.enumerated() {
             for other in controls[(index + 1)...] where !one.contains(other) && !other.contains(one) {
@@ -218,6 +220,18 @@ final class LayoutTests: XCTestCase {
                 XCTFail(
                     "\(name): \(one.name) and \(other.name) lie on top of each other (\(overlap))",
                     file: file, line: line)
+            }
+        }
+        // In the camera, the shutter row must stay visibly clear above the floating tab bar.
+        let tabTop = controls.filter(\.inTabBar).map(\.frame.minY).min()
+        if let tabTop {
+            for control in controls where ["shutter", "last-photo", "flip-camera"].contains(control.identifier) {
+                let gap = tabTop - control.frame.maxY
+                if gap < 11.5 {
+                    XCTFail(
+                        "\(name): \(control.name) is too close to the tab bar (gap \(String(format: "%.1f", gap)) pt)",
+                        file: file, line: line)
+                }
             }
         }
 
