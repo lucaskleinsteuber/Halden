@@ -17,6 +17,7 @@ pub mod doctor;
 pub mod failpoint;
 pub mod files;
 pub mod fsutil;
+pub mod import;
 pub mod jobs;
 pub mod library;
 pub mod net;

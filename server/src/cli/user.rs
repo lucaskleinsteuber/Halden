@@ -197,7 +197,7 @@ pub async fn run(config_path: &Path, command: UserCommand) -> Result<()> {
     }
 }
 
-pub(super) async fn find(pool: &crate::db::Db, name: &str) -> Result<User> {
+pub(crate) async fn find(pool: &crate::db::Db, name: &str) -> Result<User> {
     match accounts::user_by_name(pool, name).await? {
         Some(user) => Ok(user),
         None => bail!("there is no account named {name} (see `halden user list`)"),

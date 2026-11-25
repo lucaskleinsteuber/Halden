@@ -7,11 +7,12 @@ mod backup;
 mod config;
 mod devices;
 mod doctor;
+mod import;
 mod log;
 mod mirror;
 mod pair;
 mod update;
-mod user;
+pub(crate) mod user;
 
 use std::{
     io::{BufRead, IsTerminal},
@@ -75,6 +76,9 @@ enum Command {
     Config(config::ConfigCommand),
     /// Check the server and say how to fix what's wrong.
     Doctor(doctor::DoctorArgs),
+    /// Bring photos in from Google Takeout or Immich (the server must be running).
+    #[command(subcommand)]
+    Import(import::ImportCommand),
     /// Look for a new version and install it (needs sudo).
     Update(update::UpdateArgs),
     /// Ask the running server whether it answers (for Docker's health check and scripts).
@@ -152,6 +156,7 @@ async fn run(cli: Cli) -> Result<()> {
         Command::Log(args) => log::run(&cli.config, args).await,
         Command::Backup(command) => backup::run(&cli.config, command).await,
         Command::Mirror(command) => mirror::run(&cli.config, command).await,
+        Command::Import(command) => import::run(&cli.config, command).await,
         Command::Config(command) => config::run(&cli.config, command).await,
         Command::Doctor(args) => doctor::run(&cli.config, args).await,
         Command::Update(args) => update::run(&cli.config, args).await,

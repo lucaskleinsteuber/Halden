@@ -8,6 +8,12 @@ There are no version numbers yet; entries are grouped by date until the first re
 
 ### Added
 
+- Server: `halden import takeout` (Google Photos from Google Takeout, ZIP files or folders, all
+  parts at once) and `halden import immich` (an Immich account by API key). The import goes
+  through the running server as a device of its own, so duplicates stay single; what Google or
+  Immich knew comes along where the file doesn't say (time, place, description), albums and
+  favourites become albums, Live Photos keep their video, Google's edited copies are left out.
+  Resumable (a journal in the data folder), `--dry-run` to count.
 - Small copies of big videos to play on the go: made on the iPhone (720p H.264) and sent as the
   asset's `stream` (a new upload role), or made by the server with ffmpeg when the phone
   hasn't (`[jobs] stream_versions`, `stream_height`, `stream_kbps`); the app plays them on

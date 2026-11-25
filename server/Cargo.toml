@@ -50,6 +50,7 @@ tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
 uuid = { version = "1.29.3", features = ["v4", "serde"] }
 webpki-roots = "1.0.12"
 x509-parser = { version = "0.18.1", default-features = false }
+zip = { version = "9.8.2", default-features = false, features = ["deflate"] }
 
 [features]
 # mimalloc instead of the system allocator, only to compare them in the load test. The system

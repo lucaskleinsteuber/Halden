@@ -119,6 +119,28 @@ fingerprint and a one-time code that is valid for 5 minutes. Devices can also si
 username and password; a device added that way shows up as new on the account's other devices
 until someone confirms it.
 
+### Bring in photos from Google or Immich
+
+```sh
+sudo halden import takeout ~/takeout-*.zip --user lucas      # Google Takeout, all parts at once
+sudo halden import immich --url https://immich.example.com --api-key … --user lucas
+```
+
+The server must be running; the import sends everything to it like a phone does (as its own
+device, "Import (…)"), so duplicates stay single, files get their names and folders, and
+thumbnails and small copies of videos follow in the background.
+
+- **Google Takeout**: the ZIP files or their unpacked folders. What Google kept in its JSON files
+  comes along where the photo itself doesn't say (time, place, description); album folders
+  become albums, a photo and a video with the same name a Live Photo; the copies Google edited
+  are left out.
+- **Immich**: an API key from Immich (Account Settings › API Keys; also as `IMMICH_API_KEY`).
+  Originals, Live Photos, descriptions, places, albums, and the favourites as an album; what is
+  in Immich's trash stays there.
+
+`--dry-run` only counts. Stopped halfway, the same command goes on where it stopped (a journal
+in the data folder remembers what went in).
+
 ### Commands
 
 | Command | What it does |
@@ -144,6 +166,8 @@ until someone confirms it.
 | `halden update [--check] [--yes]` | Look for a new version and install it (signed, with a way back) |
 | `halden update --beta on\|off` | Also install test versions |
 | `halden health` | Exit 0 when the running server answers |
+| `halden import takeout <zip or folder>… --user <name> [--dry-run]` | Bring in Google Photos from Google Takeout |
+| `halden import immich --url <url> --api-key <key> --user <name> [--dry-run]` | Bring in an Immich account's photos |
 
 ### Settings
 

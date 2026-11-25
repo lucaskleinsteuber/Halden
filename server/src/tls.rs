@@ -188,6 +188,18 @@ pub fn server_config(config: &Config) -> Result<(Arc<ServerConfig>, Fingerprint)
 /// A client that trusts exactly one certificate, by its fingerprint, like the apps do. Used to
 /// ask the local server whether it is up (after an update).
 pub fn pinned_client(fingerprint: Fingerprint) -> Result<reqwest::Client> {
+    pinned(fingerprint, Some(std::time::Duration::from_secs(5)))
+}
+
+/// The same for big transfers (the import): no limit on the whole request, only on connecting.
+pub fn pinned_client_for_transfers(fingerprint: Fingerprint) -> Result<reqwest::Client> {
+    pinned(fingerprint, None)
+}
+
+fn pinned(
+    fingerprint: Fingerprint,
+    timeout: Option<std::time::Duration>,
+) -> Result<reqwest::Client> {
     #[derive(Debug)]
     struct Pinned {
         expected: [u8; 32],
@@ -260,11 +272,13 @@ pub fn pinned_client(fingerprint: Fingerprint) -> Result<reqwest::Client> {
         }))
         .with_no_client_auth();
     tls.alpn_protocols = vec![b"h2".to_vec(), b"http/1.1".to_vec()];
-    reqwest::Client::builder()
+    let mut builder = reqwest::Client::builder()
         .tls_backend_preconfigured(tls)
-        .timeout(std::time::Duration::from_secs(5))
-        .build()
-        .context("could not set up the HTTP client")
+        .connect_timeout(std::time::Duration::from_secs(5));
+    if let Some(timeout) = timeout {
+        builder = builder.timeout(timeout);
+    }
+    builder.build().context("could not set up the HTTP client")
 }
 
 #[cfg(test)]
