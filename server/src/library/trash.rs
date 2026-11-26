@@ -125,6 +125,7 @@ pub async fn purge(
                  title = NULL, description = NULL, latitude = NULL, longitude = NULL, \
                  altitude = NULL, location_accuracy_m = NULL, heading = NULL, \
                  edit_latitude = NULL, edit_longitude = NULL, edit_altitude = NULL, \
+                 edit_location_source = NULL, burst_id = NULL, \
                  camera_make = NULL, camera_model = NULL, lens = NULL, playback_json = NULL, \
                  edit_json = NULL \
              WHERE id = ? AND deleted_at IS NULL AND trashed_at IS NOT NULL AND trashed_at < ?",

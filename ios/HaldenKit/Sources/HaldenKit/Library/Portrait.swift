@@ -88,13 +88,42 @@ public enum PortraitMath {
 /// Core Image + Vision portrait bokeh and portrait lighting renderer.
 public enum PortraitRenderer {
     /// Extracts embedded disparity/depth map and portrait effects matte from a HEIC/JPEG file,
-    /// when captured with depth delivery.
+    /// when captured with depth delivery, aligned to the primary image's EXIF orientation.
     public static func extractAuxiliary(from url: URL) -> (depth: CIImage?, matte: CIImage?) {
-        let depth =
+        let primaryOrientation = primaryExifOrientation(of: url)
+        let rawDepth =
             CIImage(contentsOf: url, options: [.auxiliaryDisparity: true])
             ?? CIImage(contentsOf: url, options: [.auxiliaryDepth: true])
-        let matte = CIImage(contentsOf: url, options: [.auxiliaryPortraitEffectsMatte: true])
-        return (depth, matte)
+        let rawMatte = CIImage(contentsOf: url, options: [.auxiliaryPortraitEffectsMatte: true])
+        return (
+            orientAuxiliary(rawDepth, fallbackOrientation: primaryOrientation),
+            orientAuxiliary(rawMatte, fallbackOrientation: primaryOrientation)
+        )
+    }
+
+    private static func primaryExifOrientation(of url: URL) -> Int32 {
+        guard let source = CGImageSourceCreateWithURL(url as CFURL, nil),
+            let props = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any]
+        else { return 1 }
+        if let number = props[kCGImagePropertyOrientation] as? NSNumber {
+            return number.int32Value
+        }
+        if let tiff = props[kCGImagePropertyTIFFDictionary] as? [CFString: Any],
+            let number = tiff[kCGImagePropertyTIFFOrientation] as? NSNumber
+        {
+            return number.int32Value
+        }
+        return 1
+    }
+
+    private static func orientAuxiliary(_ image: CIImage?, fallbackOrientation: Int32) -> CIImage? {
+        guard let image else { return nil }
+        let ownOrientation = (image.properties[kCGImagePropertyOrientation as String] as? NSNumber)?.int32Value
+        let effective = ownOrientation ?? fallbackOrientation
+        guard (1...8).contains(effective), effective != 1 else { return image }
+        let oriented = image.oriented(forExifOrientation: effective)
+        return oriented.transformed(
+            by: CGAffineTransform(translationX: -oriented.extent.minX, y: -oriented.extent.minY))
     }
 
     /// Detects normalized face rectangles (0…1, Core Image bottom-left origin) using Vision.
@@ -132,6 +161,8 @@ public enum PortraitRenderer {
                 blur.setValue(depthMap, forKey: "inputDisparityImage")
                 if let matte { blur.setValue(matte, forKey: "inputMatteImage") }
                 blur.setValue(Float(clamped), forKey: "inputAperture")
+                let scaleFactor = Float(min(1.0, max(extent.width, extent.height) / 4032.0))
+                blur.setValue(scaleFactor, forKey: "inputScaleFactor")
                 if let rendered = blur.outputImage?.cropped(to: extent) {
                     output = rendered
                 }

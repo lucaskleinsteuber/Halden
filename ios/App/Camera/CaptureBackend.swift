@@ -262,4 +262,6 @@ protocol CaptureBackend: AnyObject {
     func startDualRecording(_ request: VideoRequest, corner: PiPCorner, swapped: Bool) -> Bool
     /// Updates PiP layout / camera swap while Dual Capture preview is live.
     func updateDualLayout(corner: PiPCorner, swapped: Bool)
+    /// Streams throttled low-resolution preview JPEGs off the main thread when Apple Watch is connected.
+    func setWatchFrameHandler(_ handler: (@Sendable (Data) -> Void)?)
 }

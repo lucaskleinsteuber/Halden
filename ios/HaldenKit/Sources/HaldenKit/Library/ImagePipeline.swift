@@ -112,7 +112,10 @@ public actor ImagePipeline {
         guard let edit, !edit.isEmpty else { return decode(url, pixels: pixels) }
         // Read a little larger: a crop keeps only part of it.
         guard let plain = decode(url, pixels: pixels * 2) else { return nil }
-        var edited = EditRenderer.apply(edit, to: CIImage(cgImage: plain.cgImage))
+        let aux: (depth: CIImage?, matte: CIImage?) =
+            edit.hasPortraitEdit ? PortraitRenderer.extractAuxiliary(from: url) : (nil, nil)
+        var edited = EditRenderer.apply(
+            edit, to: CIImage(cgImage: plain.cgImage), depthMap: aux.depth, matte: aux.matte)
         let longest = max(edited.extent.width, edited.extent.height)
         if longest > CGFloat(pixels) {
             let scale = CGFloat(pixels) / longest

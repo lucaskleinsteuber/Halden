@@ -45,7 +45,9 @@ final class StandInCamera: CaptureBackend {
     @ObservationIgnored private var quickTaking = false
     @ObservationIgnored private var mode = CameraMode.photo
     @ObservationIgnored private var panoramaDirection: PanoramaDirection?
+    @ObservationIgnored private var dualSwapped = false
     @ObservationIgnored private var gliding: Task<Void, Never>?
+    @ObservationIgnored private var watchFrameTask: Task<Void, Never>?
 
     func prepare(mode: CameraMode, options video: CaptureOptions) {
         self.mode = mode
@@ -78,7 +80,10 @@ final class StandInCamera: CaptureBackend {
     }
 
     func start() {}
-    func stop() {}
+    func stop() {
+        watchFrameTask?.cancel()
+        watchFrameTask = nil
+    }
 
     /// Takes about as long as the real camera to change its format.
     func setMode(_ mode: CameraMode, options video: CaptureOptions) async {
@@ -88,6 +93,15 @@ final class StandInCamera: CaptureBackend {
         state.canLive = mode == .photo
         state.canRAW = mode == .photo
         state.canDepth = mode.isStill
+        if mode == .dual {
+            state.presets = dualSwapped ? [1] : [1, 2]
+            state.zoomRange = dualSwapped ? 1...1 : 1...5
+            state.zoom = 1
+        } else {
+            state.presets = state.side == .back ? [0.5, 1, 2] : [1]
+            state.zoomRange = state.side == .back ? 0.5...10 : 1...5
+            state.zoom = min(max(state.zoom, state.zoomRange.lowerBound), state.zoomRange.upperBound)
+        }
         state.portraitHint =
             mode == .portrait && ProcessInfo.processInfo.arguments.contains("-ui-testing-portrait-hint")
             ? .moveFartherAway : nil
@@ -274,7 +288,36 @@ final class StandInCamera: CaptureBackend {
         return true
     }
 
-    func updateDualLayout(corner: PiPCorner, swapped: Bool) {}
+    func updateDualLayout(corner: PiPCorner, swapped: Bool) {
+        dualSwapped = swapped
+        if mode == .dual {
+            state.presets = swapped ? [1] : [1, 2]
+            state.zoomRange = swapped ? 1...1 : 1...5
+            state.zoom = 1
+        }
+    }
+
+    func setWatchFrameHandler(_ handler: (@Sendable (Data) -> Void)?) {
+        watchFrameTask?.cancel()
+        watchFrameTask = nil
+        guard let handler else { return }
+        watchFrameTask = Task { [weak self] in
+            let context = CIContext(options: [.cacheIntermediates: false])
+            while !Task.isCancelled {
+                let isFront = self?.state.side == .front
+                let jpeg = await Task.detached(priority: .utility) { () -> Data? in
+                    let color =
+                        isFront
+                        ? CIColor(red: 0.85, green: 0.45, blue: 0.25) : CIColor(red: 0.16, green: 0.52, blue: 0.85)
+                    let ci = CIImage(color: color).cropped(to: CGRect(x: 0, y: 0, width: 180, height: 240))
+                    guard let cg = context.createCGImage(ci, from: ci.extent) else { return nil }
+                    return UIImage(cgImage: cg).jpegData(compressionQuality: 0.45)
+                }.value
+                if let jpeg, !Task.isCancelled { handler(jpeg) }
+                try? await Task.sleep(for: .milliseconds(250))
+            }
+        }
+    }
 
     func startPanorama(direction: PanoramaDirection) -> Bool {
         guard mode == .panorama, panoramaDirection == nil else { return false }

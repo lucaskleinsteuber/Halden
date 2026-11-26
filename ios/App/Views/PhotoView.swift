@@ -425,10 +425,13 @@ struct InfoView: View {
     static func role(_ role: String) -> String {
         switch role {
         case "original": "Original"
+        case "raw": "RAW (DNG)"
         case "thumbnail": "Thumbnail"
         case "preview": "Preview"
         case "converted": "Preferred format"
+        case "stream": "Stream"
         case "paired_video": "Live Photo video"
+        case "live_effect": "Live effect"
         default: role
         }
     }

@@ -30,6 +30,8 @@ final class DeviceCamera: CaptureBackend {
     @ObservationIgnored private var pipRelay: Relay<UIImage?>?
     @ObservationIgnored private let multiCam: MultiCamEngine
     @ObservationIgnored private var dualRecording = false
+    @ObservationIgnored private var dualCorner = PiPCorner.topRight
+    @ObservationIgnored private var dualSwapped = false
     @ObservationIgnored private var configured = false
     @ObservationIgnored private var mode = CameraMode.photo
     @ObservationIgnored private var video: CaptureOptions?
@@ -127,7 +129,7 @@ final class DeviceCamera: CaptureBackend {
         if mode == .dual && MultiCamEngine.isSupported {
             await withCheckedContinuation { (done: CheckedContinuation<Void, Never>) in
                 core.run { core in
-                    core.pauseForMultiCam()
+                    core.prepareForMultiCam(video: video)
                     done.resume()
                 }
             }
@@ -135,7 +137,10 @@ final class DeviceCamera: CaptureBackend {
             state.customPreviewActive = true
             state.canMultiCam = true
             state.videoFormat = nil
-            multiCam.start(swapped: false, corner: .topRight)
+            state.presets = dualSwapped ? [1] : [1, 2]
+            state.zoomRange = dualSwapped ? 1...1 : 1...5
+            state.zoom = 1
+            multiCam.start(swapped: dualSwapped, corner: dualCorner)
             return
         }
         if wasDual {
@@ -160,6 +165,12 @@ final class DeviceCamera: CaptureBackend {
     /// The zoom shown follows the camera itself (see `update`), so it moves along with a glide
     /// instead of jumping to where it is going.
     func zoom(to factor: Double, glide: Bool) {
+        if mode == .dual {
+            let clamped = min(max(factor, state.zoomRange.lowerBound), state.zoomRange.upperBound)
+            state.zoom = clamped
+            multiCam.zoom(to: clamped, glide: glide)
+            return
+        }
         core.run { $0.zoom(to: factor, glide: glide) }
     }
 
@@ -270,7 +281,19 @@ final class DeviceCamera: CaptureBackend {
     }
 
     func updateDualLayout(corner: PiPCorner, swapped: Bool) {
+        dualCorner = corner
+        dualSwapped = swapped
+        if mode == .dual {
+            state.presets = swapped ? [1] : [1, 2]
+            state.zoomRange = swapped ? 1...1 : 1...5
+            state.zoom = 1
+        }
         multiCam.updateLayout(swapped: swapped, corner: corner)
+    }
+
+    func setWatchFrameHandler(_ handler: (@Sendable (Data) -> Void)?) {
+        let isDual = mode == .dual
+        core.run { $0.setWatchFrameHandler(handler, dualActive: isDual) }
     }
 
     func startPanorama(direction: PanoramaDirection) -> Bool {
@@ -435,6 +458,10 @@ final class CaptureCore: NSObject, @unchecked Sendable {
     var scopesChanged: (@Sendable (LiveScopesData?) -> Void)?
     private let scopeLock = NSLock()
     private var lastScopeTime: Double = 0
+    private var watchFrameHandler: (@Sendable (Data) -> Void)?
+    private let watchContext = CIContext(options: [.cacheIntermediates: false])
+    private let watchLock = NSLock()
+    private var lastWatchTime: Double = 0
 
     init(metalView: MetalPreviewView) {
         self.metalView = metalView
@@ -494,11 +521,22 @@ final class CaptureCore: NSObject, @unchecked Sendable {
 
     private var device: AVCaptureDevice? { input?.device }
 
+    static func supportsBackBayerRAW() -> Bool {
+        AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .back) != nil
+    }
+
     /// The back camera with the most lenses there are, or the front camera. For slow motion the
-    /// first that can record that fast (not every camera made of several lenses can).
+    /// first that can record that fast (not every camera made of several lenses can). For Bayer RAW
+    /// in Photo mode, the physical wide sensor is required because virtual fusion cameras only expose
+    /// Apple ProRAW.
     static func camera(_ side: CameraSide, mode: CameraMode = .photo, options: CaptureOptions? = nil)
         -> AVCaptureDevice?
     {
+        if mode == .photo, side == .back, options?.captureRAW == true, options?.captureProRAW != true,
+            let wide = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .back)
+        {
+            return wide
+        }
         let types: [AVCaptureDevice.DeviceType] =
             side == .back
             ? [.builtInTripleCamera, .builtInDualWideCamera, .builtInDualCamera, .builtInWideAngleCamera]
@@ -565,8 +603,14 @@ final class CaptureCore: NSObject, @unchecked Sendable {
         publish(device: nil)
     }
 
-    func pauseForMultiCam() {
+    func prepareForMultiCam(video: CaptureOptions?) {
+        self.mode = .dual
+        self.video = video
         if session.isRunning { session.stopRunning() }
+        if !wantsScopes { scopesChanged?(nil) }
+        metalView.configure(
+            style: nil, filter: nil, portraitAperture: nil, portraitLighting: nil,
+            frameObserver: makeFrameObserver())
     }
 
     func startRunning() {
@@ -616,6 +660,16 @@ final class CaptureCore: NSObject, @unchecked Sendable {
         mode != .timeLapse && mode != .panorama && (video?.showHistogram == true || video?.showWaveform == true)
     }
 
+    private var wantsPreviewFrames: Bool {
+        needsMetalPreview || watchFrameHandler != nil
+    }
+
+    private var isBayerRAWActive: Bool {
+        mode == .photo && video?.captureRAW == true
+            && !(video?.captureProRAW == true && photoOutput.isAppleProRAWSupported)
+            && availableBayerRAW() != nil
+    }
+
     private var needsMetalPreview: Bool {
         if wantsScopes { return true }
         guard mode.isStill else { return false }
@@ -635,6 +689,63 @@ final class CaptureCore: NSObject, @unchecked Sendable {
         scopesChanged?(data)
     }
 
+    private func sampleWatchFrame(_ image: CIImage, handler: @Sendable (Data) -> Void) {
+        let now = ProcessInfo.processInfo.systemUptime
+        let shouldRun = watchLock.withLock { () -> Bool in
+            guard now - lastWatchTime >= 0.125 else { return false }
+            lastWatchTime = now
+            return true
+        }
+        guard shouldRun else { return }
+        let extent = image.extent
+        guard extent.width > 0, extent.height > 0 else { return }
+        let scale = min(1.0, 240.0 / max(extent.width, extent.height))
+        let scaled =
+            scale < 1.0 ? image.transformed(by: CGAffineTransform(scaleX: scale, y: scale)) : image
+        guard let cg = watchContext.createCGImage(scaled, from: scaled.extent.integral),
+            let jpeg = UIImage(cgImage: cg).jpegData(compressionQuality: 0.45)
+        else { return }
+        handler(jpeg)
+    }
+
+    func makeFrameObserver() -> (@Sendable (CIImage) -> Void)? {
+        let scopes = wantsScopes
+        let watch = watchFrameHandler
+        guard scopes || watch != nil else { return nil }
+        return { [weak self] frame in
+            guard let self else { return }
+            if scopes { self.sampleScopes(frame) }
+            if let watch { self.sampleWatchFrame(frame, handler: watch) }
+        }
+    }
+
+    func setWatchFrameHandler(_ handler: (@Sendable (Data) -> Void)?, dualActive: Bool) {
+        let hadHandler = watchFrameHandler != nil
+        watchFrameHandler = handler
+        if dualActive {
+            metalView.configure(
+                style: nil, filter: nil, portraitAperture: nil, portraitLighting: nil,
+                frameObserver: makeFrameObserver())
+            return
+        }
+        metalView.configure(
+            style: mode.isStill ? video?.style : nil, filter: mode.isStill ? video?.filter : nil,
+            portraitAperture: mode == .portrait ? (video?.portraitAperture ?? PortraitMath.defaultAperture) : nil,
+            portraitLighting: mode == .portrait ? video?.portraitLighting : nil,
+            frameObserver: makeFrameObserver())
+        let hasHandler = handler != nil
+        guard hadHandler != hasHandler, let device, !movieOutput.isRecording, !timeLapsing, !panoramaCapturing else {
+            return
+        }
+        if mode != .timeLapse && mode != .panorama {
+            session.beginConfiguration()
+            apply(mode: mode, on: device)
+            session.commitConfiguration()
+            state = describe(device)
+            publish(device: nil)
+        }
+    }
+
     /// Photo: the photo output in the chosen resolution and prioritization (no movie output so
     /// Live Photos work), plus metadata detection for automatic depth on people/pets.
     /// Portrait: photo + Metal preview (+ synchronized depth when supported).
@@ -649,22 +760,16 @@ final class CaptureCore: NSObject, @unchecked Sendable {
             allowPlayback: video?.allowAudioPlayback == true,
             allowAirPodsMic: video?.allowAirPodsMic == true,
             needsAudio: mode != .timeLapse)
-        var scopeObserver: (@Sendable (CIImage) -> Void)? = nil
-        if wantsScopes {
-            scopeObserver = { [weak self] frame in
-                self?.sampleScopes(frame)
-            }
-        }
         if !wantsScopes { scopesChanged?(nil) }
         metalView.configure(
             style: mode.isStill ? video?.style : nil, filter: mode.isStill ? video?.filter : nil,
             portraitAperture: mode == .portrait ? (video?.portraitAperture ?? PortraitMath.defaultAperture) : nil,
             portraitLighting: mode == .portrait ? video?.portraitLighting : nil,
-            frameObserver: scopeObserver)
+            frameObserver: makeFrameObserver())
         switch mode {
         case .photo:
             var outputs: [AVCaptureOutput] = [photoOutput, metadataOutput]
-            if needsMetalPreview { outputs.append(previewOutput) }
+            if wantsPreviewFrames { outputs.append(previewOutput) }
             if video?.showLiveText != false {
                 outputs.append(frameOutput)
                 frameOutput.setSampleBufferDelegate(textDetector, queue: textDetector.queue)
@@ -676,6 +781,7 @@ final class CaptureCore: NSObject, @unchecked Sendable {
             if let connection = previewOutput.connection(with: .video) {
                 if connection.isVideoRotationAngleSupported(90) { connection.videoRotationAngle = 90 }
                 applyMirroring(on: connection, mirror: side == .front)
+                previewOutput.setSampleBufferDelegate(previewRelay, queue: previewRelay.queue)
             }
             // Live Photos record sound (unless Bayer RAW or Apple ProRAW is active).
             let proRAW = video?.captureProRAW == true && photoOutput.isAppleProRAWSupported
@@ -688,11 +794,15 @@ final class CaptureCore: NSObject, @unchecked Sendable {
                 self.audioInput = nil
             }
             if session.canSetSessionPreset(.photo) { session.sessionPreset = .photo }
+            if raw, (try? device.lockForConfiguration()) != nil {
+                device.videoZoomFactor = 1.0
+                device.unlockForConfiguration()
+            }
             let faster = video?.prioritizeFasterShooting ?? true
             photoOutput.maxPhotoQualityPrioritization = faster ? .balanced : .quality
             let supported = device.activeFormat.supportedMaxPhotoDimensions
             let tuples = supported.map { (width: Int($0.width), height: Int($0.height)) }
-            let wanted = video?.photoResolution ?? .mp24
+            let wanted: PhotoResolution = raw ? .mp12 : (video?.photoResolution ?? .mp24)
             if let index = PhotoResolution.bestDimensionIndex(wanted: wanted, in: tuples) {
                 photoOutput.maxPhotoDimensions = supported[index]
             } else if let largest = supported.max(by: { $0.width * $0.height < $1.width * $1.height }) {
@@ -751,7 +861,7 @@ final class CaptureCore: NSObject, @unchecked Sendable {
                 case .cinematic: [movieOutput, metadataOutput]
                 default: [movieOutput]
                 }
-            if wantsScopes { outputs.append(previewOutput) }
+            if wantsPreviewFrames { outputs.append(previewOutput) }
             use(outputs)
             addMicrophone()
             configureAudioInput()
@@ -786,7 +896,7 @@ final class CaptureCore: NSObject, @unchecked Sendable {
                     }
                 }
             }
-            if wantsScopes, let connection = previewOutput.connection(with: .video) {
+            if wantsPreviewFrames, let connection = previewOutput.connection(with: .video) {
                 if connection.isVideoRotationAngleSupported(90) { connection.videoRotationAngle = 90 }
                 applyMirroring(on: connection, mirror: side == .front)
                 previewOutput.setSampleBufferDelegate(previewRelay, queue: previewRelay.queue)
@@ -1209,11 +1319,18 @@ final class CaptureCore: NSObject, @unchecked Sendable {
         described.hasFlash = device.hasFlash
         described.hasTorch = device.hasTorch
         described.canLive = mode == .photo && photoOutput.isLivePhotoCaptureSupported
-        described.canRAW = mode == .photo && availableBayerRAW() != nil
+        described.canRAW =
+            mode == .photo && (availableBayerRAW() != nil || (side == .back && Self.supportsBackBayerRAW()))
         let dims = device.activeFormat.supportedMaxPhotoDimensions.map {
             (width: Int($0.width), height: Int($0.height))
         }
         described.availableResolutions = PhotoResolution.available(for: dims)
+        if isBayerRAWActive {
+            described.presets = [1]
+            described.zoomRange = 1...1
+            described.zoom = 1
+            described.availableResolutions = [.mp12]
+        }
         described.customPreviewActive = needsMetalPreview && session.outputs.contains(previewOutput)
         described.canDepth = photoOutput.isDepthDataDeliverySupported
         described.subjectDetected = state.subjectDetected
@@ -1256,7 +1373,7 @@ final class CaptureCore: NSObject, @unchecked Sendable {
     /// a quick one that follows a finger smoothly. The camera switches lenses on the way where
     /// Apple's camera does.
     func zoom(to shown: Double, glide: Bool) {
-        guard let device, (try? device.lockForConfiguration()) != nil else { return }
+        guard !isBayerRAWActive, let device, (try? device.lockForConfiguration()) != nil else { return }
         let multiplier = Double(device.displayVideoZoomFactorMultiplier)
         let factor = min(
             max(shown / multiplier, Double(device.minAvailableVideoZoomFactor)),
@@ -1375,7 +1492,7 @@ final class CaptureCore: NSObject, @unchecked Sendable {
         applyMirroring(on: connection, mirror: request.mirrorFrontCamera)
         let heic = request.format == .heic && photoOutput.availablePhotoCodecTypes.contains(.hevc)
         let processedFormat: [String: Any] = [AVVideoCodecKey: heic ? AVVideoCodecType.hevc : .jpeg]
-        let rawFormat: OSType? =
+        var rawFormat: OSType? =
             if request.proRAW, photoOutput.isAppleProRAWEnabled {
                 availableAppleProRAW()
             } else if request.raw {
@@ -1383,16 +1500,33 @@ final class CaptureCore: NSObject, @unchecked Sendable {
             } else {
                 nil
             }
+        let isBayerRAW = rawFormat.map { AVCapturePhotoOutput.isBayerRAWPixelFormat($0) } ?? false
+        if isBayerRAW {
+            if let device, device.videoZoomFactor != 1.0, (try? device.lockForConfiguration()) != nil {
+                device.cancelVideoZoomRamp()
+                device.videoZoomFactor = 1.0
+                device.unlockForConfiguration()
+            }
+            if device?.videoZoomFactor != 1.0 || connection.videoScaleAndCropFactor != 1.0 {
+                rawFormat = nil
+            }
+        }
         let settings: AVCapturePhotoSettings
         if let rawFormat {
             settings = AVCapturePhotoSettings(rawPixelFormatType: rawFormat, processedFormat: processedFormat)
         } else {
             settings = AVCapturePhotoSettings(format: processedFormat)
         }
-        let wantedPriority: AVCapturePhotoOutput.QualityPrioritization = request.prioritizeFaster ? .balanced : .quality
-        settings.photoQualityPrioritization =
-            wantedPriority.rawValue <= photoOutput.maxPhotoQualityPrioritization.rawValue
-            ? wantedPriority : photoOutput.maxPhotoQualityPrioritization
+        if rawFormat != nil && isBayerRAW {
+            settings.photoQualityPrioritization = .speed
+            if photoOutput.isConstantColorSupported { settings.isConstantColorEnabled = false }
+        } else {
+            let wantedPriority: AVCapturePhotoOutput.QualityPrioritization =
+                request.prioritizeFaster ? .balanced : .quality
+            settings.photoQualityPrioritization =
+                wantedPriority.rawValue <= photoOutput.maxPhotoQualityPrioritization.rawValue
+                ? wantedPriority : photoOutput.maxPhotoQualityPrioritization
+        }
         settings.maxPhotoDimensions = photoOutput.maxPhotoDimensions
         let flash: AVCaptureDevice.FlashMode =
             switch request.flash {
@@ -1431,6 +1565,7 @@ final class CaptureCore: NSObject, @unchecked Sendable {
         _ request: PhotoRequest, angle: CGFloat, done: @escaping @Sendable (TakenPhoto?) -> Void
     ) {
         guard session.isRunning, movieOutput.isRecording, session.outputs.contains(photoOutput),
+            device?.activeColorSpace != .appleLog,
             let connection = photoOutput.connection(with: .video)
         else { return done(nil) }
         if connection.isVideoRotationAngleSupported(angle) { connection.videoRotationAngle = angle }

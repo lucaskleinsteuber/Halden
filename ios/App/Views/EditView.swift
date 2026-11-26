@@ -188,6 +188,7 @@ struct EditView: View {
                 }
             }
             .padding(.horizontal, 20)
+            .padding(.bottom, 56)
         }
         .foregroundStyle(.white)
         .tint(.yellow)
@@ -327,6 +328,15 @@ struct EditView: View {
             let decoded = await Task.detached(operation: { ImagePipeline.decode(preview, pixels: edge) }).value
         {
             base = CIImage(cgImage: decoded.cgImage)
+            if let local = app.media.localOriginal(of: asset) {
+                let aux = await Task.detached { PortraitRenderer.extractAuxiliary(from: local) }.value
+                depthMap = aux.depth
+                portraitMatte = aux.matte
+            } else if recipe.hasPortraitEdit, let original = try? await app.media.original(of: asset) {
+                let aux = await Task.detached { PortraitRenderer.extractAuxiliary(from: original) }.value
+                depthMap = aux.depth
+                portraitMatte = aux.matte
+            }
         } else if let original = try? await app.media.original(of: asset),
             let decoded = await Task.detached(operation: { ImagePipeline.decode(original, pixels: edge) }).value
         {

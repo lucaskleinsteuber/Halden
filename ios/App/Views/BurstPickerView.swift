@@ -36,9 +36,14 @@ struct BurstPickerView: View {
                 filmstrip
             }
             .padding(.vertical, 12)
-            .navigationTitle("Select Favorites (\(keeping.count)/\(members.count))")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
+                ToolbarItem(placement: .principal) {
+                    Text("Select Favorites (\(keeping.count)/\(members.count))")
+                        .font(.headline)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.72)
+                }
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { dismiss() }
                         .accessibilityIdentifier("burst-picker-cancel")

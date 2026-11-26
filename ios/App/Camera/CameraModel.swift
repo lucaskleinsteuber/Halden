@@ -121,6 +121,10 @@ final class CameraModel {
     }
 
     func flip() {
+        if mode == .dual {
+            swapDualCameras()
+            return
+        }
         zoomShown.forget()
         backend.flip()
     }
@@ -283,6 +287,27 @@ final class CameraModel {
             mode.records ? { [weak self] in self?.startRecording() } : { [weak self] in self?.takePhoto() }
         guard timer > 0 else { return action() }
         runCountdown(seconds: timer, then: action)
+    }
+
+    /// Triggers shutter or a one-shot countdown from Apple Watch without mutating the phone's `timer` setting.
+    func triggerFromWatch(delay: Int) {
+        if isNightCapturing || panoramaStitching { return }
+        if countdown != nil { return cancelCountdown() }
+        if burstTask != nil { return stopBurst() }
+        if isPanoramaCapturing { return stopPanorama() }
+        if recording { return stopRecording() }
+        if mode == .panorama { return startPanorama() }
+        let action: () -> Void
+        if mode == .dual {
+            action =
+                dualKind == .video
+                ? { [weak self] in self?.startDualRecording() } : { [weak self] in self?.takeDualPhoto() }
+        } else {
+            action =
+                mode.records ? { [weak self] in self?.startRecording() } : { [weak self] in self?.takePhoto() }
+        }
+        guard delay > 0 else { return action() }
+        runCountdown(seconds: delay, then: action)
     }
 
     func swapDualCameras() {

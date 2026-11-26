@@ -1,6 +1,8 @@
 import CoreImage
 import Foundation
+import ImageIO
 import Testing
+import UniformTypeIdentifiers
 
 @testable import HaldenKit
 
@@ -69,5 +71,63 @@ import Testing
         var naturalOnly = EditRecipe()
         naturalOnly.portraitLighting = .natural
         #expect(naturalOnly.isEmpty, "natural lighting alone equals no edit")
+    }
+
+    @Test func extractAuxiliaryAlignsPortraitExifOrientationAndDecodesPortraitEdits() throws {
+        let width = 160
+        let height = 120
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("portrait-orient-\(UUID().uuidString).heic")
+        defer { try? FileManager.default.removeItem(at: url) }
+
+        let baseCI = CIImage(color: CIColor(red: 0.7, green: 0.5, blue: 0.4))
+            .cropped(to: CGRect(x: 0, y: 0, width: width, height: height))
+        let cg = try #require(context.createCGImage(baseCI, from: baseCI.extent))
+        let dest = try #require(
+            CGImageDestinationCreateWithURL(url as CFURL, UTType.heic.identifier as CFString, 1, nil))
+        // Sensor image is landscape 160x120 with EXIF orientation 6 (.right -> upright 120x160).
+        CGImageDestinationAddImage(
+            dest, cg, [kCGImagePropertyOrientation: 6] as CFDictionary)
+
+        var matteBytes = [UInt8](repeating: 0, count: width * height)
+        for y in 40..<80 {
+            for x in 50..<110 {
+                matteBytes[y * width + x] = 255
+            }
+        }
+        let desc = try #require(
+            CGImageSourceCopyPropertiesAtIndex(
+                CGImageSourceCreateWithData(
+                    Thumbnails.jpeg(cg, quality: 0.8)!.data as CFData, nil)!, 0, nil))
+        _ = desc
+        let auxInfo: [CFString: Any] = [
+            kCGImageAuxiliaryDataInfoData: Data(matteBytes) as CFData,
+            kCGImageAuxiliaryDataInfoDataDescription: [
+                kCGImagePropertyWidth: width,
+                kCGImagePropertyHeight: height,
+                kCGImagePropertyPixelFormat: kCVPixelFormatType_OneComponent8,
+                kCGImagePropertyBytesPerRow: width,
+            ] as CFDictionary,
+        ]
+        CGImageDestinationAddAuxiliaryDataInfo(
+            dest, kCGImageAuxiliaryDataTypePortraitEffectsMatte, auxInfo as CFDictionary)
+        #expect(CGImageDestinationFinalize(dest))
+
+        let upright = try #require(CIImage(contentsOf: url, options: [.applyOrientationProperty: true]))
+        #expect(Int(upright.extent.width) == height && Int(upright.extent.height) == width)
+
+        let aux = PortraitRenderer.extractAuxiliary(from: url)
+        let matte = try #require(aux.matte)
+        #expect(
+            Int(matte.extent.width) == height && Int(matte.extent.height) == width,
+            "Auxiliary matte without its own orientation tag must inherit primary EXIF orientation 6")
+
+        var recipe = EditRecipe()
+        recipe.portraitAperture = 2.0
+        recipe.portraitLighting = .stage
+        let decoded = try #require(ImagePipeline.decode(url, pixels: 160, edit: recipe))
+        #expect(decoded.cgImage.width == height && decoded.cgImage.height == width)
+        let thumb = try #require(EditRenderer.picture(of: url, with: recipe, edge: 160, context: context))
+        #expect(thumb.width == height && thumb.height == width)
     }
 }

@@ -286,7 +286,7 @@ async fn round3_multi_device_full_lifecycle() {
         .await;
     assert_eq!(share.status, 201);
 
-    // Trash 2 burst extras, then restore 1 of them.
+    // Trash 2 burst extras, then restore 1 of them and permanently delete the other.
     let trash_resp = api
         .post(
             "/api/v1/assets/trash",
@@ -303,6 +303,15 @@ async fn round3_multi_device_full_lifecycle() {
         )
         .await;
     assert_eq!(restore_resp.status, 200);
+    let purge_resp = api
+        .post(
+            "/api/v1/assets/delete",
+            Some(&phone),
+            json!({ "ids": [burst_assets[2]] }),
+        )
+        .await;
+    assert_eq!(purge_resp.status, 200);
+    assert_eq!(purge_resp.body["changed"], 1);
 
     // 7. Device 2 (iPad) syncs everything in small pages (`limit=2`) and verifies complete fidelity.
     let (synced_assets, synced_albums, cursor) = sync_all(&api, &ipad, 2).await;
@@ -321,7 +330,8 @@ async fn round3_multi_device_full_lifecycle() {
     };
     assert_eq!(by_id(&burst_assets[0])["burstId"], burst_id.as_str());
     assert!(by_id(&burst_assets[1])["trashedAt"].is_null());
-    assert!(!by_id(&burst_assets[2])["trashedAt"].is_null());
+    assert!(!by_id(&burst_assets[2])["deletedAt"].is_null());
+    assert!(by_id(&burst_assets[2])["burstId"].is_null());
     assert_eq!(by_id(&live_id)["edit"]["liveEffect"], "long_exposure");
     assert_eq!(by_id(&live_id)["edit"]["style"]["preset"], "amber");
     assert!(
@@ -393,6 +403,13 @@ async fn round3_edit_recipe_v2_boundary_and_negative_validation() {
         json!({
             "version": 2,
             "style": { "preset": "stark_bw", "tone": 1.0, "color": -1.0, "palette": 1.0 },
+            "portraitAperture": 1.4,
+            "portraitLighting": "highKeyMono",
+            "cinematicAperture": 2.0,
+            "cinematicFocusPoints": [
+                { "timeMs": 0, "x": 0.0, "y": 1.0 },
+                { "timeMs": 4200, "x": 0.5, "y": 0.5 }
+            ],
             "liveEffect": "bounce",
             "liveKeyFrameMs": 600_000,
             "audioMix": "in_frame",
@@ -425,6 +442,14 @@ async fn round3_edit_recipe_v2_boundary_and_negative_validation() {
         json!({ "version": 2, "style": { "preset": "amber", "color": 1.01 } }),
         json!({ "version": 2, "style": { "preset": "amber", "palette": 1.01 } }),
         json!({ "version": 2, "filter": "f".repeat(33) }),
+        json!({ "version": 2, "portraitAperture": 1.3 }),
+        json!({ "version": 2, "portraitAperture": 16.1 }),
+        json!({ "version": 2, "portraitLighting": "neon" }),
+        json!({ "version": 2, "cinematicAperture": 1.9 }),
+        json!({ "version": 2, "cinematicAperture": 16.1 }),
+        json!({ "version": 2, "cinematicFocusPoints": "bad" }),
+        json!({ "version": 2, "cinematicFocusPoints": [{ "timeMs": -1, "x": 0.5, "y": 0.5 }] }),
+        json!({ "version": 2, "cinematicFocusPoints": [{ "timeMs": 100, "x": 1.1, "y": 0.5 }] }),
         json!({ "version": 2, "liveEffect": "boomerang" }),
         json!({ "version": 2, "liveKeyFrameMs": -5 }),
         json!({ "version": 2, "liveKeyFrameMs": 600_001 }),

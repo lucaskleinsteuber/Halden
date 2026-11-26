@@ -6,6 +6,10 @@ import SwiftUI
 import UIKit
 import VisionKit
 
+#if canImport(Cinematic)
+    import Cinematic
+#endif
+
 /// Full screen: swipe between photos, pinch or double-tap to zoom, videos play. A picture never
 /// jumps: the thumbnail is there at once, the preview fades in over it at the same size, and the
 /// original follows when zoomed in.
@@ -98,6 +102,7 @@ final class PageController: UIViewController, UIScrollViewDelegate, PHLivePhotoV
     private var effectLooper: AVPlayerLooper?
     private var effectLayer: AVPlayerLayer?
     private var effectTask: Task<Void, Never>?
+    private var liveStillLoaded = false
     private var playbackObserver: NSObjectProtocol?
     private var editObserver: NSObjectProtocol?
     private var liveLoading: Task<PHLivePhoto?, Never>?
@@ -179,6 +184,7 @@ final class PageController: UIViewController, UIScrollViewDelegate, PHLivePhotoV
         }
         loading?.cancel()
         hasOriginal = false
+        liveStillLoaded = false
         scroll.setZoomScale(1, animated: false)
         if asset.isLivePhoto {
             updateLiveBadge()
@@ -190,6 +196,13 @@ final class PageController: UIViewController, UIScrollViewDelegate, PHLivePhotoV
     override func viewDidLayoutSubviews() {
         super.viewDidLayoutSubviews()
         effectLayer?.frame = imageView.bounds
+    }
+
+    private var hasLiveStillOverride: Bool {
+        let current = app.asset(asset.id) ?? asset
+        guard current.isLivePhoto else { return false }
+        let effect = current.activeLiveEffect
+        return (!effect.isVideoOutput && effect != .live) || (effect == .live && current.edit?.liveKeyFrameMs != nil)
     }
 
     /// The thumbnail at once, then the preview (as edited) over it.
@@ -205,12 +218,14 @@ final class PageController: UIViewController, UIScrollViewDelegate, PHLivePhotoV
                     ImagePipeline.decode(preview, pixels: pixels, edit: edit)
                 }).value
             {
+                guard self?.liveStillLoaded != true else { return }
                 self?.show(decoded, fade: true)
             } else if !asset.isVideo, let local = app.media.localOriginal(of: asset),
                 let decoded = await Task.detached(operation: { ImagePipeline.decode(local, pixels: pixels, edit: edit) }
                 )
                 .value
             {
+                guard self?.liveStillLoaded != true else { return }
                 self?.show(decoded, fade: true)
             }
         }
@@ -336,9 +351,15 @@ final class PageController: UIViewController, UIScrollViewDelegate, PHLivePhotoV
             } else {
                 let pixels = Int(
                     max(self.view.bounds.width, self.view.bounds.height) * self.traitCollection.displayScale)
+                var stillEdit = current.edit
+                stillEdit?.portraitAperture = nil
+                stillEdit?.portraitLighting = nil
+                let edit = stillEdit
                 if let decoded = await Task.detached(operation: {
-                    ImagePipeline.decode(url, pixels: pixels, edit: nil)
+                    ImagePipeline.decode(url, pixels: pixels, edit: edit)
                 }).value {
+                    guard !Task.isCancelled else { return }
+                    self.liveStillLoaded = true
                     self.show(decoded, fade: true)
                 }
             }
@@ -472,21 +493,65 @@ final class PageController: UIViewController, UIScrollViewDelegate, PHLivePhotoV
                 return
             }
             item.audioTimePitchAlgorithm = .varispeed
+            await self?.applyAudioMixIfNeeded(to: item, asset: current, edit: current.edit)
             self?.player?.player?.replaceCurrentItem(with: item)
         }
     }
 
-    /// An edited video: trimmed, with its light and colour.
+    /// An edited video: trimmed, with its light, colour and Spatial Audio Mix.
     private func playEdited() {
         Task { [weak self, asset, app] in
             guard let current = app.asset(asset.id) ?? Optional(asset), let edit = current.edit,
-                let video = app.playable(current), let edited = try? await Retiming.edited(video, edit: edit)
+                let video = app.playable(current)
             else { return }
-            let item = AVPlayerItem(asset: edited.composition)
-            item.videoComposition = edited.video
+            var colour = edit
+            colour.quarterTurns = 0
+            colour.straighten = 0
+            colour.crop = nil
+            let needsComposition = edit.trimStartMs != nil || edit.trimEndMs != nil || colour.changesColour
+            let item: AVPlayerItem
+            if needsComposition {
+                guard let edited = try? await Retiming.edited(video, edit: edit) else { return }
+                item = AVPlayerItem(asset: edited.composition)
+                item.videoComposition = edited.video
+            } else {
+                item = AVPlayerItem(asset: video)
+            }
+            await self?.applyAudioMixIfNeeded(to: item, asset: current, edit: edit)
             self?.player?.player?.replaceCurrentItem(with: item)
         }
     }
+
+    private func applyAudioMixIfNeeded(to item: AVPlayerItem, asset: LocalAsset, edit: EditRecipe?) async {
+        #if canImport(Cinematic)
+            guard let style = edit?.audioMix, style != .standard,
+                let localURL = app.media.localOriginal(of: asset)
+            else { return }
+            let intensity = Float(ProDeviceRules.clampAudioMixIntensity(edit?.audioMixIntensity ?? 0.5))
+            if let mix = await Self.makeSpatialAudioMix(url: localURL, style: style, intensity: intensity) {
+                item.audioMix = mix
+            }
+        #endif
+    }
+
+    #if canImport(Cinematic)
+        nonisolated private static func makeSpatialAudioMix(
+            url: URL, style: AudioMixStyle, intensity: Float
+        ) async -> AVAudioMix? {
+            let avAsset = AVURLAsset(url: url)
+            guard await CNAssetSpatialAudioInfo.assetContainsSpatialAudio(asset: avAsset),
+                let info = try? await CNAssetSpatialAudioInfo(asset: avAsset)
+            else { return nil }
+            let rendering: CNSpatialAudioRenderingStyle =
+                switch style {
+                case .standard: .standard
+                case .inFrame: .inFrame
+                case .studio: .studio
+                case .cinematic: .cinematic
+                }
+            return info.audioMix(effectIntensity: intensity, renderingStyle: rendering)
+        }
+    #endif
 
     func viewForZooming(in scrollView: UIScrollView) -> UIView? {
         asset.isVideo ? nil : imageView

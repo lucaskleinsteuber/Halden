@@ -427,7 +427,9 @@ and never changes the file. `null` goes back to the original. Version 1 fields: 
 - `style`: optional photographic style object `{ "preset": "amber", "tone": 0.25, "color": 0.4, "palette": 0.7 }` (`preset` 1–32 bytes, `tone` and `color` in `-1…1`, `palette` in `0…1`).
 - `filter`: optional filter name (`vivid`, `vividWarm`, `vividCool`, `dramatic`, `dramaticWarm`, `dramaticCool`, `mono`, `silvertone`, `noir`; 1–32 bytes).
 - `portraitAperture`: optional depth-of-field f-stop (`1.4…16.0`) for Portrait photos or photos with embedded depth.
-- `portraitLighting`: optional Portrait Lighting effect (`studio`, `contour`, `stage`, `stageMono`, `highKeyMono`).
+- `portraitLighting`: optional Portrait Lighting effect (`natural`, `studio`, `contour`, `stage`, `stageMono`, `highKeyMono`).
+- `cinematicAperture`: optional post-capture f-stop (`2.0…16.0`) for Cinematic videos.
+- `cinematicFocusPoints`: optional focus-rack points (`[{ "timeMs": 0…86400000, "x": 0…1, "y": 0…1 }]`, up to 512 entries) for Cinematic videos.
 - `liveEffect`: optional Live Photo playback effect (`live`, `loop`, `bounce`, `long_exposure`).
 - `liveKeyFrameMs`: optional key-photo timestamp in milliseconds (`0…600000`) within the Live Photo video.
 - `audioMix`: optional Audio Mix rendering style (`standard`, `in_frame`, `studio`, `cinematic`) for Spatial Audio videos.

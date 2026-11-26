@@ -128,6 +128,69 @@ fn check_edit(edit: &Value) -> Result<(), String> {
     {
         return Err("edit.filter must be a non-empty string up to 32 bytes.".into());
     }
+    if let Some(aperture) = map.get("portraitAperture")
+        && !aperture.is_null()
+        && !aperture
+            .as_f64()
+            .is_some_and(|n| n.is_finite() && (1.4..=16.0).contains(&n))
+    {
+        return Err("edit.portraitAperture must be between 1.4 and 16.".into());
+    }
+    if let Some(lighting) = map.get("portraitLighting")
+        && !lighting.is_null()
+        && !lighting.as_str().is_some_and(|s| {
+            matches!(
+                s,
+                "natural" | "studio" | "contour" | "stage" | "stageMono" | "highKeyMono"
+            )
+        })
+    {
+        return Err(
+            "edit.portraitLighting must be natural, studio, contour, stage, stageMono or highKeyMono."
+                .into(),
+        );
+    }
+    if let Some(cin_aperture) = map.get("cinematicAperture")
+        && !cin_aperture.is_null()
+        && !cin_aperture
+            .as_f64()
+            .is_some_and(|n| n.is_finite() && (2.0..=16.0).contains(&n))
+    {
+        return Err("edit.cinematicAperture must be between 2 and 16.".into());
+    }
+    if let Some(points) = map.get("cinematicFocusPoints")
+        && !points.is_null()
+    {
+        let Some(list) = points.as_array() else {
+            return Err("edit.cinematicFocusPoints must be an array.".into());
+        };
+        if list.len() > 512 {
+            return Err("edit.cinematicFocusPoints may contain at most 512 points.".into());
+        }
+        for point in list {
+            let Some(obj) = point.as_object() else {
+                return Err("each cinematic focus point must be an object.".into());
+            };
+            let time_ok = obj
+                .get("timeMs")
+                .and_then(Value::as_i64)
+                .is_some_and(|t| (0..=86_400_000).contains(&t));
+            let x_ok = obj
+                .get("x")
+                .and_then(Value::as_f64)
+                .is_some_and(|n| n.is_finite() && (0.0..=1.0).contains(&n));
+            let y_ok = obj
+                .get("y")
+                .and_then(Value::as_f64)
+                .is_some_and(|n| n.is_finite() && (0.0..=1.0).contains(&n));
+            if !time_ok || !x_ok || !y_ok {
+                return Err(
+                    "cinematicFocusPoints entries require timeMs (0..=86400000) and x, y (0..=1)."
+                        .into(),
+                );
+            }
+        }
+    }
     if let Some(live_effect) = map.get("liveEffect")
         && !live_effect.is_null()
         && !live_effect

@@ -675,7 +675,11 @@ final class HaldenUITests: XCTestCase {
         XCTAssertTrue(app.buttons["Take dual photo"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.descendants(matching: .any)["dual-pip-window"].waitForExistence(timeout: 5))
 
-        // Swap primary/secondary lenses and snap a composited dual photo.
+        // Swap primary/secondary lenses (via both PiP swap and bottom flip button) and snap a composited dual photo.
+        app.buttons["dual-swap"].tap()
+        XCTAssertTrue(app.descendants(matching: .any)["dual-pip-window"].label.contains("Back camera"))
+        app.buttons["flip-camera"].tap()
+        XCTAssertTrue(app.descendants(matching: .any)["dual-pip-window"].label.contains("Front camera"))
         app.buttons["dual-swap"].tap()
         XCTAssertTrue(app.descendants(matching: .any)["dual-pip-window"].label.contains("Back camera"))
         app.buttons["shutter"].tap()

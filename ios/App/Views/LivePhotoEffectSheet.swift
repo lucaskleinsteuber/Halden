@@ -107,16 +107,16 @@ struct LivePhotoEffectSheet: View {
                     Button {
                         selectedEffect = effect
                     } label: {
-                        HStack(spacing: 8) {
+                        HStack(spacing: 6) {
                             Image(systemName: effect.symbol)
                                 .font(.body.weight(.semibold))
                             Text(effect.title)
                                 .font(.subheadline.weight(.semibold))
                                 .lineLimit(1)
-                                .minimumScaleFactor(0.8)
+                                .minimumScaleFactor(0.65)
                             Spacer(minLength: 0)
                         }
-                        .padding(.horizontal, 12)
+                        .padding(.horizontal, 10)
                         .frame(maxWidth: .infinity, minHeight: 48)
                         .foregroundStyle(active ? .black : .primary)
                         .background(

@@ -468,7 +468,9 @@ public enum EditRenderer {
             kCGImageSourceThumbnailMaxPixelSize: edge * 2,
         ]
         guard let small = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else { return nil }
-        var edited = apply(recipe, to: CIImage(cgImage: small))
+        let aux: (depth: CIImage?, matte: CIImage?) =
+            recipe.hasPortraitEdit ? PortraitRenderer.extractAuxiliary(from: original) : (nil, nil)
+        var edited = apply(recipe, to: CIImage(cgImage: small), depthMap: aux.depth, matte: aux.matte)
         let longest = max(edited.extent.width, edited.extent.height)
         if longest > CGFloat(edge) {
             let scale = CGFloat(edge) / longest

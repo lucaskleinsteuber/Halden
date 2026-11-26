@@ -6,13 +6,12 @@ import UIKit
 
 /// Connects the live Halden iPhone camera to the Apple Watch companion app over `WatchConnectivity`:
 /// forwards shutter, 3-second timer, flip, and Digital Crown zoom commands to `CameraModel`, and
-/// streams throttled (~8 fps) low-resolution JPEG previews plus post-capture thumbnails to the Watch.
+/// streams throttled (~8 fps) low-resolution JPEG previews directly from camera pixel buffers.
 @MainActor
 final class WatchCameraBridge: NSObject, WCSessionDelegate {
     private weak var camera: CameraModel?
     private var throttler = WatchFrameThrottler(maxFPS: 8.0)
     private var inFlight = false
-    private var previewTask: Task<Void, Never>?
     private var isActive = false
 
     override init() {
@@ -29,13 +28,12 @@ final class WatchCameraBridge: NSObject, WCSessionDelegate {
         isActive = true
         throttler.reset()
         sendState()
-        startPreviewStream()
+        updatePreviewStream()
     }
 
     func detach() {
         isActive = false
-        previewTask?.cancel()
-        previewTask = nil
+        camera?.backend.setWatchFrameHandler(nil)
         sendState()
         camera = nil
     }
@@ -51,6 +49,7 @@ final class WatchCameraBridge: NSObject, WCSessionDelegate {
         } else {
             try? session.updateApplicationContext(msg)
         }
+        updatePreviewStream()
     }
 
     func sendLastPhoto(_ image: CGImage) {
@@ -66,46 +65,40 @@ final class WatchCameraBridge: NSObject, WCSessionDelegate {
             return WatchCameraState(cameraOpen: false)
         }
         let s = camera.backend.state
+        let isFront = camera.mode == .dual ? camera.dualSwapped : (s.side == .front)
         return WatchCameraState(
             cameraOpen: true,
             mode: camera.mode.rawValue,
             zoom: camera.zoom,
             minZoom: s.zoomRange.lowerBound,
             maxZoom: s.zoomRange.upperBound,
-            isFront: s.side == .front,
+            isFront: isFront,
             isRecording: camera.recording,
             countdown: camera.countdown)
     }
 
-    private func startPreviewStream() {
-        previewTask?.cancel()
-        previewTask = Task { [weak self] in
-            while !Task.isCancelled {
-                try? await Task.sleep(for: .milliseconds(125))
-                guard let self, self.isActive else { break }
-                self.sendLivePreviewFrameIfNeeded()
-            }
+    private func updatePreviewStream() {
+        guard let camera else { return }
+        guard isActive, WCSession.isSupported(),
+            WCSession.default.activationState == .activated,
+            WCSession.default.isReachable
+        else {
+            camera.backend.setWatchFrameHandler(nil)
+            return
+        }
+        camera.backend.setWatchFrameHandler { [weak self] jpeg in
+            Task { @MainActor in self?.deliverPreviewJPEG(jpeg) }
         }
     }
 
-    private func sendLivePreviewFrameIfNeeded() {
-        guard WCSession.isSupported(), let camera else { return }
+    private func deliverPreviewJPEG(_ jpeg: Data) {
+        guard isActive, WCSession.isSupported() else { return }
         let session = WCSession.default
         let now = ProcessInfo.processInfo.systemUptime
         guard session.activationState == .activated,
             throttler.shouldSendFrame(now: now, isReachable: session.isReachable, inFlight: inFlight)
         else { return }
 
-        let view = camera.backend.previewView
-        guard view.bounds.width > 0, view.bounds.height > 0 else { return }
-        let targetSize = CGSize(
-            width: CGFloat(WatchFrameThrottler.targetWidth),
-            height: CGFloat(WatchFrameThrottler.targetHeight))
-        let renderer = UIGraphicsImageRenderer(size: targetSize)
-        let snapshot = renderer.image { _ in
-            view.drawHierarchy(in: CGRect(origin: .zero, size: targetSize), afterScreenUpdates: false)
-        }
-        guard let jpeg = snapshot.jpegData(compressionQuality: throttler.jpegQuality) else { return }
         throttler.recordPayloadSize(jpeg.count)
         inFlight = true
         session.sendMessage(
@@ -138,11 +131,9 @@ final class WatchCameraBridge: NSObject, WCSessionDelegate {
         }
         switch command {
         case .shutter:
-            camera.timer = 0
-            camera.shutter()
+            camera.triggerFromWatch(delay: 0)
         case .timer3s:
-            camera.timer = 3
-            camera.shutter()
+            camera.triggerFromWatch(delay: 3)
         case .flipCamera:
             camera.flip()
         case .setZoom(let factor):
@@ -159,6 +150,10 @@ final class WatchCameraBridge: NSObject, WCSessionDelegate {
         _ session: WCSession, activationDidCompleteWith activationState: WCSessionActivationState, error: Error?
     ) {
         Task { @MainActor in self.sendState() }
+    }
+
+    nonisolated func sessionReachabilityDidChange(_ session: WCSession) {
+        Task { @MainActor in self.updatePreviewStream() }
     }
 
     nonisolated func sessionDidBecomeInactive(_ session: WCSession) {}

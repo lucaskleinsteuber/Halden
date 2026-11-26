@@ -21,6 +21,10 @@ struct CameraView: View {
         }
         .onChange(of: app.camera.mode) { _, _ in watchBridge.sendState() }
         .onChange(of: app.camera.recording) { _, _ in watchBridge.sendState() }
+        .onChange(of: app.camera.countdown) { _, _ in watchBridge.sendState() }
+        .onChange(of: app.camera.dualSwapped) { _, _ in watchBridge.sendState() }
+        .onChange(of: app.camera.backend.state.side) { _, _ in watchBridge.sendState() }
+        .onChange(of: app.camera.backend.state.zoomRange) { _, _ in watchBridge.sendState() }
     }
 }
 

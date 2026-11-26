@@ -6,13 +6,18 @@ import UIKit
 /// Simultaneous back + front camera engine backed by `AVCaptureMultiCamSession` (iPhone 15 and
 /// newer). Feeds the primary image into `MetalPreviewView`, delivers secondary Picture-in-Picture
 /// preview frames, and composites Dual photos (HEIC/JPEG) and Dual videos (single `.mov`).
-final class MultiCamEngine: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate, @unchecked Sendable {
+final class MultiCamEngine: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate,
+    AVCaptureAudioDataOutputSampleBufferDelegate, @unchecked Sendable
+{
     let queue = DispatchQueue(label: "halden.multicam", qos: .userInitiated)
     private let ciContext = CIContext(options: [.cacheIntermediates: false])
     private let metalView: MetalPreviewView
     private var session: AVCaptureMultiCamSession?
+    private var backDevice: AVCaptureDevice?
     private let backOutput = AVCaptureVideoDataOutput()
     private let frontOutput = AVCaptureVideoDataOutput()
+    private let audioOutput = AVCaptureAudioDataOutput()
+    private var audioAttached = false
     private var latestBack: CIImage?
     private var latestFront: CIImage?
     private var swapped = false
@@ -23,6 +28,7 @@ final class MultiCamEngine: NSObject, AVCaptureVideoDataOutputSampleBufferDelega
     // Composited Dual video recording state.
     private var writer: AVAssetWriter?
     private var writerInput: AVAssetWriterInput?
+    private var writerAudioInput: AVAssetWriterInput?
     private var adaptor: AVAssetWriterInputPixelBufferAdaptor?
     private var recordingURL: URL?
     private var recordingStart: CMTime?
@@ -45,6 +51,12 @@ final class MultiCamEngine: NSObject, AVCaptureVideoDataOutputSampleBufferDelega
             guard Self.isSupported else { return }
             if self.session == nil {
                 self.setupSession()
+            } else if !self.audioAttached, let multi = self.session,
+                AVCaptureDevice.authorizationStatus(for: .audio) == .authorized
+            {
+                multi.beginConfiguration()
+                self.attachMicrophone(to: multi)
+                multi.commitConfiguration()
             }
             if let session = self.session, !session.isRunning {
                 session.startRunning()
@@ -56,6 +68,22 @@ final class MultiCamEngine: NSObject, AVCaptureVideoDataOutputSampleBufferDelega
         queue.async {
             self.swapped = swapped
             self.corner = corner
+            if swapped, let back = self.backDevice, (try? back.lockForConfiguration()) != nil {
+                back.videoZoomFactor = 1.0
+                back.unlockForConfiguration()
+            }
+        }
+    }
+
+    func zoom(to factor: Double, glide: Bool) {
+        queue.async {
+            guard !self.swapped, let device = self.backDevice, (try? device.lockForConfiguration()) != nil else {
+                return
+            }
+            let clamped = min(max(factor, 1.0), min(5.0, Double(device.maxAvailableVideoZoomFactor)))
+            let rate = glide ? Zoom.glideRate(from: Double(device.videoZoomFactor), to: clamped) : Zoom.followRate
+            device.ramp(toVideoZoomFactor: CGFloat(clamped), withRate: rate)
+            device.unlockForConfiguration()
         }
     }
 
@@ -77,11 +105,13 @@ final class MultiCamEngine: NSObject, AVCaptureVideoDataOutputSampleBufferDelega
 
         guard
             let back = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .back),
-            let front = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .front),
+            let front = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .front)
+                ?? AVCaptureDevice.default(.builtInTrueDepthCamera, for: .video, position: .front),
             let backInput = try? AVCaptureDeviceInput(device: back),
             let frontInput = try? AVCaptureDeviceInput(device: front),
             multi.canAddInput(backInput), multi.canAddInput(frontInput)
         else { return }
+        backDevice = back
 
         multi.addInputWithNoConnections(backInput)
         multi.addInputWithNoConnections(frontInput)
@@ -123,12 +153,34 @@ final class MultiCamEngine: NSObject, AVCaptureVideoDataOutputSampleBufferDelega
             }
             frontOutput.setSampleBufferDelegate(self, queue: queue)
         }
+        if AVCaptureDevice.authorizationStatus(for: .audio) == .authorized {
+            attachMicrophone(to: multi)
+        }
         session = multi
+    }
+
+    private func attachMicrophone(to multi: AVCaptureMultiCamSession) {
+        guard !audioAttached,
+            let mic = AVCaptureDevice.default(for: .audio),
+            let micInput = try? AVCaptureDeviceInput(device: mic),
+            multi.canAddInput(micInput),
+            multi.canAddOutput(audioOutput)
+        else { return }
+        multi.addInput(micInput)
+        multi.addOutput(audioOutput)
+        audioOutput.setSampleBufferDelegate(self, queue: queue)
+        audioAttached = true
     }
 
     func captureOutput(
         _ output: AVCaptureOutput, didOutput sampleBuffer: CMSampleBuffer, from connection: AVCaptureConnection
     ) {
+        if output === audioOutput {
+            if recordingStart != nil, let audioIn = writerAudioInput, audioIn.isReadyForMoreMediaData {
+                audioIn.append(sampleBuffer)
+            }
+            return
+        }
         guard let buffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
         let ci = CIImage(cvPixelBuffer: buffer)
         if output === backOutput {
@@ -199,9 +251,28 @@ final class MultiCamEngine: NSObject, AVCaptureVideoDataOutputSampleBufferDelega
                 ])
             guard writer.canAdd(input) else { return }
             writer.add(input)
+            writer.metadata = VideoMetadata.items(
+                location: request.location, takenAt: request.takenAt, timeZone: request.timeZone)
+            var audioIn: AVAssetWriterInput?
+            if self.audioAttached {
+                let candidate = AVAssetWriterInput(
+                    mediaType: .audio,
+                    outputSettings: [
+                        AVFormatIDKey: kAudioFormatMPEG4AAC,
+                        AVSampleRateKey: 44_100,
+                        AVNumberOfChannelsKey: 1,
+                        AVEncoderBitRateKey: 96_000,
+                    ])
+                candidate.expectsMediaDataInRealTime = true
+                if writer.canAdd(candidate) {
+                    writer.add(candidate)
+                    audioIn = candidate
+                }
+            }
             guard writer.startWriting() else { return }
             self.writer = writer
             self.writerInput = input
+            self.writerAudioInput = audioIn
             self.adaptor = adaptor
             self.recordingURL = request.url
             self.recordingStart = nil
@@ -214,12 +285,15 @@ final class MultiCamEngine: NSObject, AVCaptureVideoDataOutputSampleBufferDelega
             guard let writer = self.writer, let input = self.writerInput, let url = self.recordingURL else {
                 return done(nil)
             }
+            let audioIn = self.writerAudioInput
             self.writer = nil
             self.writerInput = nil
+            self.writerAudioInput = nil
             self.adaptor = nil
             self.recordingURL = nil
             self.recordingStart = nil
             input.markAsFinished()
+            audioIn?.markAsFinished()
             let box = CarriedWriter(writer: writer)
             writer.finishWriting {
                 done(box.writer.status == .completed ? url : nil)
