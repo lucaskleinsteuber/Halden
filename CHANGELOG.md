@@ -155,6 +155,8 @@ part of the first versions.
   edits to Long Exposure / Key Photo stills and Spatial Audio Mixes in full screen, scaled
   `BurstPickerView` and `LivePhotoEffectSheet` labels for XXXL Dynamic Type, and validated
   Portrait/Cinematic edit fields and burst tombstones on the server.
+- Completed the initial database backup and mirror health check before the server starts accepting
+  requests so `/api/v1/me` never briefly reports `mirror: "none"` right after startup or restart.
 
 ## 25.11.2026 – App 0.1.0
 

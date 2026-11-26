@@ -259,6 +259,7 @@ async fn start_inner(
     .await?;
 
     let backup_status = Arc::new(crate::backup::mirror::StatusCell::default());
+    back_up(&pool, config, &backup_status, &wake).await;
 
     let addr = listener.local_addr()?;
     let state = AppState::new(
@@ -637,7 +638,8 @@ async fn keep_backed_up(
     status: std::sync::Arc<crate::backup::mirror::StatusCell>,
     wake: std::sync::Arc<tokio::sync::Notify>,
 ) {
-    let mut every_hour = tokio::time::interval(BACKUP_EVERY);
+    let start = tokio::time::Instant::now() + BACKUP_EVERY;
+    let mut every_hour = tokio::time::interval_at(start, BACKUP_EVERY);
     loop {
         every_hour.tick().await;
         back_up(&pool, &config, &status, &wake).await;
