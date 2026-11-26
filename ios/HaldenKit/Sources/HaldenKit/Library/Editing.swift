@@ -31,6 +31,8 @@ public struct EditRecipe: Codable, Sendable, Hashable {
         var portraitLighting: PortraitLighting? = nil
         var cinematicAperture: Double? = nil
         var cinematicFocusPoints: [CinematicFocusPoint]? = nil
+        var liveEffect: LivePhotoEffect? = nil
+        var liveKeyFrameMs: Int64? = nil
         var quarterTurns: Int = 0
         var straighten: Double = 0
         var crop: Crop? = nil
@@ -40,6 +42,7 @@ public struct EditRecipe: Codable, Sendable, Hashable {
         enum CodingKeys: String, CodingKey {
             case version, exposure, brightness, contrast, highlights, shadows, saturation, vibrance, warmth, tint
             case style, filter, portraitAperture, portraitLighting, cinematicAperture, cinematicFocusPoints
+            case liveEffect, liveKeyFrameMs
             case quarterTurns, straighten, crop, trimStartMs, trimEndMs
         }
 
@@ -69,6 +72,8 @@ public struct EditRecipe: Codable, Sendable, Hashable {
             cinematicAperture = try? container.decodeIfPresent(Double.self, forKey: .cinematicAperture)
             cinematicFocusPoints = try? container.decodeIfPresent(
                 [CinematicFocusPoint].self, forKey: .cinematicFocusPoints)
+            liveEffect = try? container.decodeIfPresent(LivePhotoEffect.self, forKey: .liveEffect)
+            liveKeyFrameMs = try? container.decodeIfPresent(Int64.self, forKey: .liveKeyFrameMs)
             read(.quarterTurns, &quarterTurns)
             read(.straighten, &straighten)
             crop = try? container.decodeIfPresent(Crop.self, forKey: .crop)
@@ -167,6 +172,16 @@ public struct EditRecipe: Codable, Sendable, Hashable {
     }
     public var hasCinematicEdit: Bool {
         cinematicAperture != nil || !(cinematicFocusPoints?.isEmpty ?? true)
+    }
+    /// Non-destructive Live Photo playback effect (`live` collapses to `nil`).
+    public var liveEffect: LivePhotoEffect? {
+        get { box.values.liveEffect }
+        set { change { $0.liveEffect = newValue } }
+    }
+    /// Key-photo timestamp (ms) chosen within a Live Photo's paired video.
+    public var liveKeyFrameMs: Int64? {
+        get { box.values.liveKeyFrameMs }
+        set { change { $0.liveKeyFrameMs = newValue } }
     }
     // Shape: quarter turns clockwise, straightening in degrees (-45…45), and the part kept
     // (0…1 of the turned and straightened picture).
@@ -280,6 +295,8 @@ public struct EditRecipe: Codable, Sendable, Hashable {
         } else {
             fitted.cinematicFocusPoints = nil
         }
+        fitted.liveEffect = liveEffect == .live ? nil : liveEffect
+        fitted.liveKeyFrameMs = liveKeyFrameMs.map { LivePhotoEffectMath.clampKeyFrameMs($0) }
         fitted.quarterTurns = ((quarterTurns % 4) + 4) % 4
         fitted.straighten = clamp(straighten, 45)
         fitted.crop = crop?.fitted

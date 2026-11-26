@@ -55,6 +55,7 @@ pub async fn run(ctx: &JobContext, job: &Job) -> Result<(), String> {
         let (edge, quality) = match role {
             DerivedRole::Thumbnail => THUMBNAIL,
             DerivedRole::Preview => PREVIEW,
+            DerivedRole::LiveEffect => continue,
         };
         let source = image.clone();
         let (data, width, height) = ctx

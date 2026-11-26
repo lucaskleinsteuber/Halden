@@ -85,6 +85,8 @@ public actor Syncer {
         local.playback = asset.playback
         local.edit = asset.edit
         local.streamSha256 = asset.file("stream")?.sha256 ?? local.streamSha256
+        local.liveEffectSha256 = asset.file("live_effect")?.sha256
+        local.liveEffectMime = asset.file("live_effect")?.mimeType
         try local.save(db)
     }
 }

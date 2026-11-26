@@ -35,6 +35,11 @@ enum UITestWorld {
                     asset.durationMs = nil
                     asset.burstId = "00000000-0000-4000-8000-bbbbbbbbbbbb"
                 }
+                if count >= 10, index == 6 {
+                    asset.kind = "photo"
+                    asset.durationMs = nil
+                    asset.pairedVideoSha256 = String(format: "%064x", 99)
+                }
                 asset.seq = Int64(count - index)
                 // Places all over Europe (the same every time); one in ten has none, some are
                 // estimated.

@@ -271,7 +271,9 @@ pub fn router(state: AppState) -> Router {
         .route("/api/v1/uploads/{id}", patch(uploads::send))
         .route(
             "/api/v1/assets/{id}/files/{role}",
-            get(library::file_by_role).put(assets::put_file),
+            get(library::file_by_role)
+                .put(assets::put_file)
+                .delete(assets::delete_file),
         )
         .route("/api/v1/files/{sha256}", get(library::file_by_hash))
         .route("/api/v1/thumbnails", post(library::bulk));

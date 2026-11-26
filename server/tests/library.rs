@@ -1112,3 +1112,141 @@ async fn cinematic_capture_mode_is_kept_on_videos_and_synced() {
     assert_eq!(photo_got.body["captureMode"], Value::Null);
     api.stop().await;
 }
+
+/// Live Photo effects store `liveEffect` / `liveKeyFrameMs` in the edit recipe and upload,
+/// replace, sync and delete rendered files under the `live_effect` derived role.
+#[tokio::test]
+async fn live_photo_effect_derived_file_uploads_replaces_deletes_and_syncs() {
+    let api = Api::start().await;
+    let token = owner(&api).await;
+    let photo = Uuid::new_v4().to_string();
+    api.upload(
+        &token,
+        &photo,
+        &random_bytes(256),
+        "image/heic",
+        json!({ "takenAt": 1_795_443_730_000_i64 }),
+    )
+    .await;
+
+    let path = format!("/api/v1/assets/{photo}");
+    let effect_url = format!("{path}/files/live_effect");
+
+    // Upload a rendered Loop MP4 under role `live_effect`.
+    let loop_mp4 = random_bytes(1024);
+    let put_loop = api
+        .http
+        .put(api.url(&effect_url))
+        .bearer_auth(&token)
+        .header("content-type", "video/mp4")
+        .header("halden-sha256", sha_hex(&loop_mp4))
+        .header("halden-width", "1080")
+        .header("halden-height", "1440")
+        .body(loop_mp4.clone())
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(put_loop.status(), 200);
+    let body: Value = put_loop.json().await.unwrap();
+    let effect_file = body["files"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|f| f["role"] == "live_effect")
+        .expect("live_effect file listed");
+    assert_eq!(effect_file["sha256"], sha_hex(&loop_mp4).as_str());
+    assert_eq!(effect_file["mimeType"], "video/mp4");
+
+    // Store non-destructive edit with `liveEffect` and `liveKeyFrameMs`.
+    let edit_resp = api
+        .call(
+            Method::PATCH,
+            &path,
+            Some(&token),
+            Some(json!({ "edit": { "version": 2, "liveEffect": "loop", "liveKeyFrameMs": 650 } })),
+        )
+        .await;
+    assert_eq!(edit_resp.status, 200, "{}", edit_resp.body);
+    assert_eq!(edit_resp.body["edit"]["liveEffect"], "loop");
+    assert_eq!(edit_resp.body["edit"]["liveKeyFrameMs"], 650);
+
+    // Replace with a Long Exposure HEIC still: previous derived hash is replaced and cleaned up.
+    let long_exp = random_bytes(768);
+    let put_long = api
+        .http
+        .put(api.url(&effect_url))
+        .bearer_auth(&token)
+        .header("content-type", "image/heic")
+        .header("halden-sha256", sha_hex(&long_exp))
+        .body(long_exp.clone())
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(put_long.status(), 200);
+    let fetched = api
+        .http
+        .get(api.url(&effect_url))
+        .bearer_auth(&token)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(fetched.status(), 200);
+    assert_eq!(fetched.bytes().await.unwrap().as_ref(), long_exp.as_slice());
+
+    // Sync carries the live_effect file and edit fields.
+    let synced = api.get("/api/v1/sync?since=0", &token).await;
+    let synced_asset = synced.body["assets"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|a| a["id"] == photo.as_str())
+        .unwrap();
+    assert!(
+        synced_asset["files"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|f| f["role"] == "live_effect" && f["sha256"] == sha_hex(&long_exp).as_str())
+    );
+
+    // Invalid liveEffect / liveKeyFrameMs values are rejected with 422.
+    for bad in [
+        json!({ "version": 2, "liveEffect": "spin" }),
+        json!({ "version": 2, "liveKeyFrameMs": -1 }),
+        json!({ "version": 2, "liveKeyFrameMs": 999_999 }),
+    ] {
+        let refused = api
+            .call(
+                Method::PATCH,
+                &path,
+                Some(&token),
+                Some(json!({ "edit": bad })),
+            )
+            .await;
+        assert_eq!(refused.status, 422, "expected 422 for {bad}");
+    }
+
+    // Deleting `live_effect` removes the derived file; deleting `thumbnail` is refused.
+    let del_thumb = api
+        .call(
+            Method::DELETE,
+            &format!("{path}/files/thumbnail"),
+            Some(&token),
+            None,
+        )
+        .await;
+    assert_eq!(del_thumb.status, 422);
+
+    let del_effect = api
+        .call(Method::DELETE, &effect_url, Some(&token), None)
+        .await;
+    assert_eq!(del_effect.status, 200, "{}", del_effect.body);
+    assert!(
+        !del_effect.body["files"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|f| f["role"] == "live_effect")
+    );
+    api.stop().await;
+}

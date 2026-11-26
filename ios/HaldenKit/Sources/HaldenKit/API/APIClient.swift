@@ -210,7 +210,7 @@ public final class APIClient: Sendable {
         try await call("POST", "uploads/\(id)/complete", json: Empty())
     }
 
-    /// Sends a thumbnail or preview the phone made.
+    /// Sends a thumbnail, preview or rendered `live_effect` file the phone made.
     public func put(
         file data: Data, role: String, asset: String, mimeType: String, sha256: String, width: Int, height: Int
     ) async throws -> Asset {
@@ -220,6 +220,13 @@ public final class APIClient: Sendable {
         request.setValue(String(width), forHTTPHeaderField: "Halden-Width")
         request.setValue(String(height), forHTTPHeaderField: "Halden-Height")
         let (body, _) = try await send(request, body: data)
+        return try decode(Asset.self, from: body)
+    }
+
+    /// Removes a derived file (currently `live_effect`) from the server.
+    @discardableResult
+    public func deleteDerived(role: String, asset: String) async throws -> Asset {
+        let (body, _) = try await send(request("DELETE", "assets/\(asset)/files/\(role)"))
         return try decode(Asset.self, from: body)
     }
 

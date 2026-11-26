@@ -15,6 +15,7 @@ struct PhotoView: View {
     @State private var confirmDelete = false
     @State private var editingSlowMotion = false
     @State private var editingCinematic = false
+    @State private var editingLiveEffect = false
     @State private var addingToAlbum: ChosenPhotos?
     @State private var editing = false
     @State private var pickingBurst = false
@@ -96,6 +97,18 @@ struct PhotoView: View {
                     .accessibilityLabel("Edit")
                     .accessibilityIdentifier("edit")
                 }
+                if asset?.isLivePhoto == true {
+                    ToolbarSpacer(.flexible, placement: .bottomBar)
+                    ToolbarItem(placement: .bottomBar) {
+                        Button {
+                            editingLiveEffect = true
+                        } label: {
+                            Image(systemName: asset?.activeLiveEffect.symbol ?? "livephoto")
+                        }
+                        .accessibilityLabel("Live Photo effects")
+                        .accessibilityIdentifier("live-effects")
+                    }
+                }
                 if asset?.isSlowMotion == true {
                     ToolbarSpacer(.flexible, placement: .bottomBar)
                     ToolbarItem(placement: .bottomBar) {
@@ -173,6 +186,9 @@ struct PhotoView: View {
             }
             .sheet(isPresented: $editingCinematic) {
                 if let asset { CinematicEditorView(asset: asset) }
+            }
+            .sheet(isPresented: $editingLiveEffect) {
+                if let asset { LivePhotoEffectSheet(asset: asset) }
             }
             .sheet(isPresented: $pickingBurst) {
                 if burstMembers.count > 1 { BurstPickerView(members: burstMembers) }
@@ -310,6 +326,10 @@ struct InfoView: View {
             }
             if asset.edit != nil {
                 LabeledContent("Edited", value: "yes, the original is kept").accessibilityIdentifier("info-edited")
+            }
+            if asset.isLivePhoto && asset.activeLiveEffect != .live {
+                LabeledContent("Live effect", value: asset.activeLiveEffect.title)
+                    .accessibilityIdentifier("info-live-effect")
             }
             if let slow = asset.playback {
                 LabeledContent(

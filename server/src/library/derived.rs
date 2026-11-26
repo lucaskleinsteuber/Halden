@@ -18,11 +18,14 @@ use crate::{
 
 /// Thumbnails and previews are small; anything bigger is refused.
 pub const MAX_BYTES: usize = 8 * 1024 * 1024;
+/// Rendered Live Photo effects (loop/bounce MP4 or long-exposure still) may be up to 24 MiB.
+pub const MAX_LIVE_EFFECT_BYTES: usize = 24 * 1024 * 1024;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DerivedRole {
     Thumbnail,
     Preview,
+    LiveEffect,
 }
 
 impl DerivedRole {
@@ -30,6 +33,7 @@ impl DerivedRole {
         match text {
             "thumbnail" => Some(Self::Thumbnail),
             "preview" => Some(Self::Preview),
+            "live_effect" => Some(Self::LiveEffect),
             _ => None,
         }
     }
@@ -38,6 +42,14 @@ impl DerivedRole {
         match self {
             Self::Thumbnail => "thumbnail",
             Self::Preview => "preview",
+            Self::LiveEffect => "live_effect",
+        }
+    }
+
+    pub fn max_bytes(self) -> usize {
+        match self {
+            Self::LiveEffect => MAX_LIVE_EFFECT_BYTES,
+            Self::Thumbnail | Self::Preview => MAX_BYTES,
         }
     }
 }
@@ -205,6 +217,53 @@ async fn write_once(full: PathBuf, data: Bytes) -> std::io::Result<()> {
     })
     .await
     .map_err(|join| std::io::Error::other(join.to_string()))?
+}
+
+/// Removes a derived file (e.g. a Live Photo effect when reverted to plain Live) and touches the
+/// asset so other devices learn via `/sync`.
+pub async fn remove(
+    db: &Db,
+    root: &Path,
+    user_id: &str,
+    asset_id: &str,
+    role: DerivedRole,
+) -> Result<Asset, DerivedError> {
+    let exists: Option<(i64,)> =
+        sqlx::query_as("SELECT 1 FROM assets WHERE id = ? AND user_id = ? AND deleted_at IS NULL")
+            .bind(asset_id)
+            .bind(user_id)
+            .fetch_optional(db.read())
+            .await?;
+    if exists.is_none() {
+        return Err(DerivedError::NotFound);
+    }
+
+    let mut tx = db.begin().await?;
+    let previous: Option<(String,)> = sqlx::query_as(
+        "SELECT path FROM asset_files WHERE asset_id = ? AND role = ? AND storage = 'derived'",
+    )
+    .bind(asset_id)
+    .bind(role.as_str())
+    .fetch_optional(&mut *tx)
+    .await?;
+    if previous.is_some() {
+        sqlx::query(
+            "DELETE FROM asset_files WHERE asset_id = ? AND role = ? AND storage = 'derived'",
+        )
+        .bind(asset_id)
+        .bind(role.as_str())
+        .execute(&mut *tx)
+        .await?;
+        assets::touch(&mut tx, asset_id).await?;
+    }
+    tx.commit().await?;
+
+    if let Some((old,)) = previous {
+        remove_if_unused(db, root, &old).await?;
+    }
+    assets::get(db.read(), user_id, asset_id)
+        .await?
+        .ok_or(DerivedError::NotFound)
 }
 
 /// Deletes a derived file once no asset refers to it any more.

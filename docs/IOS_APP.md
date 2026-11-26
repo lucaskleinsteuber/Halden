@@ -75,6 +75,13 @@ the design comes after that. What works today is described below.
   (`isGeometricDistortionCorrectionEnabled`), hardware lens-smudge detection hints
   (`cameraLensSmudgeDetectionStatus`, dismissible banner), and optional camera-lens
   (`primaryConstituentDeviceSwitchingBehavior`) and white-balance locks while recording video.
+- **Live Photo effects & Key Photo** (`LivePhotoEffects`, `LivePhotoEffectSheet`, `Viewer`):
+  - Full-screen Live Photos offer **Live**, **Loop** (cross-faded seamless MP4), **Bounce**
+    (forward/reverse MP4), **Long Exposure** (Vision-aligned averaged HEIC/JPEG still), and a
+    **Key Photo** frame scrubber.
+  - Effects are stored non-destructively in `EditRecipe` (`liveEffect`, `liveKeyFrameMs`); the
+    rendered file is cached locally and synced to the server under the `live_effect` derived role
+    (`PUT`/`DELETE /assets/{id}/files/live_effect`) so the original Live Photo stays untouched.
 - **Panorama** (`Panorama`, `PanoramaGuide`, `PanoramaStitcher`, `PanoramaOverlay`):
   - Dedicated **Pano** camera mode supporting horizontal (`leftToRight` / `rightToLeft`) and
     vertical (`bottomToTop` / `topToBottom`) sweeps. Tap the arrow on the guide strip to reverse

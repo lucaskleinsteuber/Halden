@@ -428,6 +428,8 @@ and never changes the file. `null` goes back to the original. Version 1 fields: 
 - `filter`: optional filter name (`vivid`, `vividWarm`, `vividCool`, `dramatic`, `dramaticWarm`, `dramaticCool`, `mono`, `silvertone`, `noir`; 1–32 bytes).
 - `portraitAperture`: optional depth-of-field f-stop (`1.4…16.0`) for Portrait photos or photos with embedded depth.
 - `portraitLighting`: optional Portrait Lighting effect (`studio`, `contour`, `stage`, `stageMono`, `highKeyMono`).
+- `liveEffect`: optional Live Photo playback effect (`live`, `loop`, `bounce`, `long_exposure`).
+- `liveKeyFrameMs`: optional key-photo timestamp in milliseconds (`0…600000`) within the Live Photo video.
 
 The asset object carries it as `edit`. `restore: ["takenAt", "location"]`
 drops corrections and shows the originals again. Answers with the asset.
@@ -474,10 +476,11 @@ Which of these are backed up? Up to 1000 items per request, answered with two da
 
 `conflict`: this asset id is stored with different content.
 
-### `PUT /assets/{id}/files/thumbnail` and `PUT /assets/{id}/files/preview`
+### `PUT /assets/{id}/files/{role}` (`thumbnail`, `preview`, `live_effect`) and `DELETE /assets/{id}/files/live_effect`
 
-The phone makes the thumbnail (grid, about 512 px) and the preview (full screen, about 2048 px)
-and sends each in one request after the original:
+The phone makes the thumbnail (grid, about 512 px), the preview (full screen, about 2048 px) and
+rendered Live Photo effects (`live_effect`: Loop/Bounce MP4 or Long Exposure HEIC/JPEG) and sends
+each in one request after the original:
 
 ```
 Content-Type: image/jpeg
@@ -488,8 +491,11 @@ Halden-Height: 384
 <bytes>
 ```
 
-JPEG, HEIC, PNG or WebP, at most 8 MiB. Answers with the asset. Sending a new one replaces the
-old one.
+`thumbnail` and `preview` accept JPEG, HEIC, PNG or WebP up to 8 MiB. `live_effect` additionally
+accepts `video/mp4` and `video/quicktime` up to 24 MiB. Answers with the asset. Sending a new one
+replaces the old one (and removes the replaced file once unused). `DELETE /assets/{id}/files/live_effect`
+removes a rendered Live Photo effect when reverting to plain Live playback and answers with the
+updated asset.
 
 ## Trash
 

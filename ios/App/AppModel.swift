@@ -549,6 +549,60 @@ final class AppModel {
         }
     }
 
+    /// Renders and applies a non-destructive Live Photo effect (Loop, Bounce, Long Exposure) or
+    /// key photo frame, caches it locally, updates `EditRecipe`, and syncs the `live_effect`
+    /// derived file to the server.
+    func applyLiveEffect(_ id: String, effect: LivePhotoEffect, keyFrameMs: Int64?) async throws {
+        guard let asset = asset(id) else { return }
+        var recipe = asset.edit ?? EditRecipe()
+        recipe.version = EditRecipe.currentVersion
+        recipe.liveEffect = effect == .live ? nil : effect
+        recipe.liveKeyFrameMs = keyFrameMs.map { LivePhotoEffectMath.clampKeyFrameMs($0) }
+        let cleanRecipe: EditRecipe? = recipe.isEmpty ? nil : recipe.fitted
+
+        if effect == .live && keyFrameMs == nil {
+            try await database.writer.write { db in
+                try db.execute(
+                    sql: "UPDATE asset SET liveEffectSha256 = NULL, liveEffectMime = NULL WHERE id = ?",
+                    arguments: [id])
+            }
+            setEdit(id, cleanRecipe)
+            if let client, asset.backedUp {
+                _ = try? await client.deleteDerived(role: "live_effect", asset: id)
+            }
+            return
+        }
+
+        if let video = try? await media.pairedVideo(of: asset) {
+            let temp = FileManager.default.temporaryDirectory
+                .appendingPathComponent("halden-live-fx-\(UUID().uuidString).\(effect.outputExtension)")
+            defer { try? FileManager.default.removeItem(at: temp) }
+            let rendered: RenderedLiveEffect
+            if effect == .live, let keyMs = keyFrameMs {
+                rendered = try await LivePhotoEffectRenderer.extractKeyFrame(video: video, atMs: keyMs, to: temp)
+            } else {
+                rendered = try await LivePhotoEffectRenderer.render(effect: effect, video: video, to: temp)
+            }
+            _ = try await media.cacheLiveEffect(
+                data: rendered.data, sha256: rendered.sha256, mimeType: rendered.mimeType)
+            try await database.writer.write { db in
+                try db.execute(
+                    sql: "UPDATE asset SET liveEffectSha256 = ?, liveEffectMime = ? WHERE id = ?",
+                    arguments: [rendered.sha256, rendered.mimeType, id])
+            }
+            setEdit(id, cleanRecipe)
+            if let client, asset.backedUp {
+                _ = try? await client.put(
+                    file: rendered.data, role: "live_effect", asset: id,
+                    mimeType: rendered.mimeType, sha256: rendered.sha256,
+                    width: rendered.width, height: rendered.height)
+            }
+        } else {
+            // Offline / synthetic test library without video bytes on disk: still store the recipe.
+            setEdit(id, cleanRecipe)
+        }
+    }
+
     // MARK: Albums
 
     func photos(inAlbum id: String) -> [LocalAsset] {

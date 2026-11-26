@@ -238,6 +238,8 @@ mod upgrade_tests {
              VALUES ('s1', 'u1', 'tok', '[\"a1\"]', 1)",
             // 13
             "UPDATE assets SET burst_id = 'b1' WHERE id = 'a1'",
+            // 14: asset_files rebuilt with live_effect role; original file stays intact.
+            "SELECT 1",
         ];
         for statement in &statements[..level.min(statements.len())] {
             sqlx::raw_sql(*statement)

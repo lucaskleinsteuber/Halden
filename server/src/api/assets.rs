@@ -102,8 +102,8 @@ fn header_number(headers: &HeaderMap, name: &str) -> Result<Option<u32>, ApiErro
     }
 }
 
-/// `PUT /assets/{id}/files/{role}`: a thumbnail or preview in one request. Headers:
-/// `Content-Type` (JPEG, HEIC, PNG or WebP), `Halden-Sha256`, and optionally `Halden-Width` and
+/// `PUT /assets/{id}/files/{role}`: a thumbnail, preview or rendered Live Photo effect in one
+/// request. Headers: `Content-Type`, `Halden-Sha256`, and optionally `Halden-Width` and
 /// `Halden-Height`.
 pub async fn put_file(
     State(state): State<AppState>,
@@ -114,18 +114,26 @@ pub async fn put_file(
 ) -> Result<Json<Asset>, ApiError> {
     let role = DerivedRole::parse(&role).ok_or_else(|| {
         ApiError::validation(
-            "Only thumbnail and preview can be sent this way; originals use /uploads.",
+            "Only thumbnail, preview and live_effect can be sent this way; originals use /uploads.",
         )
     })?;
     let media = headers
         .get(header::CONTENT_TYPE)
         .and_then(|value| value.to_str().ok())
         .and_then(MediaType::from_mime)
-        .filter(MediaType::is_derived_image)
+        .filter(|m| {
+            if role == DerivedRole::LiveEffect {
+                m.is_live_effect_media()
+            } else {
+                m.is_derived_image()
+            }
+        })
         .ok_or_else(|| {
-            ApiError::unsupported_media_type(
-                "Thumbnails and previews must be JPEG, HEIC, PNG or WebP.",
-            )
+            ApiError::unsupported_media_type(if role == DerivedRole::LiveEffect {
+                "Live Photo effects must be MP4, QuickTime, HEIC, JPEG, PNG or WebP."
+            } else {
+                "Thumbnails and previews must be JPEG, HEIC, PNG or WebP."
+            })
         })?;
     let sha256 = parse_sha256(
         headers
@@ -135,9 +143,14 @@ pub async fn put_file(
     )?;
     let width = header_number(&headers, "halden-width")?;
     let height = header_number(&headers, "halden-height")?;
-    let data = axum::body::to_bytes(body, derived::MAX_BYTES)
-        .await
-        .map_err(|_| ApiError::too_large("Thumbnails and previews may have at most 8 MiB."))?;
+    let limit = role.max_bytes();
+    let data = axum::body::to_bytes(body, limit).await.map_err(|_| {
+        ApiError::too_large(format!(
+            "{} files may have at most {} MiB.",
+            role.as_str(),
+            limit / (1024 * 1024)
+        ))
+    })?;
 
     let asset = derived::store(
         state.db(),
@@ -154,5 +167,21 @@ pub async fn put_file(
         },
     )
     .await?;
+    Ok(Json(asset))
+}
+
+/// `DELETE /assets/{id}/files/{role}`: removes a rendered `live_effect` file when reverting to
+/// plain Live Photo playback.
+pub async fn delete_file(
+    State(state): State<AppState>,
+    auth: Auth,
+    Path((id, role)): Path<(String, String)>,
+) -> Result<Json<Asset>, ApiError> {
+    let Some(role) = DerivedRole::parse(&role).filter(|r| *r == DerivedRole::LiveEffect) else {
+        return Err(ApiError::validation(
+            "Only live_effect derived files can be removed.",
+        ));
+    };
+    let asset = derived::remove(state.db(), state.derived_dir(), &auth.user.id, &id, role).await?;
     Ok(Json(asset))
 }

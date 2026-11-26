@@ -178,6 +178,19 @@ final class LayoutTests: XCTestCase {
             app.buttons["burst-picker-cancel"].tap()
             settle()
         }
+        // Next tile is a Live Photo: open the Live Photo effects & Key Photo sheet.
+        app.swipeLeft()
+        settle()
+        let liveEffects = app.buttons["live-effects"]
+        if liveEffects.waitForExistence(timeout: 5) {
+            liveEffects.tap()
+            settle()
+            shot("photo-live-effects")
+            app.buttons["live-effect-cancel"].tap()
+            settle()
+        }
+        app.swipeRight()
+        settle()
         app.swipeRight()
         settle()
         app.swipeRight()

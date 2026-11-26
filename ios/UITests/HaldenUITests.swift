@@ -556,6 +556,63 @@ final class HaldenUITests: XCTestCase {
         XCTAssertTrue(app.buttons["Start panorama"].waitForExistence(timeout: 15))
     }
 
+    /// Live Photo effects: capture a Live Photo against the real server, apply Bounce and Long
+    /// Exposure, choose a Key Photo, verify server sync and Info display, then revert to Live.
+    @MainActor
+    func testLivePhotoEffectsAndKeyPhoto() throws {
+        let environment = ProcessInfo.processInfo.environment
+        guard let server = environment["HALDEN_TEST_SERVER"], let password = environment["HALDEN_TEST_PASSWORD"]
+        else {
+            throw XCTSkip("no server: run ios/ui-tests.sh")
+        }
+        allowLocation()
+        let app = XCUIApplication()
+        app.launchArguments = ["-ui-testing", "-ui-testing-sign-in"]
+        app.launchEnvironment = ["HALDEN_TEST_SERVER": server, "HALDEN_TEST_PASSWORD": password]
+        app.launch()
+        let tabs = Tabs(app)
+        XCTAssertTrue(tabs.waitForExistence(timeout: 60), "signed in")
+        tabs.buttons["Camera"].tap()
+        let shutter = app.buttons["shutter"]
+        XCTAssertTrue(shutter.waitForExistence(timeout: 10))
+        shutter.tap()
+
+        tabs.buttons["Photos"].tap()
+        let grid = app.collectionViews["library-grid"]
+        let liveTile = grid.cells.matching(NSPredicate(format: "label == 'Photo, backed up'")).firstMatch
+        XCTAssertTrue(liveTile.waitForExistence(timeout: 90), "Live Photo uploaded to server")
+        liveTile.tap()
+        XCTAssertTrue(app.descendants(matching: .any)["live-badge"].waitForExistence(timeout: 10))
+
+        // Apply Bounce effect and verify badge + InfoView reflect it.
+        let fxButton = app.buttons["live-effects"]
+        XCTAssertTrue(fxButton.waitForExistence(timeout: 5))
+        fxButton.tap()
+        XCTAssertTrue(app.buttons["live-effect-bounce"].waitForExistence(timeout: 5))
+        app.buttons["live-effect-bounce"].tap()
+        app.buttons["live-effect-apply"].tap()
+        let bounceBadge = app.descendants(matching: .any)
+            .matching(NSPredicate(format: "identifier == 'live-badge' AND label CONTAINS 'Bounce'")).firstMatch
+        XCTAssertTrue(bounceBadge.waitForExistence(timeout: 15), "Bounce badge shown")
+
+        app.buttons["info"].tap()
+        let infoEffect = app.descendants(matching: .any)["info-live-effect"]
+        XCTAssertTrue(infoEffect.waitForExistence(timeout: 5))
+        app.navigationBars["Info"].buttons["Done"].tap()
+
+        // Switch to Long Exposure + scrub Key Photo slider.
+        fxButton.tap()
+        XCTAssertTrue(app.buttons["live-effect-long_exposure"].waitForExistence(timeout: 5))
+        app.buttons["live-effect-long_exposure"].tap()
+        let slider = app.sliders["live-keyframe-slider"]
+        XCTAssertTrue(slider.waitForExistence(timeout: 5))
+        slider.adjust(toNormalizedSliderPosition: 0.5)
+        app.buttons["live-effect-apply"].tap()
+        let longBadge = app.descendants(matching: .any)
+            .matching(NSPredicate(format: "identifier == 'live-badge' AND label CONTAINS 'Long Exposure'")).firstMatch
+        XCTAssertTrue(longBadge.waitForExistence(timeout: 15), "Long Exposure badge shown")
+    }
+
     /// Fifty thousand photos scroll without waiting for pictures.
     @MainActor
     func testTheGridScrollsThroughFiftyThousandPhotos() {

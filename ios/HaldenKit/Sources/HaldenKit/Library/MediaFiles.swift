@@ -98,6 +98,41 @@ public actor MediaFiles {
         defer { loading[key] = nil }
         return try await task.value
     }
+
+    /// Caches a locally rendered `live_effect` file by its SHA-256 so playback is immediate.
+    @discardableResult
+    public func cacheLiveEffect(data: Data, sha256: String, mimeType: String) throws -> URL {
+        try FileManager.default.createDirectory(at: originalsCache, withIntermediateDirectories: true)
+        let ext =
+            UTType(mimeType: mimeType)?.preferredFilenameExtension ?? (mimeType.hasPrefix("video/") ? "mp4" : "heic")
+        let destination = originalsCache.appendingPathComponent("\(sha256)-effect.\(ext)")
+        if !FileManager.default.fileExists(atPath: destination.path) {
+            try data.write(to: destination, options: .atomic)
+        }
+        return destination
+    }
+
+    /// The rendered `live_effect` file of a Live Photo (Loop/Bounce video or Long Exposure still),
+    /// from the local cache or downloaded once from the server.
+    public func liveEffect(of asset: LocalAsset) async throws -> URL? {
+        guard let sha = asset.liveEffectSha256 else { return nil }
+        let mime = asset.liveEffectMime ?? asset.activeLiveEffect.outputMimeType
+        let ext = UTType(mimeType: mime)?.preferredFilenameExtension ?? asset.activeLiveEffect.outputExtension
+        let destination = originalsCache.appendingPathComponent("\(sha)-effect.\(ext)")
+        if FileManager.default.fileExists(atPath: destination.path) { return destination }
+        guard let client else { return nil }
+        let key = asset.id + "|live_effect|" + sha
+        if let running = loading[key] { return try await running.value }
+        let folder = originalsCache
+        let task = Task {
+            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+            try await client.download(asset: asset.id, role: "live_effect", to: destination)
+            return destination
+        }
+        loading[key] = task
+        defer { loading[key] = nil }
+        return try await task.value
+    }
 }
 
 /// Feeds `AVPlayer` with a video from the server in ranges, over the API client with the pinned

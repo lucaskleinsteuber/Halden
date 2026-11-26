@@ -92,6 +92,11 @@ final class PageController: UIViewController, UIScrollViewDelegate, PHLivePhotoV
     private var loading: Task<Void, Never>?
     private var hasOriginal = false
     private var liveView: PHLivePhotoView?
+    private var liveBadge: UILabel?
+    private var effectPlayer: AVQueuePlayer?
+    private var effectLooper: AVPlayerLooper?
+    private var effectLayer: AVPlayerLayer?
+    private var effectTask: Task<Void, Never>?
     private var playbackObserver: NSObjectProtocol?
     private var editObserver: NSObjectProtocol?
     private var liveLoading: Task<PHLivePhoto?, Never>?
@@ -127,9 +132,13 @@ final class PageController: UIViewController, UIScrollViewDelegate, PHLivePhotoV
         scroll.addGestureRecognizer(doubleTap)
         if asset.isLivePhoto { addLive() }
         editObserver = NotificationCenter.default.addObserver(
-            forName: .haldenEditChanged, object: asset.id, queue: .main
-        ) { [weak self] _ in
-            MainActor.assumeIsolated { self?.edited() }
+            forName: .haldenEditChanged, object: nil, queue: .main
+        ) { [weak self] note in
+            let changedId = note.object as? String
+            MainActor.assumeIsolated {
+                guard let self, changedId == nil || changedId == self.asset.id else { return }
+                self.edited()
+            }
         }
         if asset.isSlowMotion { addBadge(symbol: "slowmo", text: "SLO-MO", label: "Slow motion") }
         if asset.isTimeLapse { addBadge(symbol: "timelapse", text: "TIME-LAPSE", label: "Time-lapse") }
@@ -161,7 +170,16 @@ final class PageController: UIViewController, UIScrollViewDelegate, PHLivePhotoV
         loading?.cancel()
         hasOriginal = false
         scroll.setZoomScale(1, animated: false)
+        if asset.isLivePhoto {
+            updateLiveBadge()
+            refreshLiveEffectPlayback()
+        }
         loadPictures()
+    }
+
+    override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
+        effectLayer?.frame = imageView.bounds
     }
 
     /// The thumbnail at once, then the preview (as edited) over it.
@@ -191,11 +209,13 @@ final class PageController: UIViewController, UIScrollViewDelegate, PHLivePhotoV
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
         if asset.isVideo && player == nil { startVideo() }
+        if asset.isLivePhoto { refreshLiveEffectPlayback() }
     }
 
     override func viewDidDisappear(_ animated: Bool) {
         super.viewDidDisappear(animated)
         player?.player?.pause()
+        effectPlayer?.pause()
     }
 
     private func show(_ image: DecodedImage, fade: Bool) {
@@ -224,11 +244,84 @@ final class PageController: UIViewController, UIScrollViewDelegate, PHLivePhotoV
         press.minimumPressDuration = 0.25
         scroll.addGestureRecognizer(press)
 
-        addBadge(symbol: "livephoto", text: "LIVE", label: "Live Photo, touch and hold to play", id: "live-badge")
+        liveBadge = addBadge(
+            symbol: asset.activeLiveEffect.symbol, text: asset.activeLiveEffect.title.uppercased(),
+            label: Self.liveBadgeLabel(for: asset.activeLiveEffect), id: "live-badge")
+    }
+
+    private static func liveBadgeLabel(for effect: LivePhotoEffect) -> String {
+        switch effect {
+        case .live: "Live Photo, touch and hold to play"
+        case .loop: "Loop Live Photo"
+        case .bounce: "Bounce Live Photo"
+        case .longExposure: "Long Exposure Live Photo"
+        }
+    }
+
+    private func updateLiveBadge() {
+        guard let badge = liveBadge else { return }
+        let effect = asset.activeLiveEffect
+        let content = NSMutableAttributedString(
+            attachment: NSTextAttachment(
+                image: UIImage(systemName: effect.symbol)!.withTintColor(.label, renderingMode: .alwaysOriginal)))
+        content.append(
+            NSAttributedString(
+                string: " \(effect.title.uppercased())",
+                attributes: [.font: UIFont.systemFont(ofSize: 12, weight: .semibold)]))
+        badge.attributedText = content
+        badge.accessibilityLabel = Self.liveBadgeLabel(for: effect)
+        badge.invalidateIntrinsicContentSize()
+    }
+
+    private func stopEffectPlayer() {
+        effectTask?.cancel()
+        effectTask = nil
+        effectPlayer?.pause()
+        effectLooper?.disableLooping()
+        effectLooper = nil
+        effectPlayer = nil
+        effectLayer?.removeFromSuperlayer()
+        effectLayer = nil
+    }
+
+    /// Plays Loop/Bounce MP4 seamlessly or displays Long Exposure / Key Photo derived still.
+    private func refreshLiveEffectPlayback() {
+        stopEffectPlayer()
+        let current = app.asset(asset.id) ?? asset
+        asset = current
+        let effect = current.activeLiveEffect
+        guard effect != .live || current.edit?.liveKeyFrameMs != nil else { return }
+        effectTask = Task { [weak self, current, app] in
+            guard let url = try? await app.media.liveEffect(of: current) else { return }
+            guard !Task.isCancelled, let self else { return }
+            if effect.isVideoOutput {
+                let item = AVPlayerItem(url: url)
+                let queue = AVQueuePlayer()
+                queue.isMuted = true
+                let looper = AVPlayerLooper(player: queue, templateItem: item)
+                let layer = AVPlayerLayer(player: queue)
+                layer.frame = self.imageView.bounds
+                layer.videoGravity = .resizeAspect
+                self.imageView.layer.addSublayer(layer)
+                self.effectPlayer = queue
+                self.effectLooper = looper
+                self.effectLayer = layer
+                queue.play()
+            } else {
+                let pixels = Int(
+                    max(self.view.bounds.width, self.view.bounds.height) * self.traitCollection.displayScale)
+                if let decoded = await Task.detached(operation: {
+                    ImagePipeline.decode(url, pixels: pixels, edit: nil)
+                }).value {
+                    self.show(decoded, fade: true)
+                }
+            }
+        }
     }
 
     /// What kind of photo or video this is, top left.
-    private func addBadge(symbol: String, text: String, label: String, id: String = "kind-badge") {
+    @discardableResult
+    private func addBadge(symbol: String, text: String, label: String, id: String = "kind-badge") -> UILabel {
         let badge = UILabel()
         let content = NSMutableAttributedString(
             attachment: NSTextAttachment(
@@ -248,9 +341,12 @@ final class PageController: UIViewController, UIScrollViewDelegate, PHLivePhotoV
         NSLayoutConstraint.activate([
             badge.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor, constant: 12),
             badge.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 8),
-            badge.widthAnchor.constraint(equalToConstant: badge.intrinsicContentSize.width + 16),
             badge.heightAnchor.constraint(equalToConstant: 24),
         ])
+        badge.layoutMargins = UIEdgeInsets(top: 0, left: 8, bottom: 0, right: 8)
+        badge.widthAnchor.constraint(greaterThanOrEqualToConstant: badge.intrinsicContentSize.width + 16).isActive =
+            true
+        return badge
     }
 
     @objc private func held(_ gesture: UILongPressGestureRecognizer) {
@@ -322,9 +418,13 @@ final class PageController: UIViewController, UIScrollViewDelegate, PHLivePhotoV
         if asset.isSlowMotion {
             playSlowly()
             playbackObserver = NotificationCenter.default.addObserver(
-                forName: .haldenPlaybackChanged, object: asset.id, queue: .main
-            ) { [weak self] _ in
-                MainActor.assumeIsolated { self?.playSlowly() }
+                forName: .haldenPlaybackChanged, object: nil, queue: .main
+            ) { [weak self] note in
+                let changedId = note.object as? String
+                MainActor.assumeIsolated {
+                    guard let self, changedId == nil || changedId == self.asset.id else { return }
+                    self.playSlowly()
+                }
             }
         }
     }

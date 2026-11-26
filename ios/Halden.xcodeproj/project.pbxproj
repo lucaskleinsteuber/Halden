@@ -53,6 +53,7 @@
 		9CACD74C6ECC3C680BE4D01F /* AlbumsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4720DFD3016CAEA4E93C4BF4 /* AlbumsView.swift */; };
 		9F64B285C463AC47333BECF3 /* CameraModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = DBEEA719E7976B95C7A812F2 /* CameraModel.swift */; };
 		A892FFFF61DE9485CF41799F /* SlowMotionEditor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 532104EC85F41EC2AD8621D1 /* SlowMotionEditor.swift */; };
+		AA82230915F831C6D9D65998 /* LivePhotoEffectSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 704F616C4017148E39E611D5 /* LivePhotoEffectSheet.swift */; };
 		AC905610DA82DFA5531F1278 /* AdminViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 70F615205779FE0156F57C22 /* AdminViews.swift */; };
 		B26514E18BDCEA39A54F586F /* TripFinder.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5C9036B1E68F05F767BA225 /* TripFinder.swift */; };
 		B74A92ED5F56E522A006E68D /* MapLibraryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CF10462761DAD01DC9A3FAFA /* MapLibraryView.swift */; };
@@ -156,6 +157,7 @@
 		627A73F43AA825EA877229B8 /* TimeLapseRecorder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TimeLapseRecorder.swift; sourceTree = "<group>"; };
 		62E1A8A22DAC6A515A2252D0 /* UploadActivity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UploadActivity.swift; sourceTree = "<group>"; };
 		6DD877D2F81600FDB2E6B24E /* HaldenWidgets.appex */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = "wrapper.app-extension"; path = HaldenWidgets.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		704F616C4017148E39E611D5 /* LivePhotoEffectSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LivePhotoEffectSheet.swift; sourceTree = "<group>"; };
 		70F615205779FE0156F57C22 /* AdminViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AdminViews.swift; sourceTree = "<group>"; };
 		74E37347C080BB6AA9E72883 /* StandInCamera.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StandInCamera.swift; sourceTree = "<group>"; };
 		7A98359A74AD2C4D85A7854B /* AppIcon.icon */ = {isa = PBXFileReference; lastKnownFileType = wrapper.icon; path = AppIcon.icon; sourceTree = "<group>"; };
@@ -251,6 +253,7 @@
 				85A51E84868B0B63EAA041C2 /* CinematicEditorView.swift */,
 				F69A0135F96B9BBFE1F20138 /* EditView.swift */,
 				B5DE17A5A6B072AE573A3107 /* LibraryGrid.swift */,
+				704F616C4017148E39E611D5 /* LivePhotoEffectSheet.swift */,
 				CF10462761DAD01DC9A3FAFA /* MapLibraryView.swift */,
 				BD8F20F7C6963AF7826E38E6 /* OnboardingView.swift */,
 				C765E5168916BA5A5355EF98 /* PhotosView.swift */,
@@ -551,6 +554,7 @@
 				8800407D0E22C4C406120ED8 /* HaldenShortcuts.swift in Sources */,
 				EDA52E14D29175AC77C0C1F2 /* LevelOverlay.swift in Sources */,
 				1A3071743BB7165FCFE51777 /* LibraryGrid.swift in Sources */,
+				AA82230915F831C6D9D65998 /* LivePhotoEffectSheet.swift in Sources */,
 				2FC21580503AA05DA2CE5660 /* LiveScopesOverlay.swift in Sources */,
 				0D392F59853052F455C35A95 /* ManualPanel.swift in Sources */,
 				B74A92ED5F56E522A006E68D /* MapLibraryView.swift in Sources */,

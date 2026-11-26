@@ -128,6 +128,20 @@ fn check_edit(edit: &Value) -> Result<(), String> {
     {
         return Err("edit.filter must be a non-empty string up to 32 bytes.".into());
     }
+    if let Some(live_effect) = map.get("liveEffect")
+        && !live_effect.is_null()
+        && !live_effect
+            .as_str()
+            .is_some_and(|s| matches!(s, "live" | "loop" | "bounce" | "long_exposure"))
+    {
+        return Err("edit.liveEffect must be live, loop, bounce or long_exposure.".into());
+    }
+    if let Some(key_ms) = map.get("liveKeyFrameMs")
+        && !key_ms.is_null()
+        && !key_ms.as_i64().is_some_and(|n| (0..=600_000).contains(&n))
+    {
+        return Err("edit.liveKeyFrameMs must be an integer between 0 and 600000.".into());
+    }
     if edit.to_string().len() > MAX_EDIT_BYTES {
         return Err(format!(
             "edit may be at most {MAX_EDIT_BYTES} bytes as JSON."

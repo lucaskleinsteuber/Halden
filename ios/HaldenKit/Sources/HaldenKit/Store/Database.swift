@@ -199,6 +199,13 @@ public final class HaldenDatabase: Sendable {
             }
             try db.create(index: "asset_by_burst", on: "asset", columns: ["burstId"])
         }
+        migrator.registerMigration("10: live_effect") { db in
+            try db.alter(table: "asset") { t in
+                // Rendered Live Photo effect (Loop/Bounce MP4 or Long Exposure still) stored as derived file.
+                t.add(column: "liveEffectSha256", .text)
+                t.add(column: "liveEffectMime", .text)
+            }
+        }
         return migrator
     }
 }
@@ -259,6 +266,9 @@ public struct LocalAsset: Codable, Sendable, Equatable, Identifiable, FetchableR
     public var streamSha256: String?
     /// Shared identifier for photos taken together in a burst.
     public var burstId: String?
+    /// Rendered Live Photo effect (Loop/Bounce video or Long Exposure still) cached on the server.
+    public var liveEffectSha256: String?
+    public var liveEffectMime: String?
 
     public var isVideo: Bool { kind == "video" }
     public var isSlowMotion: Bool { isVideo && captureMode == "slowmo" }
@@ -266,6 +276,7 @@ public struct LocalAsset: Codable, Sendable, Equatable, Identifiable, FetchableR
     public var isCinematic: Bool { isVideo && captureMode == "cinematic" }
     /// A photo with a short video, taken as one.
     public var isLivePhoto: Bool { !isVideo && (pairedVideoFile != nil || pairedVideoSha256 != nil) }
+    public var activeLiveEffect: LivePhotoEffect { edit?.liveEffect ?? .live }
     public var hasLocation: Bool { latitude != nil && longitude != nil }
     /// The place was estimated (from a photo nearby in time or where the iPhone was), not measured
     /// for this file.

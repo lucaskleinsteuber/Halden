@@ -6,6 +6,18 @@ The server and the iPhone app have version numbers of their own (semantic versio
 from 0.1.0 on 25.11.2026; a heading names the versions released that day. Everything before is
 part of the first versions.
 
+## 26.11.2026
+
+### Added
+
+- Live Photo effects and Key Photo (`LivePhotoEffects`, `LivePhotoEffectSheet`, server `live_effect`
+  derived role):
+  - Non-destructive **Loop** (cross-faded seamless MP4), **Bounce** (forward-and-reverse MP4),
+    **Long Exposure** (Vision-aligned averaged HEIC/JPEG), and **Key Photo** frame selection for
+    Live Photos in full screen.
+  - Stored in `EditRecipe` (`liveEffect`, `liveKeyFrameMs`), rendered on-device, cached locally,
+    and uploaded/replaced/removed on the server under `PUT`/`DELETE /assets/{id}/files/live_effect`.
+
 ## 25.11.2026
 
 ### Added

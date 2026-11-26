@@ -83,6 +83,11 @@ impl MediaType {
             "image/jpeg" | "image/heic" | "image/png" | "image/webp"
         )
     }
+
+    /// The types a rendered Live Photo effect may have (image for long exposure, video for loop/bounce).
+    pub fn is_live_effect_media(&self) -> bool {
+        self.is_derived_image() || matches!(self.mime, "video/mp4" | "video/quicktime")
+    }
 }
 
 /// A parsed `storage.path_template`.
