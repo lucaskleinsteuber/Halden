@@ -17,6 +17,7 @@ final class StandInCamera: CaptureBackend {
         canDepth: true,
         subjectDetected: ProcessInfo.processInfo.arguments.contains("-ui-testing-subject"),
         canCinematic: true,
+        canMultiCam: true,
         canWindNoiseRemoval: true,
         manualLimits: ManualLimits(shutter: (1.0 / 8000)...1, iso: 50...3200, exposureBias: -8...8))
     private(set) var readings =
@@ -25,6 +26,7 @@ final class StandInCamera: CaptureBackend {
         ? CameraReadings(shutter: 1.0 / 15, iso: 2000, kelvin: 4800, tint: 0, focus: 0.5)
         : CameraReadings(shutter: 1.0 / 120, iso: 100, kelvin: 5200, tint: 0, focus: 0.5)
     private(set) var liveScopes: LiveScopesData?
+    private(set) var dualPipImage: UIImage?
     @ObservationIgnored private let standInPreview = StandInPreview()
     var previewView: UIView { standInPreview }
     @ObservationIgnored private var taken = 0
@@ -85,7 +87,7 @@ final class StandInCamera: CaptureBackend {
         let autoSuffix = video.autoLowLightFPS ? " · Auto" : ""
         state.videoFormat =
             switch mode {
-            case .photo, .portrait, .panorama: nil
+            case .photo, .portrait, .panorama, .dual: nil
             case .video:
                 "\(video.resolution == .uhd4K ? "4K" : "1080p") · \(fpsText)\(hdrSuffix)\(autoSuffix)\(video.actionMode ? " · Action" : "")"
             case .cinematic: "Cinematic · \(CinematicRules.formatAperture(video.cinematicAperture))"
@@ -226,6 +228,34 @@ final class StandInCamera: CaptureBackend {
             return nil
         }
     }
+
+    func takeDualPhoto(_ request: PhotoRequest, corner: PiPCorner, swapped: Bool) async -> TakenPhoto? {
+        guard mode == .dual else { return nil }
+        let preferHEIC = request.format == .heic
+        return await Task.detached(priority: .userInitiated) {
+            let back = CIImage(color: CIColor(red: 0.14, green: 0.32, blue: 0.62, alpha: 1))
+                .cropped(to: CGRect(x: 0, y: 0, width: 960, height: 1280))
+            let front = CIImage(color: CIColor(red: 0.85, green: 0.42, blue: 0.25, alpha: 1))
+                .cropped(to: CGRect(x: 0, y: 0, width: 480, height: 640))
+            let primary = swapped ? front : back
+            let secondary = swapped ? back : front
+            guard
+                let encoded = DualCompositor.encodePhoto(
+                    primary: primary, secondary: secondary, corner: corner, preferHEIC: preferHEIC)
+            else { return nil }
+            return TakenPhoto(data: encoded.data, heic: encoded.heic, width: encoded.width, height: encoded.height)
+        }.value
+    }
+
+    func startDualRecording(_ request: VideoRequest, corner: PiPCorner, swapped: Bool) -> Bool {
+        guard mode == .dual, recording == nil else { return false }
+        paused = false
+        quickTaking = false
+        recording = (request, Date())
+        return true
+    }
+
+    func updateDualLayout(corner: PiPCorner, swapped: Bool) {}
 
     func startPanorama(direction: PanoramaDirection) -> Bool {
         guard mode == .panorama, panoramaDirection == nil else { return false }

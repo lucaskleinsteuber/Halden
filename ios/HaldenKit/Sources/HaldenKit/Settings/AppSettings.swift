@@ -110,6 +110,8 @@ public struct AppSettings: Codable, Sendable, Equatable {
     public var scanQRCodes = true
     /// Detect text in the camera viewfinder (Live Text button).
     public var showLiveText = true
+    /// Show the dimmed ultra-wide surround outside the photo crop frame at 1× or higher.
+    public var viewOutsideTheFrame = false
     // Preserve Settings
     public var preserveMode = false
     public var keptMode: String?
@@ -162,7 +164,7 @@ public struct AppSettings: Codable, Sendable, Equatable {
         case prioritizeFasterShooting, allowAudioPlayback, defaultFocalLength, volumeUpForBurst
         case topBarControls, photographicStyle, photoFilter, portraitAperture, portraitLighting, nightMode
         case actionMode, cinematicAperture, audioChannelMode, windNoiseRemoval, allowAirPodsMic, showHistogram,
-            showWaveform, scanQRCodes, showLiveText
+            showWaveform, scanQRCodes, showLiveText, viewOutsideTheFrame
         case preserveMode, keptMode, preserveStyle, preservePortraitZoom, preserveNightMode, preserveActionMode,
             preserveExposure,
             keptExposureBias,
@@ -222,6 +224,7 @@ public struct AppSettings: Codable, Sendable, Equatable {
         read(.showWaveform, into: &settings.showWaveform)
         read(.scanQRCodes, into: &settings.scanQRCodes)
         read(.showLiveText, into: &settings.showLiveText)
+        read(.viewOutsideTheFrame, into: &settings.viewOutsideTheFrame)
         read(.preserveMode, into: &settings.preserveMode)
         read(.keptMode, into: &settings.keptMode)
         read(.preserveStyle, into: &settings.preserveStyle)

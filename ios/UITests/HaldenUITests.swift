@@ -654,6 +654,65 @@ final class HaldenUITests: XCTestCase {
         XCTAssertFalse(app.buttons["live-text-button"].exists, "Live Text hidden when disabled")
     }
 
+    /// Dual Capture (Double Take) with movable PiP, camera swap, single-file photo & video capture,
+    /// plus "View Outside the Frame" surround in Photo mode at >= 1x.
+    @MainActor
+    func testDualCaptureAndOutsideFrame() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-ui-testing-signed-in", "-ui-testing-library", "5"]
+        app.launch()
+        XCTAssertTrue(app.buttons["shutter"].waitForExistence(timeout: 30))
+
+        // Navigate photo -> portrait -> panorama -> dual.
+        app.buttons["mode-portrait"].tap()
+        XCTAssertTrue(app.buttons["mode-panorama"].waitForExistence(timeout: 5))
+        app.buttons["mode-panorama"].tap()
+        XCTAssertTrue(app.buttons["mode-dual"].waitForExistence(timeout: 5))
+        app.buttons["mode-dual"].tap()
+        XCTAssertTrue(app.buttons["Take dual photo"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.descendants(matching: .any)["dual-pip-window"].waitForExistence(timeout: 5))
+
+        // Swap primary/secondary lenses and snap a composited dual photo.
+        app.buttons["dual-swap"].tap()
+        XCTAssertTrue(app.descendants(matching: .any)["dual-pip-window"].label.contains("Back camera"))
+        app.buttons["shutter"].tap()
+        Thread.sleep(forTimeInterval: 0.6)
+
+        // Toggle to Dual Video, record briefly, and stop.
+        app.buttons["dual-kind-toggle"].tap()
+        XCTAssertTrue(app.buttons["Record dual video"].waitForExistence(timeout: 5))
+        app.buttons["shutter"].tap()
+        XCTAssertTrue(app.buttons["Stop recording"].waitForExistence(timeout: 5))
+        Thread.sleep(forTimeInterval: 1.0)
+        app.buttons["shutter"].tap()
+        XCTAssertTrue(app.buttons["Record dual video"].waitForExistence(timeout: 10))
+
+        // Enable "View Outside the Frame" in Settings › Camera and verify at 1x vs 0.5x.
+        let tabs = Tabs(app)
+        tabs.buttons["Settings"].tap()
+        app.buttons["camera-settings"].tap()
+        let outside = app.switches["settings-outside-frame"]
+        for _ in 0..<10 where !outside.isHittable { app.swipeUp() }
+        XCTAssertTrue(outside.waitForExistence(timeout: 5))
+        outside.switches.firstMatch.tap()
+
+        tabs.buttons["Camera"].tap()
+        XCTAssertTrue(app.buttons["shutter"].waitForExistence(timeout: 10))
+        // Step back from dual -> panorama -> portrait -> photo.
+        app.buttons["mode-panorama"].tap()
+        XCTAssertTrue(app.buttons["Start panorama"].waitForExistence(timeout: 5))
+        app.buttons["mode-portrait"].tap()
+        XCTAssertTrue(app.buttons["Take a portrait"].waitForExistence(timeout: 5))
+        app.buttons["mode-photo"].tap()
+        XCTAssertTrue(app.buttons["Take a photo"].waitForExistence(timeout: 5))
+
+        let surround = app.descendants(matching: .any)["outside-frame-overlay"]
+        XCTAssertTrue(surround.waitForExistence(timeout: 5), "Outside-frame surround active at 1x")
+        app.buttons["zoom-0.5"].tap()
+        Thread.sleep(forTimeInterval: 0.5)
+        XCTAssertFalse(surround.exists, "Outside-frame surround hides at 0.5x")
+    }
+
     /// Fifty thousand photos scroll without waiting for pictures.
     @MainActor
     func testTheGridScrollsThroughFiftyThousandPhotos() {

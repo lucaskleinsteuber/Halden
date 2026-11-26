@@ -3,9 +3,9 @@ import HaldenKit
 import UIKit
 
 enum CameraMode: String, CaseIterable, Sendable {
-    case photo, portrait, panorama, video, cinematic, slowMotion, timeLapse
+    case photo, portrait, panorama, dual, video, cinematic, slowMotion, timeLapse
 
-    /// Everything except still/panorama modes is recorded as video with start/stop.
+    /// Everything except still/panorama/dual modes is recorded as video with start/stop.
     var records: Bool { self == .video || self == .cinematic || self == .slowMotion || self == .timeLapse }
 
     /// Still-photo capture modes (4:3 / 1:1 / 16:9 viewfinder).
@@ -54,6 +54,7 @@ struct CaptureOptions: Equatable, Sendable {
     var showWaveform: Bool
     var scanQRCodes: Bool
     var showLiveText: Bool
+    var viewOutsideTheFrame: Bool
     var slowMotionRate: Int
     /// Seconds between pictures of a time-lapse; `nil` for automatic.
     var timeLapseInterval: Double?
@@ -85,6 +86,7 @@ struct CaptureOptions: Equatable, Sendable {
         showWaveform = settings.showWaveform
         scanQRCodes = settings.scanQRCodes
         showLiveText = settings.showLiveText
+        viewOutsideTheFrame = settings.viewOutsideTheFrame
         slowMotionRate = settings.slowMotionRate
         timeLapseInterval = settings.timeLapseInterval > 0 ? settings.timeLapseInterval : nil
     }
@@ -125,6 +127,8 @@ struct CameraState: Equatable, Sendable {
     var detectedText: String?
     /// True when the active camera supports Cinematic Video capture (iOS 26+).
     var canCinematic = false
+    /// True when the device supports simultaneous multi-camera capture (Dual Capture & Outside Frame).
+    var canMultiCam = false
     /// True when hardware wind noise removal is available on the active microphone input.
     var canWindNoiseRemoval = false
     /// What can be set by hand on this camera now; `nil` when nothing.
@@ -188,6 +192,8 @@ protocol CaptureBackend: AnyObject {
     var readings: CameraReadings { get }
     /// Live RGB+Luma histogram and luma waveform data when enabled (`nil` when scopes are off).
     var liveScopes: LiveScopesData? { get }
+    /// Live secondary camera image for the Picture-in-Picture overlay in Dual Capture mode.
+    var dualPipImage: UIImage? { get }
     /// Shows what the camera sees.
     var previewView: UIView { get }
     /// Gets everything ready without starting, so the picture is there the moment the camera
@@ -225,4 +231,10 @@ protocol CaptureBackend: AnyObject {
     func startPanorama(direction: PanoramaDirection) -> Bool
     /// Stops Panorama capture, unlocks AE/AWB, and stitches frames into a HEIC photo.
     func stopPanorama(request: PhotoRequest) async -> TakenPhoto?
+    /// Takes a composited front+back Dual Capture photo as a single file.
+    func takeDualPhoto(_ request: PhotoRequest, corner: PiPCorner, swapped: Bool) async -> TakenPhoto?
+    /// Starts recording a composited front+back Dual Capture video as a single file.
+    func startDualRecording(_ request: VideoRequest, corner: PiPCorner, swapped: Bool) -> Bool
+    /// Updates PiP layout / camera swap while Dual Capture preview is live.
+    func updateDualLayout(corner: PiPCorner, swapped: Bool)
 }

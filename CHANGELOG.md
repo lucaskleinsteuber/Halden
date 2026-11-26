@@ -10,6 +10,13 @@ part of the first versions.
 
 ### Added
 
+- Dual Capture (Double Take) and View Outside the Frame (`DualCapture`, `MultiCamEngine`,
+  `DualPreviewOverlay`):
+  - New **Dual** camera mode on MultiCam-capable iPhones (`AVCaptureMultiCamSession`) capturing
+    front and back cameras simultaneously with a draggable corner-snapping Picture-in-Picture
+    overlay, camera swap, and single-file composited photo (`DualCompositor`) or `.mov` video.
+  - **View Outside the Frame** toggle in Settings › Camera › Composition showing the dimmed
+    peripheral surround in Photo mode at zoom ≥ 1×.
 - Viewfinder QR scanner, Live Text and full-screen Visual Look Up (`Scanner`, `ScannerOverlays`,
   `Viewer`):
   - Photo viewfinder detects QR codes (URLs, Wi-Fi networks, vCard/MECARD contacts, Halden links,

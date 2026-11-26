@@ -429,6 +429,12 @@ struct CameraSettings: View {
                     Explained("Lens correction", "Straighten optical distortion on ultra-wide and front lenses.")
                 }
                 .accessibilityIdentifier("settings-lens-correction")
+                Toggle(isOn: app.setting(\.viewOutsideTheFrame)) {
+                    Explained(
+                        "View Outside the Frame",
+                        "Show the ultra-wide view dimly around the crop frame at 1× or higher.")
+                }
+                .accessibilityIdentifier("settings-outside-frame")
             }
         }
         .navigationTitle("Camera")

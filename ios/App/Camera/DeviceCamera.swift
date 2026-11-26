@@ -24,8 +24,12 @@ final class DeviceCamera: CaptureBackend {
     @ObservationIgnored private var smudgeRelay: Relay<Bool>?
     private(set) var readings = CameraReadings()
     private(set) var liveScopes: LiveScopesData?
+    private(set) var dualPipImage: UIImage?
     @ObservationIgnored private var readingsWatch: ReadingsWatch?
     @ObservationIgnored private var scopesRelay: Relay<LiveScopesData?>?
+    @ObservationIgnored private var pipRelay: Relay<UIImage?>?
+    @ObservationIgnored private let multiCam: MultiCamEngine
+    @ObservationIgnored private var dualRecording = false
     @ObservationIgnored private var configured = false
     @ObservationIgnored private var mode = CameraMode.photo
     @ObservationIgnored private var video: CaptureOptions?
@@ -34,6 +38,8 @@ final class DeviceCamera: CaptureBackend {
         let preview = self.preview
         let core = CaptureCore(metalView: preview.metalView)
         self.core = core
+        let multiCam = MultiCamEngine(metalView: preview.metalView)
+        self.multiCam = multiCam
         preview.previewLayer.session = core.session
         preview.previewLayer.videoGravity = .resizeAspectFill
         core.changed = { [weak self] state, device in
@@ -49,6 +55,11 @@ final class DeviceCamera: CaptureBackend {
         }
         self.scopesRelay = scopesRelay
         core.scopesChanged = { scopes in scopesRelay.send(scopes) }
+        let pipRelay = Relay<UIImage?> { [weak self] image in
+            self?.dualPipImage = image
+        }
+        self.pipRelay = pipRelay
+        multiCam.onPipImage = { image in pipRelay.send(image) }
     }
 
     static var allowed: Bool { AVCaptureDevice.authorizationStatus(for: .video) == .authorized }
@@ -94,16 +105,37 @@ final class DeviceCamera: CaptureBackend {
     }
 
     func stop() {
+        multiCam.stop()
         core.run { $0.stopRunning() }
     }
 
     func setMode(_ mode: CameraMode, options video: CaptureOptions) async {
+        let wasDual = self.mode == .dual
         self.mode = mode
         self.video = video
         // Sound for videos, Cinematic and Live Photos; without the microphone they are silent.
         let sound = mode == .video || mode == .cinematic || mode == .slowMotion || (mode == .photo && video.live)
         if sound, AVCaptureDevice.authorizationStatus(for: .audio) == .notDetermined {
             _ = await AVCaptureDevice.requestAccess(for: .audio)
+        }
+        if mode == .dual && MultiCamEngine.isSupported {
+            await withCheckedContinuation { (done: CheckedContinuation<Void, Never>) in
+                core.run { core in
+                    core.pauseForMultiCam()
+                    done.resume()
+                }
+            }
+            preview.setMetalActive(true)
+            state.customPreviewActive = true
+            state.canMultiCam = true
+            state.videoFormat = nil
+            multiCam.start(swapped: false, corner: .topRight)
+            return
+        }
+        if wasDual {
+            multiCam.stop()
+            dualPipImage = nil
+            core.run { $0.startRunning() }
         }
         await withCheckedContinuation { (done: CheckedContinuation<Void, Never>) in
             core.run { core in
@@ -202,12 +234,37 @@ final class DeviceCamera: CaptureBackend {
     }
 
     func stopRecording() async -> URL? {
+        if dualRecording {
+            dualRecording = false
+            return await withCheckedContinuation { continuation in
+                multiCam.stopRecording { continuation.resume(returning: $0) }
+            }
+        }
         let (url, plan): (URL?, TimeLapsePlan?) = await withCheckedContinuation { continuation in
             core.run { $0.stopRecording { url, plan in continuation.resume(returning: (url, plan)) } }
         }
         guard let url else { return nil }
         if let plan, plan.stretches.count > 1 { return await Self.evenOut(url, plan) ?? url }
         return url
+    }
+
+    func takeDualPhoto(_ request: PhotoRequest, corner: PiPCorner, swapped: Bool) async -> TakenPhoto? {
+        guard mode == .dual else { return nil }
+        return await withCheckedContinuation { continuation in
+            multiCam.takePhoto(request: request, corner: corner, swapped: swapped) {
+                continuation.resume(returning: $0)
+            }
+        }
+    }
+
+    func startDualRecording(_ request: VideoRequest, corner: PiPCorner, swapped: Bool) -> Bool {
+        guard mode == .dual, !dualRecording else { return false }
+        dualRecording = multiCam.startRecording(request: request, corner: corner, swapped: swapped)
+        return dualRecording
+    }
+
+    func updateDualLayout(corner: PiPCorner, swapped: Bool) {
+        multiCam.updateLayout(swapped: swapped, corner: corner)
     }
 
     func startPanorama(direction: PanoramaDirection) -> Bool {
@@ -490,6 +547,10 @@ final class CaptureCore: NSObject, @unchecked Sendable {
         publish(device: nil)
     }
 
+    func pauseForMultiCam() {
+        if session.isRunning { session.stopRunning() }
+    }
+
     func startRunning() {
         wantRunning = true
         if !session.isRunning { session.startRunning() }
@@ -743,6 +804,8 @@ final class CaptureCore: NSObject, @unchecked Sendable {
             if let connection = frameOutput.connection(with: .video), connection.isVideoStabilizationSupported {
                 connection.preferredVideoStabilizationMode = .auto
             }
+        case .dual:
+            state.videoFormat = nil
         }
         applyComposition(on: device)
     }
@@ -1009,6 +1072,7 @@ final class CaptureCore: NSObject, @unchecked Sendable {
         described.ready = true
         described.side = side
         described.canFlip = Self.camera(side == .back ? .front : .back) != nil
+        described.canMultiCam = MultiCamEngine.isSupported
         let multiplier = Double(device.displayVideoZoomFactorMultiplier)
         let lowest = Double(device.minAvailableVideoZoomFactor) * multiplier
         var presets: [Double] = []

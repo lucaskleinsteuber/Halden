@@ -94,6 +94,13 @@ final class LayoutTests: XCTestCase {
         app.buttons["mode-panorama"].tap()
         settle(1.0)
         shot("camera-panorama")
+        if app.buttons["mode-dual"].exists {
+            app.buttons["mode-dual"].tap()
+            settle(1.2)
+            shot("camera-dual")
+            app.buttons["mode-panorama"].tap()
+            settle(0.6)
+        }
         app.buttons["mode-portrait"].tap()
         settle(0.6)
         app.buttons["mode-photo"].tap()

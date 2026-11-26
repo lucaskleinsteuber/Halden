@@ -38,6 +38,12 @@ final class CameraModel {
     private(set) var isPanoramaCapturing = false
     /// True while stitching collected Panorama frames into HEIC.
     private(set) var panoramaStitching = false
+    /// Dual Capture PiP corner, capture kind (photo/video) and camera swap state.
+    var dualCorner = PiPCorner.topRight {
+        didSet { backend.updateDualLayout(corner: dualCorner, swapped: dualSwapped) }
+    }
+    var dualKind = DualCaptureKind.photo
+    private(set) var dualSwapped = false
     private(set) var torch = false
     private(set) var problem: String?
     /// Goes up with every photo taken, for the flash on the screen.
@@ -263,10 +269,72 @@ final class CameraModel {
         if isPanoramaCapturing { return stopPanorama() }
         if recording { return stopRecording() }
         if mode == .panorama { return startPanorama() }
+        if mode == .dual {
+            let action: () -> Void =
+                dualKind == .video
+                ? { [weak self] in self?.startDualRecording() } : { [weak self] in self?.takeDualPhoto() }
+            guard timer > 0 else { return action() }
+            return runCountdown(seconds: timer, then: action)
+        }
         let action: () -> Void =
             mode.records ? { [weak self] in self?.startRecording() } : { [weak self] in self?.takePhoto() }
         guard timer > 0 else { return action() }
         runCountdown(seconds: timer, then: action)
+    }
+
+    func swapDualCameras() {
+        guard !recording else { return }
+        dualSwapped.toggle()
+        backend.updateDualLayout(corner: dualCorner, swapped: dualSwapped)
+    }
+
+    private func takeDualPhoto() {
+        guard mode == .dual, !recording else { return }
+        let now = Date()
+        let currentSettings = settings()
+        let place = place(at: now)
+        let corner = dualCorner
+        let swapped = dualSwapped
+        shots += 1
+        let request = PhotoRequest(
+            format: currentSettings.photoFormat, flash: .off, location: place,
+            trueNorth: location.compass?.trueNorth ?? false, takenAt: now, live: false,
+            resolution: .mp12, raw: false, prioritizeFaster: true,
+            mirrorFrontCamera: currentSettings.mirrorFrontCamera)
+        Task {
+            guard let photo = await backend.takeDualPhoto(request, corner: corner, swapped: swapped) else {
+                problem = "Dual photo could not be taken."
+                return
+            }
+            problem = nil
+            let data = photo.data
+            if let small = await Task.detached(operation: { Self.small(data) }).value {
+                withAnimation(.snappy(duration: 0.25)) { lastShot = small }
+            }
+            var metadata = Self.metadata(at: now, place: place)
+            metadata.width = photo.width
+            metadata.height = photo.height
+            keepPhoto?(photo, metadata)
+        }
+    }
+
+    private func startDualRecording() {
+        guard mode == .dual, !recording else { return }
+        let now = Date()
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("\(UUID().uuidString).mov")
+        let request = VideoRequest(
+            url: url, location: place(at: now), takenAt: now, timeZone: .current, mode: .dual)
+        guard backend.startDualRecording(request, corner: dualCorner, swapped: dualSwapped) else {
+            problem = "Dual video could not be started."
+            return
+        }
+        problem = nil
+        video = (request, request.location)
+        isQuickTake = false
+        isQuickTakeLocked = false
+        recordingPausedAt = nil
+        recordingPausedTotal = 0
+        recordingSince = now
     }
 
     func reversePanoramaDirection() {

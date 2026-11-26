@@ -204,7 +204,16 @@ struct CameraScreen<Gallery: View>: View {
         }
         .overlay {
             if state.ready {
-                if camera.mode == .panorama {
+                if camera.mode == .dual {
+                    DualPreviewOverlay(
+                        corner: Binding(get: { camera.dualCorner }, set: { camera.dualCorner = $0 }),
+                        kind: Binding(get: { camera.dualKind }, set: { camera.dualKind = $0 }),
+                        swapped: camera.dualSwapped,
+                        recording: camera.recording,
+                        pipImage: camera.backend.dualPipImage,
+                        onSwap: { camera.swapDualCameras() }
+                    )
+                } else if camera.mode == .panorama {
                     PanoramaOverlay(
                         direction: camera.panoramaDirection,
                         capturing: camera.isPanoramaCapturing,
@@ -220,6 +229,14 @@ struct CameraScreen<Gallery: View>: View {
                         offset: motion.holdStillOffset, secondsLeft: camera.nightCaptureSecondsLeft)
                 } else if settings.showLevel {
                     LevelOverlay(reading: motion.reading)
+                }
+                if OutsideFrameMath.isActive(
+                    enabled: settings.viewOutsideTheFrame, isPhotoMode: camera.mode == .photo,
+                    zoom: camera.zoom, hasUltraWide: state.presets.contains(0.5))
+                {
+                    OutsideFrameOverlay(zoom: camera.zoom)
+                        .accessibilityElement(children: .ignore)
+                        .accessibilityIdentifier("outside-frame-overlay")
                 }
                 if let focusPoint {
                     GeometryReader { geo in
@@ -860,8 +877,14 @@ struct CameraScreen<Gallery: View>: View {
     // MARK: Bottom
 
     /// The modes, the chosen one in the middle; also changed by swiping over the picture.
+    private var visibleModes: [CameraMode] {
+        CameraMode.strip.filter { mode in
+            mode != .dual || state.canMultiCam
+        }
+    }
+
     private var modeStrip: some View {
-        let modes = CameraMode.strip
+        let modes = visibleModes
         let chosen = Double(modes.firstIndex(of: camera.mode) ?? 0)
         let middle = Double(modes.count - 1) / 2
         let width = 86.0
@@ -986,7 +1009,8 @@ struct CameraScreen<Gallery: View>: View {
                     Text("\(camera.burstCount)")
                         .font(.title2.bold().monospacedDigit())
                         .foregroundStyle(.black)
-                } else if camera.recording || camera.mode.records {
+                } else if camera.recording || camera.mode.records || (camera.mode == .dual && camera.dualKind == .video)
+                {
                     RoundedRectangle(cornerRadius: camera.recording ? 6 : 30)
                         .fill(.red)
                         .frame(width: camera.recording ? 30 : 62, height: camera.recording ? 30 : 62)
@@ -1003,7 +1027,11 @@ struct CameraScreen<Gallery: View>: View {
                 ? "Stop the self-timer"
                 : camera.isPanoramaCapturing
                     ? "Stop panorama"
-                    : camera.recording ? "Stop recording" : camera.mode.shutterLabel
+                    : camera.recording
+                        ? "Stop recording"
+                        : camera.mode == .dual
+                            ? (camera.dualKind == .video ? "Record dual video" : "Take dual photo")
+                            : camera.mode.shutterLabel
         )
         .accessibilityIdentifier("shutter")
     }
@@ -1104,13 +1132,14 @@ extension CameraScreen where Gallery == EmptyView {
 
 extension CameraMode {
     /// The order on the screen, as in Apple's camera (`video` stays immediately left of `photo`).
-    static let strip: [CameraMode] = [.timeLapse, .slowMotion, .cinematic, .video, .photo, .portrait, .panorama]
+    static let strip: [CameraMode] = [.timeLapse, .slowMotion, .cinematic, .video, .photo, .portrait, .panorama, .dual]
 
     var title: String {
         switch self {
         case .photo: "Photo"
         case .portrait: "Portrait"
         case .panorama: "Pano"
+        case .dual: "Dual"
         case .video: "Video"
         case .cinematic: "Cinematic"
         case .slowMotion: "Slo-mo"
@@ -1123,6 +1152,7 @@ extension CameraMode {
         case .photo: "Take a photo"
         case .portrait: "Take a portrait"
         case .panorama: "Start panorama"
+        case .dual: "Take dual photo"
         case .video: "Record a video"
         case .cinematic: "Record cinematic video"
         case .slowMotion: "Record slow motion"

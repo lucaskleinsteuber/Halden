@@ -75,6 +75,13 @@ the design comes after that. What works today is described below.
   (`isGeometricDistortionCorrectionEnabled`), hardware lens-smudge detection hints
   (`cameraLensSmudgeDetectionStatus`, dismissible banner), and optional camera-lens
   (`primaryConstituentDeviceSwitchingBehavior`) and white-balance locks while recording video.
+- **Dual Capture & View Outside the Frame** (`DualCapture`, `MultiCamEngine`, `DualPreviewOverlay`):
+  - **Dual mode (Double Take)**: simultaneous front + back camera capture via
+    `AVCaptureMultiCamSession` (on MultiCam devices, including iPhone 15) with a draggable
+    corner-snapping Picture-in-Picture window, one-tap lens swap, and Photo/Video toggle saving a
+    single composited HEIC/JPEG photo (`DualCompositor`) or `.mov` video.
+  - **View Outside the Frame**: optional setting under Settings › Camera › Composition that shows
+    a dimmed peripheral surround outside the photo crop frame at zoom ≥ 1×.
 - **Scanner, Live Text & Visual Look Up** (`Scanner`, `ScannerOverlays`, `Viewer`):
   - **Viewfinder QR scanner**: `AVCaptureMetadataOutput` (`.qr`) detects links, Wi-Fi networks,
     contacts (`vCard` / `MECARD`), Halden pairing links and plain text in Photo mode with a
