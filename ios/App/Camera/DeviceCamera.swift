@@ -4,6 +4,7 @@ import HaldenKit
 import ImageIO
 import Observation
 import UIKit
+import Vision
 
 /// The iPhone's cameras through AVFoundation: ultra wide, main and tele as one virtual camera
 /// (so zooming switches between them where Apple's camera does), and the front camera. All
@@ -345,6 +346,7 @@ final class CaptureCore: NSObject, @unchecked Sendable {
     private let panoramaCollector = PanoramaCollector()
     private var panoramaCapturing = false
     private var lockedForPanorama = false
+    private let textDetector = ViewfinderTextDetector()
     /// Values set by hand, applied to every camera and mode.
     private var manual = ManualSettings()
     private var input: AVCaptureDeviceInput?
@@ -381,6 +383,22 @@ final class CaptureCore: NSObject, @unchecked Sendable {
             self?.run { core in
                 guard core.state.subjectDetected != detected else { return }
                 core.state.subjectDetected = detected
+                core.publish(device: nil)
+            }
+        }
+        subjectRelay.onQRCode = { [weak self] code in
+            self?.run { core in
+                let effective = core.mode == .photo && core.video?.scanQRCodes != false ? code : nil
+                guard core.state.detectedQR != effective else { return }
+                core.state.detectedQR = effective
+                core.publish(device: nil)
+            }
+        }
+        textDetector.onText = { [weak self] text in
+            self?.run { core in
+                let effective = core.mode == .photo && core.video?.showLiveText != false ? text : nil
+                guard core.state.detectedText != effective else { return }
+                core.state.detectedText = effective
                 core.publish(device: nil)
             }
         }
@@ -568,6 +586,12 @@ final class CaptureCore: NSObject, @unchecked Sendable {
         case .photo:
             var outputs: [AVCaptureOutput] = [photoOutput, metadataOutput]
             if needsMetalPreview { outputs.append(previewOutput) }
+            if video?.showLiveText != false {
+                outputs.append(frameOutput)
+                frameOutput.setSampleBufferDelegate(textDetector, queue: textDetector.queue)
+            } else {
+                state.detectedText = nil
+            }
             use(outputs)
             configureSubjectMetadata()
             if let connection = previewOutput.connection(with: .video) {
@@ -723,10 +747,17 @@ final class CaptureCore: NSObject, @unchecked Sendable {
         applyComposition(on: device)
     }
 
-    /// Watches people, faces, dogs and cats in photo/portrait mode so depth data can be captured automatically.
+    /// Watches people, faces, dogs and cats in photo/portrait mode so depth data can be captured
+    /// automatically, plus `.qr` in photo mode when QR scanning is enabled.
     private func configureSubjectMetadata() {
         guard session.outputs.contains(metadataOutput) else { return }
-        let wanted: [AVMetadataObject.ObjectType] = [.face, .humanBody, .dogBody, .catBody]
+        var wanted: [AVMetadataObject.ObjectType] = [.face, .humanBody, .dogBody, .catBody]
+        if mode == .photo && video?.scanQRCodes != false {
+            wanted.append(.qr)
+        } else {
+            subjectRelay.resetQR()
+            state.detectedQR = nil
+        }
         let available = Set(metadataOutput.availableMetadataObjectTypes)
         let types = wanted.filter { available.contains($0) }
         metadataOutput.metadataObjectTypes = types
@@ -1415,6 +1446,45 @@ final class PanoramaCollector: NSObject, AVCaptureVideoDataOutputSampleBufferDel
         let ci = CIImage(cvPixelBuffer: buffer)
         if let cg = ciContext.createCGImage(ci, from: ci.extent) {
             frames.append(cg)
+        }
+    }
+}
+
+/// Runs throttled fast Vision text recognition (~0.8 Hz) in Photo mode so the viewfinder can offer
+/// a Live Text button whenever legible text enters the frame.
+final class ViewfinderTextDetector: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate, @unchecked Sendable {
+    let queue = DispatchQueue(label: "halden.livetext", qos: .utility)
+    var onText: (@Sendable (String?) -> Void)?
+    private var lastScanTime: Double = 0
+    private var lastDetectedAt: Double = 0
+    private var lastText: String?
+
+    func captureOutput(
+        _ output: AVCaptureOutput, didOutput sampleBuffer: CMSampleBuffer, from connection: AVCaptureConnection
+    ) {
+        let now = ProcessInfo.processInfo.systemUptime
+        guard now - lastScanTime >= 1.25 else { return }
+        lastScanTime = now
+        guard let buffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
+        let request = VNRecognizeTextRequest()
+        request.recognitionLevel = .fast
+        request.usesLanguageCorrection = false
+        let handler = VNImageRequestHandler(cvPixelBuffer: buffer, orientation: .right, options: [:])
+        try? handler.perform([request])
+        let lines = (request.results ?? [])
+            .compactMap { $0.topCandidates(1).first?.string }
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { $0.count >= 2 }
+        let joined = lines.isEmpty ? nil : lines.prefix(12).joined(separator: "\n")
+        if let joined {
+            lastDetectedAt = now
+            if joined != lastText {
+                lastText = joined
+                onText?(joined)
+            }
+        } else if lastText != nil, now - lastDetectedAt >= 2.0 {
+            lastText = nil
+            onText?(nil)
         }
     }
 }

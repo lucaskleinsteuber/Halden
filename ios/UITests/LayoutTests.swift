@@ -273,6 +273,17 @@ final class LayoutTests: XCTestCase {
                 }
             }
         }
+
+        // Viewfinder QR code & Live Text floating controls.
+        app.terminate()
+        app.launchArguments = [
+            "-ui-testing-signed-in", "-ui-testing-library", "5", "-ui-testing-qr", "-ui-testing-text",
+        ]
+        if let textSize { app.launchArguments += ["-UIPreferredContentSizeCategoryName", textSize] }
+        app.launch()
+        XCTAssertTrue(app.buttons["qr-action-pill"].waitForExistence(timeout: 30))
+        settle()
+        shot("camera-qr-detected")
     }
 
     /// Lets animations finish before looking.

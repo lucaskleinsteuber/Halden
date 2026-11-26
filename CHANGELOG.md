@@ -10,6 +10,13 @@ part of the first versions.
 
 ### Added
 
+- Viewfinder QR scanner, Live Text and full-screen Visual Look Up (`Scanner`, `ScannerOverlays`,
+  `Viewer`):
+  - Photo viewfinder detects QR codes (URLs, Wi-Fi networks, vCard/MECARD contacts, Halden links,
+    plain text) with a yellow action pill and spots text with a Live Text button; both can be
+    toggled in Settings › Camera.
+  - Full-screen photos integrate VisionKit `ImageAnalysisInteraction` with Live Text and Visual
+    Look Up (`.visualLookUp`).
 - Live Photo effects and Key Photo (`LivePhotoEffects`, `LivePhotoEffectSheet`, server `live_effect`
   derived role):
   - Non-destructive **Loop** (cross-faded seamless MP4), **Bounce** (forward-and-reverse MP4),

@@ -34,6 +34,9 @@ struct CameraScreen<Gallery: View>: View {
     @State private var focalBadge: FocalLength?
     @State private var focalBadgeTicks = 0
     @State private var smudgeDismissed = false
+    @State private var activeQRSheet: ScannedQRCode?
+    @State private var activeTextSheet: String?
+    @Environment(\.openURL) private var openURL
     @State private var shutterHoldTask: Task<Void, Never>?
     @State private var shutterPressed = false
     @State private var shutterStartZoom = 1.0
@@ -89,6 +92,20 @@ struct CameraScreen<Gallery: View>: View {
         }
         .onChange(of: motion.panoramaCompleted) { _, done in
             if done && camera.isPanoramaCapturing { camera.stopPanorama() }
+        }
+        .sheet(
+            isPresented: Binding(
+                get: { activeQRSheet != nil },
+                set: { if !$0 { activeQRSheet = nil } })
+        ) {
+            if let qr = activeQRSheet { ScannedQRSheet(code: qr) }
+        }
+        .sheet(
+            isPresented: Binding(
+                get: { activeTextSheet != nil },
+                set: { if !$0 { activeTextSheet = nil } })
+        ) {
+            if let text = activeTextSheet { DetectedTextSheet(text: text) }
         }
         .onChange(of: state.lensSmudged) { _, smudged in if !smudged { smudgeDismissed = false } }
         .onChange(of: state.side) { _, _ in smudgeDismissed = false }
@@ -364,6 +381,22 @@ struct CameraScreen<Gallery: View>: View {
                         .padding(.bottom, 4)
                         .transition(.opacity)
                         .accessibilityIdentifier("focal-length-badge")
+                } else if camera.mode == .photo && !camera.recording && camera.burstCount == 0
+                    && (state.detectedQR != nil || state.detectedText != nil)
+                {
+                    ViewfinderScannerBar(
+                        qr: settings.scanQRCodes ? state.detectedQR : nil,
+                        detectedText: settings.showLiveText ? state.detectedText : nil,
+                        onTapQR: { code in
+                            if case .url(let url) = code.kind {
+                                openURL(url)
+                            } else {
+                                activeQRSheet = code
+                            }
+                        },
+                        onTapText: { text in activeTextSheet = text }
+                    )
+                    .padding(.bottom, 6)
                 }
                 zoomControl.frame(height: 56)
             }

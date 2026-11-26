@@ -106,6 +106,10 @@ public struct AppSettings: Codable, Sendable, Equatable {
     public var showHistogram = false
     /// Live Luma waveform overlay in the camera viewfinder.
     public var showWaveform = false
+    /// Detect QR codes in the camera viewfinder with a floating action button.
+    public var scanQRCodes = true
+    /// Detect text in the camera viewfinder (Live Text button).
+    public var showLiveText = true
     // Preserve Settings
     public var preserveMode = false
     public var keptMode: String?
@@ -158,7 +162,7 @@ public struct AppSettings: Codable, Sendable, Equatable {
         case prioritizeFasterShooting, allowAudioPlayback, defaultFocalLength, volumeUpForBurst
         case topBarControls, photographicStyle, photoFilter, portraitAperture, portraitLighting, nightMode
         case actionMode, cinematicAperture, audioChannelMode, windNoiseRemoval, allowAirPodsMic, showHistogram,
-            showWaveform
+            showWaveform, scanQRCodes, showLiveText
         case preserveMode, keptMode, preserveStyle, preservePortraitZoom, preserveNightMode, preserveActionMode,
             preserveExposure,
             keptExposureBias,
@@ -216,6 +220,8 @@ public struct AppSettings: Codable, Sendable, Equatable {
         read(.allowAirPodsMic, into: &settings.allowAirPodsMic)
         read(.showHistogram, into: &settings.showHistogram)
         read(.showWaveform, into: &settings.showWaveform)
+        read(.scanQRCodes, into: &settings.scanQRCodes)
+        read(.showLiveText, into: &settings.showLiveText)
         read(.preserveMode, into: &settings.preserveMode)
         read(.keptMode, into: &settings.keptMode)
         read(.preserveStyle, into: &settings.preserveStyle)

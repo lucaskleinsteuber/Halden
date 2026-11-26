@@ -181,20 +181,45 @@ final class PreviewFrameRelay: NSObject, AVCaptureVideoDataOutputSampleBufferDel
     }
 }
 
-/// Watches people, faces, dogs and cats in photo/portrait mode for automatic depth delivery.
+/// Watches people, faces, dogs, cats (automatic depth) and QR codes in photo/portrait mode.
 final class SubjectMetadataRelay: NSObject, AVCaptureMetadataOutputObjectsDelegate, @unchecked Sendable {
     let queue = DispatchQueue(label: "halden.metadata.subjects", qos: .utility)
     var onDetect: (@Sendable (Bool) -> Void)?
+    var onQRCode: (@Sendable (ScannedQRCode?) -> Void)?
     private var lastDetected = false
+    private var qrHold = ScannerHoldState()
+    private var lastQR: ScannedQRCode?
 
     func metadataOutput(
         _ output: AVCaptureMetadataOutput, didOutput metadataObjects: [AVMetadataObject],
         from connection: AVCaptureConnection
     ) {
-        let detected = !metadataObjects.isEmpty
-        if detected != lastDetected {
-            lastDetected = detected
-            onDetect?(detected)
+        let hasSubject = metadataObjects.contains { object in
+            object.type == .face || object.type == .humanBody || object.type == .dogBody || object.type == .catBody
+        }
+        if hasSubject != lastDetected {
+            lastDetected = hasSubject
+            onDetect?(hasSubject)
+        }
+        let rawQR =
+            metadataObjects
+            .compactMap { $0 as? AVMetadataMachineReadableCodeObject }
+            .first(where: { $0.type == .qr })?
+            .stringValue
+        let stableQR = qrHold.update(raw: rawQR, now: ProcessInfo.processInfo.systemUptime)
+        if stableQR != lastQR {
+            lastQR = stableQR
+            onQRCode?(stableQR)
+        }
+    }
+
+    func resetQR() {
+        queue.async {
+            self.qrHold.clear()
+            if self.lastQR != nil {
+                self.lastQR = nil
+                self.onQRCode?(nil)
+            }
         }
     }
 }

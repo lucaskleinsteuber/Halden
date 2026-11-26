@@ -52,6 +52,8 @@ struct CaptureOptions: Equatable, Sendable {
     var allowAirPodsMic: Bool
     var showHistogram: Bool
     var showWaveform: Bool
+    var scanQRCodes: Bool
+    var showLiveText: Bool
     var slowMotionRate: Int
     /// Seconds between pictures of a time-lapse; `nil` for automatic.
     var timeLapseInterval: Double?
@@ -81,6 +83,8 @@ struct CaptureOptions: Equatable, Sendable {
         allowAirPodsMic = settings.allowAirPodsMic
         showHistogram = settings.showHistogram
         showWaveform = settings.showWaveform
+        scanQRCodes = settings.scanQRCodes
+        showLiveText = settings.showLiveText
         slowMotionRate = settings.slowMotionRate
         timeLapseInterval = settings.timeLapseInterval > 0 ? settings.timeLapseInterval : nil
     }
@@ -115,6 +119,10 @@ struct CameraState: Equatable, Sendable {
     var subjectDetected = false
     /// Live distance / lighting guidance in Portrait mode.
     var portraitHint: PortraitHint?
+    /// QR code currently detected in the camera viewfinder (Photo mode when enabled).
+    var detectedQR: ScannedQRCode?
+    /// Live Text recognized in the camera viewfinder (Photo mode when enabled).
+    var detectedText: String?
     /// True when the active camera supports Cinematic Video capture (iOS 26+).
     var canCinematic = false
     /// True when hardware wind noise removal is available on the active microphone input.

@@ -4,6 +4,7 @@ import HaldenKit
 import PhotosUI
 import SwiftUI
 import UIKit
+import VisionKit
 
 /// Full screen: swipe between photos, pinch or double-tap to zoom, videos play. A picture never
 /// jumps: the thumbnail is there at once, the preview fades in over it at the same size, and the
@@ -100,6 +101,8 @@ final class PageController: UIViewController, UIScrollViewDelegate, PHLivePhotoV
     private var playbackObserver: NSObjectProtocol?
     private var editObserver: NSObjectProtocol?
     private var liveLoading: Task<PHLivePhoto?, Never>?
+    private var imageAnalysis: ImageAnalysisInteraction?
+    private var analysisTask: Task<Void, Never>?
 
     init(asset: LocalAsset, app: AppModel) {
         self.asset = asset
@@ -126,6 +129,13 @@ final class PageController: UIViewController, UIScrollViewDelegate, PHLivePhotoV
         imageView.contentMode = .scaleAspectFit
         imageView.isAccessibilityElement = true
         imageView.accessibilityLabel = asset.isVideo ? "Video" : "Photo"
+        if !asset.isVideo, ImageAnalyzer.isSupported {
+            imageView.isUserInteractionEnabled = true
+            let interaction = ImageAnalysisInteraction()
+            interaction.preferredInteractionTypes = [.automatic, .visualLookUp]
+            imageView.addInteraction(interaction)
+            imageAnalysis = interaction
+        }
         scroll.addSubview(imageView)
         let doubleTap = UITapGestureRecognizer(target: self, action: #selector(zoom(_:)))
         doubleTap.numberOfTapsRequired = 2
@@ -220,12 +230,28 @@ final class PageController: UIViewController, UIScrollViewDelegate, PHLivePhotoV
 
     private func show(_ image: DecodedImage, fade: Bool) {
         let new = UIImage(cgImage: image.cgImage)
-        guard fade, imageView.image != nil else {
+        if fade, imageView.image != nil {
+            UIView.transition(with: imageView, duration: 0.2, options: .transitionCrossDissolve) {
+                self.imageView.image = new
+            }
+        } else {
             imageView.image = new
-            return
         }
-        UIView.transition(with: imageView, duration: 0.2, options: .transitionCrossDissolve) {
-            self.imageView.image = new
+        analyzeForLiveTextAndLookUp(new)
+    }
+
+    /// Runs VisionKit Live Text & Visual Look Up analysis on still photos when supported by hardware.
+    private func analyzeForLiveTextAndLookUp(_ image: UIImage) {
+        guard !asset.isVideo, let interaction = imageAnalysis, ImageAnalyzer.isSupported else { return }
+        analysisTask?.cancel()
+        analysisTask = Task { [weak self] in
+            let analyzer = ImageAnalyzer()
+            let configuration = ImageAnalyzer.Configuration([.text, .machineReadableCode, .visualLookUp])
+            guard let analysis = try? await analyzer.analyze(image, configuration: configuration),
+                !Task.isCancelled
+            else { return }
+            self?.imageAnalysis?.analysis = analysis
+            _ = interaction
         }
     }
 

@@ -402,6 +402,14 @@ struct CameraSettings: View {
                 Toggle(isOn: app.setting(\.volumeUpForBurst)) {
                     Explained("Volume Up for burst", "Hold Volume Up in photo mode to shoot a burst.")
                 }
+                Toggle(isOn: app.setting(\.scanQRCodes)) {
+                    Explained("Scan QR Codes", "Show a quick action button when a QR code appears in the viewfinder.")
+                }
+                .accessibilityIdentifier("settings-scan-qr")
+                Toggle(isOn: app.setting(\.showLiveText)) {
+                    Explained("Show Detected Text", "Offer a Live Text button when text is spotted in the viewfinder.")
+                }
+                .accessibilityIdentifier("settings-live-text")
             }
 
             Section("Composition") {

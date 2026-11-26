@@ -50,6 +50,15 @@ final class StandInCamera: CaptureBackend {
             style: mode.isStill ? video.style : nil, filter: mode.isStill ? video.filter : nil,
             isPortrait: mode == .portrait, showScopes: scopesOn)
         state.customPreviewActive = custom
+        let args = ProcessInfo.processInfo.arguments
+        state.detectedQR =
+            mode == .photo && video.scanQRCodes && args.contains("-ui-testing-qr")
+            ? QRPayloadParser.parse("https://halden.example/visit")
+            : nil
+        state.detectedText =
+            mode == .photo && video.showLiveText && args.contains("-ui-testing-text")
+            ? "Halden Cafe\nOpen 08:00 - 19:00"
+            : nil
         standInPreview.applyLook(
             style: mode.isStill ? video.style : nil, filter: mode.isStill ? video.filter : nil,
             portraitAperture: mode == .portrait ? video.portraitAperture : nil,

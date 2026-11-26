@@ -26,6 +26,7 @@
 		41B53AF02D73AB8EE6107451 /* HaldenWidgets.swift in Sources */ = {isa = PBXBuildFile; fileRef = C021AAFC98EA6F297083D1E9 /* HaldenWidgets.swift */; };
 		423C29A696E7F844F445ADA2 /* LayoutTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A956D2E7B37916DA28E53461 /* LayoutTests.swift */; };
 		442C9FD29309011799EB92F9 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 80A08A19CFB7DE203B87EE2F /* SettingsView.swift */; };
+		4801728014D39FCD4EFF6A2F /* ScannerOverlays.swift in Sources */ = {isa = PBXBuildFile; fileRef = A69BEE38CE200F5262571FEE /* ScannerOverlays.swift */; };
 		49FC6542BD2AE2DE9BB10B29 /* HaldenUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 330BB49007FE4A8212AE2A53 /* HaldenUITests.swift */; };
 		51C75A4A2FFC3A6FD5E5C868 /* SharedLinksView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 37372CD04EF8CBD01FB101B4 /* SharedLinksView.swift */; };
 		590FC3C8D5856F986F2178F9 /* AppIcon.icon in Resources */ = {isa = PBXBuildFile; fileRef = 7A98359A74AD2C4D85A7854B /* AppIcon.icon */; };
@@ -56,6 +57,7 @@
 		AA82230915F831C6D9D65998 /* LivePhotoEffectSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 704F616C4017148E39E611D5 /* LivePhotoEffectSheet.swift */; };
 		AC905610DA82DFA5531F1278 /* AdminViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 70F615205779FE0156F57C22 /* AdminViews.swift */; };
 		B26514E18BDCEA39A54F586F /* TripFinder.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5C9036B1E68F05F767BA225 /* TripFinder.swift */; };
+		B4C60806494ADA5885D13347 /* ScannerOverlays.swift in Sources */ = {isa = PBXBuildFile; fileRef = A69BEE38CE200F5262571FEE /* ScannerOverlays.swift */; };
 		B74A92ED5F56E522A006E68D /* MapLibraryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CF10462761DAD01DC9A3FAFA /* MapLibraryView.swift */; };
 		BB780C0AEB61A3907F0C631E /* StylePadView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DA8660C88F0141F53D2DF344 /* StylePadView.swift */; };
 		C5BEB796768D84CB9050598F /* Viewer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B4EC6EBA149179462421878 /* Viewer.swift */; };
@@ -168,6 +170,7 @@
 		8C8F6CBCE5F738CE28E84C59 /* UITestWorld.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UITestWorld.swift; sourceTree = "<group>"; };
 		9B4EC6EBA149179462421878 /* Viewer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Viewer.swift; sourceTree = "<group>"; };
 		A1507DF230E24878FF9FB227 /* HaldenShortcuts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HaldenShortcuts.swift; sourceTree = "<group>"; };
+		A69BEE38CE200F5262571FEE /* ScannerOverlays.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScannerOverlays.swift; sourceTree = "<group>"; };
 		A956D2E7B37916DA28E53461 /* LayoutTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LayoutTests.swift; sourceTree = "<group>"; };
 		AE56A441B2CFDD9C6F0A36EE /* CameraScreen.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraScreen.swift; sourceTree = "<group>"; };
 		B3DC81E0143A53F37F02DDAE /* WithoutPlaceView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WithoutPlaceView.swift; sourceTree = "<group>"; };
@@ -226,6 +229,7 @@
 				2D91F7D87FE5AA30AAD243D9 /* ManualPanel.swift */,
 				5E3DE58031AEAD039C3BB51A /* MetalPreviewView.swift */,
 				F9C5B922F2543AB6ECF603DB /* PanoramaOverlay.swift */,
+				A69BEE38CE200F5262571FEE /* ScannerOverlays.swift */,
 				74E37347C080BB6AA9E72883 /* StandInCamera.swift */,
 				DA8660C88F0141F53D2DF344 /* StylePadView.swift */,
 				627A73F43AA825EA877229B8 /* TimeLapseRecorder.swift */,
@@ -525,6 +529,7 @@
 				9A2C1A9B4CD8F46CACCF342C /* ManualPanel.swift in Sources */,
 				3A627F7D466686A834D7958D /* MetalPreviewView.swift in Sources */,
 				3AF202FA2DC7FE6CA81F399B /* PanoramaOverlay.swift in Sources */,
+				4801728014D39FCD4EFF6A2F /* ScannerOverlays.swift in Sources */,
 				1C4A95BC88D4E44A70DEE043 /* SharedIntents.swift in Sources */,
 				5FD91AEBB32417E33BA60285 /* StandInCamera.swift in Sources */,
 				BB780C0AEB61A3907F0C631E /* StylePadView.swift in Sources */,
@@ -567,6 +572,7 @@
 				5A96811187A6415234B7B946 /* PhotosWatcher.swift in Sources */,
 				064F948830F9B67FA84C37D2 /* QRScannerView.swift in Sources */,
 				97449D449BB9B1DC96C1267A /* RootView.swift in Sources */,
+				B4C60806494ADA5885D13347 /* ScannerOverlays.swift in Sources */,
 				442C9FD29309011799EB92F9 /* SettingsView.swift in Sources */,
 				71B99CF29DE1A7DD33488186 /* SharedIntents.swift in Sources */,
 				51C75A4A2FFC3A6FD5E5C868 /* SharedLinksView.swift in Sources */,

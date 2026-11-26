@@ -613,6 +613,47 @@ final class HaldenUITests: XCTestCase {
         XCTAssertTrue(longBadge.waitForExistence(timeout: 15), "Long Exposure badge shown")
     }
 
+    /// Viewfinder QR code detection and Live Text sheet, plus disabling both in Settings › Camera.
+    @MainActor
+    func testViewfinderQRCodeAndLiveText() {
+        let app = XCUIApplication()
+        app.launchArguments = [
+            "-ui-testing-signed-in", "-ui-testing-library", "5", "-ui-testing-qr", "-ui-testing-text",
+        ]
+        app.launch()
+        XCTAssertTrue(app.buttons["shutter"].waitForExistence(timeout: 30))
+
+        // Both the yellow QR action pill and Live Text icon appear in photo mode.
+        let qrPill = app.buttons["qr-action-pill"]
+        XCTAssertTrue(qrPill.waitForExistence(timeout: 5), "QR pill shown")
+        XCTAssertTrue(qrPill.label.contains("halden.example"), qrPill.label)
+
+        let textButton = app.buttons["live-text-button"]
+        XCTAssertTrue(textButton.waitForExistence(timeout: 5), "Live Text button shown")
+        textButton.tap()
+        let content = app.descendants(matching: .any)["detected-text-content"]
+        XCTAssertTrue(content.waitForExistence(timeout: 5), "Detected text sheet opened")
+        app.buttons["copy-detected-text"].tap()
+        app.buttons["detected-text-done"].tap()
+
+        // Turn both off in Settings › Camera and confirm they disappear from the viewfinder.
+        let tabs = Tabs(app)
+        tabs.buttons["Settings"].tap()
+        app.buttons["camera-settings"].tap()
+        let scanQR = app.switches["settings-scan-qr"]
+        for _ in 0..<8 where !scanQR.isHittable { app.swipeUp() }
+        XCTAssertTrue(scanQR.waitForExistence(timeout: 5))
+        scanQR.switches.firstMatch.tap()
+        let liveText = app.switches["settings-live-text"]
+        for _ in 0..<4 where !liveText.isHittable { app.swipeUp() }
+        liveText.switches.firstMatch.tap()
+
+        tabs.buttons["Camera"].tap()
+        XCTAssertTrue(app.buttons["shutter"].waitForExistence(timeout: 10))
+        XCTAssertFalse(app.buttons["qr-action-pill"].exists, "QR pill hidden when disabled")
+        XCTAssertFalse(app.buttons["live-text-button"].exists, "Live Text hidden when disabled")
+    }
+
     /// Fifty thousand photos scroll without waiting for pictures.
     @MainActor
     func testTheGridScrollsThroughFiftyThousandPhotos() {

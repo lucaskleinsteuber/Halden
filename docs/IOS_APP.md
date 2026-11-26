@@ -75,6 +75,18 @@ the design comes after that. What works today is described below.
   (`isGeometricDistortionCorrectionEnabled`), hardware lens-smudge detection hints
   (`cameraLensSmudgeDetectionStatus`, dismissible banner), and optional camera-lens
   (`primaryConstituentDeviceSwitchingBehavior`) and white-balance locks while recording video.
+- **Scanner, Live Text & Visual Look Up** (`Scanner`, `ScannerOverlays`, `Viewer`):
+  - **Viewfinder QR scanner**: `AVCaptureMetadataOutput` (`.qr`) detects links, Wi-Fi networks,
+    contacts (`vCard` / `MECARD`), Halden pairing links and plain text in Photo mode with a
+    floating yellow action pill (links open directly; Wi-Fi joins via `NEHotspotConfigurationManager`
+    or copies password). Toggleable under Settings › Camera › Scan QR Codes.
+  - **Viewfinder Live Text**: throttled Vision text recognition (`VNRecognizeTextRequest`) offers
+    a Live Text button in the viewfinder to inspect and copy detected text. Toggleable under
+    Settings › Camera › Show Detected Text.
+  - **Full-screen Live Text & Visual Look Up**: `Viewer` attaches VisionKit's
+    `ImageAnalysisInteraction` (`.automatic` + `.visualLookUp`) to still photos where supported so
+    you can select, copy, translate, call, convert units, and look up plants, animals, landmarks or
+    artwork right in Halden.
 - **Live Photo effects & Key Photo** (`LivePhotoEffects`, `LivePhotoEffectSheet`, `Viewer`):
   - Full-screen Live Photos offer **Live**, **Loop** (cross-faded seamless MP4), **Bounce**
     (forward/reverse MP4), **Long Exposure** (Vision-aligned averaged HEIC/JPEG still), and a
