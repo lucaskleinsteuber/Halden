@@ -33,6 +33,7 @@ final class DeviceCamera: CaptureBackend {
     @ObservationIgnored private var configured = false
     @ObservationIgnored private var mode = CameraMode.photo
     @ObservationIgnored private var video: CaptureOptions?
+    @ObservationIgnored var onControlStyleChanged: (@MainActor (PhotographicStyle?) -> Void)?
 
     init() {
         let preview = self.preview
@@ -44,6 +45,9 @@ final class DeviceCamera: CaptureBackend {
         preview.previewLayer.videoGravity = .resizeAspectFill
         core.changed = { [weak self] state, device in
             Task { @MainActor in self?.update(state, device: device?.value) }
+        }
+        core.onControlStyleChanged = { [weak self] style in
+            Task { @MainActor in self?.onControlStyleChanged?(style) }
         }
         zoomRelay = Relay { [weak self] zoom in self?.state.zoom = zoom }
         smudgeRelay = Relay { [weak self] smudged in self?.state.lensSmudged = smudged }
@@ -113,8 +117,10 @@ final class DeviceCamera: CaptureBackend {
         let wasDual = self.mode == .dual
         self.mode = mode
         self.video = video
-        // Sound for videos, Cinematic and Live Photos; without the microphone they are silent.
-        let sound = mode == .video || mode == .cinematic || mode == .slowMotion || (mode == .photo && video.live)
+        // Sound for videos, Cinematic, Spatial and Live Photos; without the microphone they are silent.
+        let sound =
+            mode == .video || mode == .cinematic || mode == .slowMotion || mode == .spatial
+            || (mode == .photo && video.live)
         if sound, AVCaptureDevice.authorizationStatus(for: .audio) == .notDetermined {
             _ = await AVCaptureDevice.requestAccess(for: .audio)
         }
@@ -419,6 +425,10 @@ final class CaptureCore: NSObject, @unchecked Sendable {
     private var lockedWhiteBalanceForRecording = false
     private var wantRunning = false
     private var observers: [NSObjectProtocol] = []
+    private var activeExternalURL: URL?
+    private let controlsRelay = CameraControlsRelay()
+    /// Called when the iPhone 16+ Camera Control style picker changes the active Photographic Style.
+    var onControlStyleChanged: (@Sendable (PhotographicStyle?) -> Void)?
     /// Gets every new state (and the camera, when it changed).
     var changed: (@Sendable (CameraState, Carry<AVCaptureDevice>?) -> Void)?
     /// Delivers throttled live histogram/waveform snapshots when enabled.
@@ -460,6 +470,13 @@ final class CaptureCore: NSObject, @unchecked Sendable {
             }
         }
         metadataOutput.setMetadataObjectsDelegate(subjectRelay, queue: subjectRelay.queue)
+        controlsRelay.onFullscreenChanged = { [weak self] fullscreen in
+            self?.run { core in
+                guard core.state.controlsFullscreen != fullscreen else { return }
+                core.state.controlsFullscreen = fullscreen
+                core.publish(device: nil)
+            }
+        }
         observers.append(
             NotificationCenter.default.addObserver(
                 forName: AVCaptureSession.runtimeErrorNotification, object: session, queue: nil
@@ -524,6 +541,7 @@ final class CaptureCore: NSObject, @unchecked Sendable {
         session.addInput(newInput)
         input = newInput
         apply(mode: mode, on: device)
+        configureSessionControls(on: device)
         session.commitConfiguration()
         prepare(device)
         state = describe(device)
@@ -659,9 +677,10 @@ final class CaptureCore: NSObject, @unchecked Sendable {
                 if connection.isVideoRotationAngleSupported(90) { connection.videoRotationAngle = 90 }
                 applyMirroring(on: connection, mirror: side == .front)
             }
-            // Live Photos record sound (unless RAW is active, which cannot combine with Live Photos).
-            let raw = video?.captureRAW == true && availableBayerRAW() != nil
-            let live = video?.live == true && !raw
+            // Live Photos record sound (unless Bayer RAW or Apple ProRAW is active).
+            let proRAW = video?.captureProRAW == true && photoOutput.isAppleProRAWSupported
+            let raw = !proRAW && video?.captureRAW == true && availableBayerRAW() != nil
+            let live = video?.live == true && !raw && !proRAW
             if live {
                 addMicrophone()
             } else if let audioInput {
@@ -682,7 +701,10 @@ final class CaptureCore: NSObject, @unchecked Sendable {
             if photoOutput.isResponsiveCaptureSupported {
                 photoOutput.isResponsiveCaptureEnabled = faster
             }
-            photoOutput.isDepthDataDeliveryEnabled = !raw && photoOutput.isDepthDataDeliverySupported
+            if photoOutput.isAppleProRAWSupported {
+                photoOutput.isAppleProRAWEnabled = proRAW
+            }
+            photoOutput.isDepthDataDeliveryEnabled = !raw && !proRAW && photoOutput.isDepthDataDeliverySupported
             photoOutput.isPortraitEffectsMatteDeliveryEnabled =
                 photoOutput.isDepthDataDeliveryEnabled && photoOutput.isPortraitEffectsMatteDeliverySupported
             photoOutput.isLivePhotoCaptureEnabled = live && photoOutput.isLivePhotoCaptureSupported
@@ -719,7 +741,7 @@ final class CaptureCore: NSObject, @unchecked Sendable {
                 previewOutput.setSampleBufferDelegate(previewRelay, queue: previewRelay.queue)
             }
             state.videoFormat = nil
-        case .video, .cinematic, .slowMotion:
+        case .video, .cinematic, .slowMotion, .spatial:
             // Disable Live Photos before adding `movieOutput`, then keep `photoOutput` attached in
             // `.video` mode so users can snap still photos while recording.
             photoOutput.isLivePhotoCaptureEnabled = false
@@ -733,18 +755,32 @@ final class CaptureCore: NSObject, @unchecked Sendable {
             use(outputs)
             addMicrophone()
             configureAudioInput()
+            var wantedProFormat = ProVideoFormat.standard
             if let video {
                 if mode == .slowMotion {
                     applyVideoFormat(
                         sizes: [(1920, 1080)], rate: Double(video.slowMotionRate), hdr: false,
-                        autoLowLightFPS: false, on: device)
+                        autoLowLightFPS: false, appleLog: false, on: device)
                 } else if mode == .cinematic {
                     applyCinematicFormat(video: video, on: device)
+                } else if mode == .spatial {
+                    applySpatialVideoFormat(on: device)
                 } else {
+                    let canProRes = movieOutput.availableVideoCodecTypes.contains(.proRes422)
+                    let canLog = device.formats.contains { $0.supportedColorSpaces.contains(.appleLog) }
+                    wantedProFormat = ProDeviceRules.effectiveVideoFormat(
+                        wanted: video.proVideoFormat,
+                        capabilities: DeviceCapabilities(canProRes: canProRes, canAppleLog: canLog))
                     applyVideoFormat(
                         sizes: video.resolution == .uhd4K ? [(3840, 2160), (1920, 1080)] : [(1920, 1080)],
-                        rate: Double(video.frameRate), hdr: video.hdr, autoLowLightFPS: video.autoLowLightFPS,
+                        rate: Double(video.frameRate), hdr: video.hdr && wantedProFormat != .proResLog,
+                        autoLowLightFPS: video.autoLowLightFPS, appleLog: wantedProFormat == .proResLog,
                         on: device)
+                    if wantedProFormat == .proRes, let base = state.videoFormat {
+                        state.videoFormat = "\(base) · ProRes"
+                    } else if wantedProFormat == .proResLog, let base = state.videoFormat {
+                        state.videoFormat = "\(base) · ProRes Log"
+                    }
                     if video.actionMode, let base = state.videoFormat {
                         state.videoFormat = "\(base) · Action"
                     }
@@ -762,8 +798,16 @@ final class CaptureCore: NSObject, @unchecked Sendable {
             {
                 photoOutput.maxPhotoDimensions = largest
             }
+            if movieOutput.isSpatialVideoCaptureSupported {
+                movieOutput.isSpatialVideoCaptureEnabled = mode == .spatial
+            }
             if let connection = movieOutput.connection(with: .video) {
-                if movieOutput.availableVideoCodecTypes.contains(.hevc) {
+                if mode == .video && wantedProFormat != .standard
+                    && movieOutput.availableVideoCodecTypes.contains(.proRes422)
+                {
+                    movieOutput.setOutputSettings(
+                        [AVVideoCodecKey: AVVideoCodecType.proRes422], for: connection)
+                } else if movieOutput.availableVideoCodecTypes.contains(.hevc) {
                     movieOutput.setOutputSettings([AVVideoCodecKey: AVVideoCodecType.hevc], for: connection)
                 }
                 if connection.isVideoStabilizationSupported {
@@ -835,6 +879,17 @@ final class CaptureCore: NSObject, @unchecked Sendable {
         if device.activeFormat.isCameraLensSmudgeDetectionSupported {
             device.setCameraLensSmudgeDetectionEnabled(
                 true, detectionInterval: CMTime(seconds: 3, preferredTimescale: 1))
+        }
+        if device.isVirtualDevice, device.primaryConstituentDeviceSwitchingBehavior != .unsupported,
+            !lockedSwitchingForRecording
+        {
+            switch video?.macroMode ?? .auto {
+            case .off:
+                device.setPrimaryConstituentDeviceSwitchingBehavior(
+                    .restricted, restrictedSwitchingBehaviorConditions: [])
+            case .auto, .on:
+                device.setPrimaryConstituentDeviceSwitchingBehavior(.auto, restrictedSwitchingBehaviorConditions: [])
+            }
         }
         device.unlockForConfiguration()
     }
@@ -931,11 +986,13 @@ final class CaptureCore: NSObject, @unchecked Sendable {
         }
     }
 
-    /// Configures Stereo/Mono multichannel audio and Wind Noise Removal on the active microphone.
+    /// Configures Spatial (first-order Ambisonics), Stereo or Mono audio and Wind Noise Removal.
     private func configureAudioInput() {
         guard let audioInput else { return }
-        let wantStereo = (video?.audioChannelMode ?? .stereo) == .stereo
-        if wantStereo && audioInput.isMultichannelAudioModeSupported(.stereo) {
+        let wanted = video?.audioChannelMode ?? .stereo
+        if wanted == .spatial && audioInput.isMultichannelAudioModeSupported(.firstOrderAmbisonics) {
+            audioInput.multichannelAudioMode = .firstOrderAmbisonics
+        } else if wanted != .mono && audioInput.isMultichannelAudioModeSupported(.stereo) {
             audioInput.multichannelAudioMode = .stereo
         } else if audioInput.isMultichannelAudioModeSupported(.none) {
             audioInput.multichannelAudioMode = .none
@@ -945,6 +1002,45 @@ final class CaptureCore: NSObject, @unchecked Sendable {
             audioInput.isWindNoiseRemovalEnabled =
                 (video?.windNoiseRemoval ?? true) && audioInput.multichannelAudioMode != .none
         }
+    }
+
+    /// Configures a spatial MV-HEVC video format when supported by the camera hardware.
+    private func applySpatialVideoFormat(on device: AVCaptureDevice) {
+        let spatialFormats = device.formats.filter(\.isSpatialVideoCaptureSupported)
+        if let chosen = spatialFormats.first, (try? device.lockForConfiguration()) != nil {
+            device.activeFormat = chosen
+            let frame = CMTime(value: 1, timescale: 30)
+            device.activeVideoMinFrameDuration = frame
+            device.activeVideoMaxFrameDuration = frame
+            device.unlockForConfiguration()
+            state.videoFormat = "Spatial · 1080p · 30 fps"
+        } else {
+            applyVideoFormat(
+                sizes: [(1920, 1080)], rate: 30, hdr: false, autoLowLightFPS: false, appleLog: false, on: device)
+            state.videoFormat = "Spatial · 1080p · 30 fps"
+        }
+    }
+
+    /// Registers iPhone 16+ Camera Control sliders (Zoom, Exposure Bias, Photographic Style) when supported.
+    private func configureSessionControls(on device: AVCaptureDevice) {
+        guard session.supportsControls else { return }
+        for existing in session.controls { session.removeControl(existing) }
+        session.setControlsDelegate(controlsRelay, queue: queue)
+        let zoomSlider = AVCaptureSystemZoomSlider(device: device)
+        if session.canAddControl(zoomSlider) { session.addControl(zoomSlider) }
+        let exposureSlider = AVCaptureSystemExposureBiasSlider(device: device)
+        if session.canAddControl(exposureSlider) { session.addControl(exposureSlider) }
+        let presets = PhotographicStylePreset.allCases
+        let titles = presets.map(\.title)
+        let stylePicker = AVCaptureIndexPicker(
+            "Style", symbolName: "wand.and.stars", localizedIndexTitles: titles)
+        stylePicker.setActionQueue(queue) { [weak self] (index: Int) in
+            guard presets.indices.contains(index) else { return }
+            let preset = presets[index]
+            let style: PhotographicStyle? = preset == .standard ? nil : PhotographicStyle(preset: preset)
+            self?.onControlStyleChanged?(style)
+        }
+        if session.canAddControl(stylePicker) { session.addControl(stylePicker) }
     }
 
     /// Lets music or podcasts keep playing while filming and/or routes audio from AirPods / Bluetooth HFP.
@@ -976,6 +1072,20 @@ final class CaptureCore: NSObject, @unchecked Sendable {
         photoOutput.availableRawPhotoPixelFormatTypes.first { AVCapturePhotoOutput.isBayerRAWPixelFormat($0) }
     }
 
+    private func availableAppleProRAW() -> OSType? {
+        photoOutput.availableRawPhotoPixelFormatTypes.first { AVCapturePhotoOutput.isAppleProRAWPixelFormat($0) }
+    }
+
+    private func connectedExternalStorage() -> (device: AVExternalStorageDevice, info: ExternalStorageInfo)? {
+        guard AVExternalStorageDeviceDiscoverySession.isSupported,
+            let dev = AVExternalStorageDeviceDiscoverySession.shared?.externalStorageDevices
+                .first(where: \.isConnected)
+        else { return nil }
+        let info = ExternalStorageInfo(
+            displayName: dev.displayName ?? "External SSD", freeBytes: Int64(max(0, dev.freeSize)))
+        return (dev, info)
+    }
+
     /// Sound, when allowed.
     private func addMicrophone() {
         guard audioInput == nil, AVCaptureDevice.authorizationStatus(for: .audio) == .authorized,
@@ -990,7 +1100,8 @@ final class CaptureCore: NSObject, @unchecked Sendable {
     /// bit with HLG) or not, and auto low-light FPS when requested and supported. What was
     /// actually chosen is shown on the camera screen.
     private func applyVideoFormat(
-        sizes: [(Int, Int)], rate: Double, hdr wantHDR: Bool, autoLowLightFPS: Bool, on device: AVCaptureDevice
+        sizes: [(Int, Int)], rate: Double, hdr wantHDR: Bool, autoLowLightFPS: Bool,
+        appleLog wantLog: Bool = false, on device: AVCaptureDevice
     ) {
         func dimensions(_ format: AVCaptureDevice.Format) -> (Int, Int) {
             let size = CMVideoFormatDescriptionGetDimensions(format.formatDescription)
@@ -1014,7 +1125,12 @@ final class CaptureCore: NSObject, @unchecked Sendable {
         let fast = sized.filter { maxRate($0) >= rate }
         let pool = fast.isEmpty ? sized : fast
         let format =
-            pool.first { wantHDR ? tenBit($0) && $0.supportedColorSpaces.contains(.HLG_BT2020) : !tenBit($0) }
+            pool.first {
+                if wantLog {
+                    return tenBit($0) && $0.supportedColorSpaces.contains(.appleLog)
+                }
+                return wantHDR ? tenBit($0) && $0.supportedColorSpaces.contains(.HLG_BT2020) : !tenBit($0)
+            }
             ?? pool[0]
         let used = min(rate, maxRate(format)).rounded()
         guard (try? device.lockForConfiguration()) != nil else { return }
@@ -1028,7 +1144,9 @@ final class CaptureCore: NSObject, @unchecked Sendable {
             device.activeVideoMinFrameDuration = frame
             device.activeVideoMaxFrameDuration = frame
         }
-        if wantHDR, format.supportedColorSpaces.contains(.HLG_BT2020) {
+        if wantLog, format.supportedColorSpaces.contains(.appleLog) {
+            device.activeColorSpace = .appleLog
+        } else if wantHDR, format.supportedColorSpaces.contains(.HLG_BT2020) {
             device.activeColorSpace = .HLG_BT2020
         } else if format.supportedColorSpaces.contains(.sRGB) {
             device.activeColorSpace = .sRGB
@@ -1103,6 +1221,31 @@ final class CaptureCore: NSObject, @unchecked Sendable {
             mode == .portrait ? PortraitMath.hint(distanceMeters: nil, iso: Double(device.iso)) : nil
         described.canCinematic = device.formats.contains(where: \.isCinematicVideoCaptureSupported)
         described.canWindNoiseRemoval = audioInput?.isWindNoiseRemovalSupported ?? false
+        let canSpatialVideo = device.formats.contains(where: \.isSpatialVideoCaptureSupported)
+        let canAppleLog = device.formats.contains { $0.supportedColorSpaces.contains(.appleLog) }
+        let canProRes = canAppleLog || movieOutput.availableVideoCodecTypes.contains(.proRes422)
+        let canMacro =
+            device.isVirtualDevice
+            && device.constituentDevices.contains {
+                $0.deviceType == .builtInUltraWideCamera && $0.isFocusModeSupported(.autoFocus)
+            }
+        let canSpatialAudio =
+            audioInput?.isMultichannelAudioModeSupported(.firstOrderAmbisonics) ?? canSpatialVideo
+        described.capabilities = DeviceCapabilities(
+            canProRAW: photoOutput.isAppleProRAWSupported,
+            canProRes: canProRes,
+            canAppleLog: canAppleLog,
+            canExternalStorage: AVExternalStorageDeviceDiscoverySession.isSupported,
+            canSpatialVideo: canSpatialVideo,
+            canMacroControl: canMacro,
+            canCameraControl: session.supportsControls,
+            canSpatialAudio: canSpatialAudio,
+            canAudioMix: canSpatialAudio)
+        described.externalStorage = connectedExternalStorage()?.info
+        described.macroActive =
+            canMacro && device.activePrimaryConstituent?.deviceType == .builtInUltraWideCamera
+            && described.zoom >= 0.95
+        described.controlsFullscreen = state.controlsFullscreen
         described.manualLimits = limits(of: device)
         described.focusLocked = state.focusLocked
         described.videoFormat = state.videoFormat
@@ -1232,7 +1375,14 @@ final class CaptureCore: NSObject, @unchecked Sendable {
         applyMirroring(on: connection, mirror: request.mirrorFrontCamera)
         let heic = request.format == .heic && photoOutput.availablePhotoCodecTypes.contains(.hevc)
         let processedFormat: [String: Any] = [AVVideoCodecKey: heic ? AVVideoCodecType.hevc : .jpeg]
-        let rawFormat = request.raw ? availableBayerRAW() : nil
+        let rawFormat: OSType? =
+            if request.proRAW, photoOutput.isAppleProRAWEnabled {
+                availableAppleProRAW()
+            } else if request.raw {
+                availableBayerRAW()
+            } else {
+                nil
+            }
         let settings: AVCapturePhotoSettings
         if let rawFormat {
             settings = AVCapturePhotoSettings(rawPixelFormatType: rawFormat, processedFormat: processedFormat)
@@ -1368,9 +1518,17 @@ final class CaptureCore: NSObject, @unchecked Sendable {
         applyMirroring(on: connection, mirror: video?.mirrorFrontCamera == true)
         if let device { lockForRecording(on: device) }
         movieOutput.metadata = metadata
+        var targetURL = request.url
+        if request.preferExternalStorage, let external = connectedExternalStorage(),
+            let urls = try? external.device.nextAvailableURLs(withPathExtensions: ["mov"]),
+            let externalURL = urls.first, externalURL.startAccessingSecurityScopedResource()
+        {
+            activeExternalURL = externalURL
+            targetURL = externalURL
+        }
         let recording = Recording()
         self.recording = recording
-        movieOutput.startRecording(to: request.url, recordingDelegate: recording)
+        movieOutput.startRecording(to: targetURL, recordingDelegate: recording)
     }
 
     /// The finished file, and for a time-lapse which stretches were taken how often.
@@ -1385,9 +1543,12 @@ final class CaptureCore: NSObject, @unchecked Sendable {
         let wasQuickTake = quickTaking
         quickTaking = false
         recording.whenFinished { [weak self] url in
-            if wasQuickTake {
-                self?.run { core in
-                    guard core.mode == .photo, let device = core.device else { return }
+            self?.run { core in
+                if let scoped = core.activeExternalURL {
+                    scoped.stopAccessingSecurityScopedResource()
+                    core.activeExternalURL = nil
+                }
+                if wasQuickTake, core.mode == .photo, let device = core.device {
                     core.session.beginConfiguration()
                     core.apply(mode: .photo, on: device)
                     core.session.commitConfiguration()
@@ -1461,6 +1622,25 @@ final class CaptureCore: NSObject, @unchecked Sendable {
         if manual.whiteBalance == nil, device.isWhiteBalanceModeSupported(.continuousAutoWhiteBalance) {
             device.whiteBalanceMode = .continuousAutoWhiteBalance
         }
+    }
+}
+
+/// Bridges iPhone 16+ Camera Control overlay lifecycle events to the camera state.
+final class CameraControlsRelay: NSObject, AVCaptureSessionControlsDelegate, @unchecked Sendable {
+    var onFullscreenChanged: (@Sendable (Bool) -> Void)?
+
+    func sessionControlsDidBecomeActive(_ session: AVCaptureSession) {}
+
+    func sessionControlsWillEnterFullscreenAppearance(_ session: AVCaptureSession) {
+        onFullscreenChanged?(true)
+    }
+
+    func sessionControlsWillExitFullscreenAppearance(_ session: AVCaptureSession) {
+        onFullscreenChanged?(false)
+    }
+
+    func sessionControlsDidBecomeInactive(_ session: AVCaptureSession) {
+        onFullscreenChanged?(false)
     }
 }
 

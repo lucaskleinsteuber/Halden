@@ -65,6 +65,12 @@ struct CameraScreen<Gallery: View>: View {
         .onAppear {
             cameraVisible = true
             camera.appear()
+            if let deviceCamera = camera.backend as? DeviceCamera {
+                deviceCamera.onControlStyleChanged = { style in
+                    update { $0.photographicStyle = style }
+                    camera.settingsChanged()
+                }
+            }
             motion.showLevel = settings.showLevel
             motion.start()
             camera.isOnTripod = motion.isOnTripod
@@ -368,6 +374,33 @@ struct CameraScreen<Gallery: View>: View {
                         ? "Night Mode \(activeSeconds) seconds" : "Night Mode off"
                 )
                 .accessibilityIdentifier("night-mode-badge")
+            } else if camera.mode == .spatial {
+                Label("Rotate iPhone to landscape for Spatial Video", systemImage: "view.3d")
+                    .font(.caption.bold())
+                    .foregroundStyle(.black)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 6)
+                    .background(.yellow, in: .capsule)
+                    .padding(.top, 8)
+                    .accessibilityIdentifier("spatial-hint")
+            }
+            if camera.mode.records && state.capabilities.canExternalStorage,
+                let storage = state.externalStorage,
+                ProDeviceRules.shouldRecordToExternalStorage(
+                    enabled: settings.recordToExternalStorage, storage: storage, format: settings.proVideoFormat)
+            {
+                Label(
+                    "\(storage.badgeLabel) · \(storage.displayName)",
+                    systemImage: "externaldrive.connected.to.line.below"
+                )
+                .font(.caption2.bold())
+                .foregroundStyle(.yellow)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 4)
+                .background(.black.opacity(0.65), in: .capsule)
+                .padding(.top, 6)
+                .accessibilityLabel("Recording to \(storage.displayName)")
+                .accessibilityIdentifier("external-storage-badge")
             }
             Spacer(minLength: 0)
             if let problem = camera.problem {
@@ -416,6 +449,28 @@ struct CameraScreen<Gallery: View>: View {
                     .padding(.bottom, 6)
                 }
                 zoomControl.frame(height: 56)
+                    .overlay(alignment: .leading) {
+                        if state.capabilities.canMacroControl && settings.macroControl
+                            && (camera.mode == .photo || camera.mode == .video)
+                            && (state.macroActive || settings.macroMode != .auto)
+                            && !dialShown
+                        {
+                            let macroOn = settings.macroMode != .off
+                            Button {
+                                update { $0.macroMode = macroOn ? .off : .on }
+                                camera.settingsChanged()
+                            } label: {
+                                Image(systemName: "camera.macro")
+                                    .font(.body.weight(.semibold))
+                                    .foregroundStyle(macroOn ? .black : .white)
+                                    .frame(width: 44, height: 44)
+                                    .background(macroOn ? Color.yellow : Color.black.opacity(0.55), in: .circle)
+                            }
+                            .padding(.leading, 16)
+                            .accessibilityLabel(macroOn ? "Macro on" : "Macro off")
+                            .accessibilityIdentifier("macro-toggle")
+                        }
+                    }
             }
             if camera.recording || camera.burstCount > 0 || camera.isPanoramaCapturing {
                 Color.clear.frame(height: Self.modeHeight)
@@ -441,6 +496,8 @@ struct CameraScreen<Gallery: View>: View {
             }
             shutterRow.frame(height: Self.shutterHeight)
         }
+        .opacity(state.controlsFullscreen ? 0.15 : 1)
+        .animation(.easeInOut(duration: 0.2), value: state.controlsFullscreen)
         .foregroundStyle(.white)
         .tint(.white)
     }
@@ -725,7 +782,13 @@ struct CameraScreen<Gallery: View>: View {
                         }
                     }
                     Picker("Audio", selection: videoSetting(\.audioChannelMode)) {
-                        ForEach(AudioChannelMode.allCases) { channel in
+                        ForEach(availableAudioChannels) { channel in
+                            Text(channel.title).tag(channel)
+                        }
+                    }
+                case .spatial:
+                    Picker("Audio", selection: videoSetting(\.audioChannelMode)) {
+                        ForEach(availableAudioChannels) { channel in
                             Text(channel.title).tag(channel)
                         }
                     }
@@ -752,6 +815,13 @@ struct CameraScreen<Gallery: View>: View {
                         }
                     }
                     Toggle("HDR", isOn: videoSetting(\.videoHDR))
+                    if state.capabilities.hasProVideo {
+                        Picker("Pro video", selection: videoSetting(\.proVideoFormat)) {
+                            ForEach(ProVideoFormat.available(for: state.capabilities)) { format in
+                                Text(format.title).tag(format)
+                            }
+                        }
+                    }
                     Toggle("Auto low-light FPS", isOn: videoSetting(\.autoLowLightFPS))
                 }
             } label: {
@@ -781,6 +851,10 @@ struct CameraScreen<Gallery: View>: View {
                 update { $0[keyPath: keyPath] = value }
                 camera.settingsChanged()
             })
+    }
+
+    private var availableAudioChannels: [AudioChannelMode] {
+        state.capabilities.canSpatialAudio ? [.spatial, .stereo, .mono] : [.stereo, .mono]
     }
 
     private var flashSymbol: String {
@@ -879,7 +953,8 @@ struct CameraScreen<Gallery: View>: View {
     /// The modes, the chosen one in the middle; also changed by swiping over the picture.
     private var visibleModes: [CameraMode] {
         CameraMode.strip.filter { mode in
-            mode != .dual || state.canMultiCam
+            (mode != .dual || state.canMultiCam)
+                && (mode != .spatial || state.capabilities.canSpatialVideo)
         }
     }
 
@@ -1132,7 +1207,9 @@ extension CameraScreen where Gallery == EmptyView {
 
 extension CameraMode {
     /// The order on the screen, as in Apple's camera (`video` stays immediately left of `photo`).
-    static let strip: [CameraMode] = [.timeLapse, .slowMotion, .cinematic, .video, .photo, .portrait, .panorama, .dual]
+    static let strip: [CameraMode] = [
+        .timeLapse, .slowMotion, .cinematic, .video, .photo, .portrait, .panorama, .dual, .spatial,
+    ]
 
     var title: String {
         switch self {
@@ -1144,6 +1221,7 @@ extension CameraMode {
         case .cinematic: "Cinematic"
         case .slowMotion: "Slo-mo"
         case .timeLapse: "Time-lapse"
+        case .spatial: "Spatial"
         }
     }
 
@@ -1157,6 +1235,7 @@ extension CameraMode {
         case .cinematic: "Record cinematic video"
         case .slowMotion: "Record slow motion"
         case .timeLapse: "Record a time-lapse"
+        case .spatial: "Record spatial video"
         }
     }
 

@@ -33,6 +33,8 @@ public struct EditRecipe: Codable, Sendable, Hashable {
         var cinematicFocusPoints: [CinematicFocusPoint]? = nil
         var liveEffect: LivePhotoEffect? = nil
         var liveKeyFrameMs: Int64? = nil
+        var audioMix: AudioMixStyle? = nil
+        var audioMixIntensity: Double? = nil
         var quarterTurns: Int = 0
         var straighten: Double = 0
         var crop: Crop? = nil
@@ -42,7 +44,7 @@ public struct EditRecipe: Codable, Sendable, Hashable {
         enum CodingKeys: String, CodingKey {
             case version, exposure, brightness, contrast, highlights, shadows, saturation, vibrance, warmth, tint
             case style, filter, portraitAperture, portraitLighting, cinematicAperture, cinematicFocusPoints
-            case liveEffect, liveKeyFrameMs
+            case liveEffect, liveKeyFrameMs, audioMix, audioMixIntensity
             case quarterTurns, straighten, crop, trimStartMs, trimEndMs
         }
 
@@ -74,6 +76,8 @@ public struct EditRecipe: Codable, Sendable, Hashable {
                 [CinematicFocusPoint].self, forKey: .cinematicFocusPoints)
             liveEffect = try? container.decodeIfPresent(LivePhotoEffect.self, forKey: .liveEffect)
             liveKeyFrameMs = try? container.decodeIfPresent(Int64.self, forKey: .liveKeyFrameMs)
+            audioMix = try? container.decodeIfPresent(AudioMixStyle.self, forKey: .audioMix)
+            audioMixIntensity = try? container.decodeIfPresent(Double.self, forKey: .audioMixIntensity)
             read(.quarterTurns, &quarterTurns)
             read(.straighten, &straighten)
             crop = try? container.decodeIfPresent(Crop.self, forKey: .crop)
@@ -182,6 +186,16 @@ public struct EditRecipe: Codable, Sendable, Hashable {
     public var liveKeyFrameMs: Int64? {
         get { box.values.liveKeyFrameMs }
         set { change { $0.liveKeyFrameMs = newValue } }
+    }
+    /// Non-destructive Spatial Audio Mix style for videos (`standard` collapses to `nil`).
+    public var audioMix: AudioMixStyle? {
+        get { box.values.audioMix }
+        set { change { $0.audioMix = newValue } }
+    }
+    /// Audio Mix effect intensity (`0.0…1.0`), kept only when a non-standard `audioMix` is active.
+    public var audioMixIntensity: Double? {
+        get { box.values.audioMixIntensity }
+        set { change { $0.audioMixIntensity = newValue } }
     }
     // Shape: quarter turns clockwise, straightening in degrees (-45…45), and the part kept
     // (0…1 of the turned and straightened picture).
@@ -297,6 +311,9 @@ public struct EditRecipe: Codable, Sendable, Hashable {
         }
         fitted.liveEffect = liveEffect == .live ? nil : liveEffect
         fitted.liveKeyFrameMs = liveKeyFrameMs.map { LivePhotoEffectMath.clampKeyFrameMs($0) }
+        fitted.audioMix = audioMix == .standard ? nil : audioMix
+        fitted.audioMixIntensity =
+            fitted.audioMix != nil ? audioMixIntensity.map(ProDeviceRules.clampAudioMixIntensity) : nil
         fitted.quarterTurns = ((quarterTurns % 4) + 4) % 4
         fitted.straighten = clamp(straighten, 45)
         fitted.crop = crop?.fitted

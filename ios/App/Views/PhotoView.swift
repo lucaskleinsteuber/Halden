@@ -16,6 +16,7 @@ struct PhotoView: View {
     @State private var editingSlowMotion = false
     @State private var editingCinematic = false
     @State private var editingLiveEffect = false
+    @State private var editingAudioMix = false
     @State private var addingToAlbum: ChosenPhotos?
     @State private var editing = false
     @State private var pickingBurst = false
@@ -133,6 +134,18 @@ struct PhotoView: View {
                         .accessibilityIdentifier("cinematic-edit")
                     }
                 }
+                if asset?.isVideo == true && AudioMixSheet.isSupportedOnThisDevice {
+                    ToolbarSpacer(.flexible, placement: .bottomBar)
+                    ToolbarItem(placement: .bottomBar) {
+                        Button {
+                            editingAudioMix = true
+                        } label: {
+                            Image(systemName: "waveform.and.mic")
+                        }
+                        .accessibilityLabel("Audio Mix")
+                        .accessibilityIdentifier("audio-mix")
+                    }
+                }
                 if burstMembers.count > 1 {
                     ToolbarSpacer(.flexible, placement: .bottomBar)
                     ToolbarItem(placement: .bottomBar) {
@@ -189,6 +202,9 @@ struct PhotoView: View {
             }
             .sheet(isPresented: $editingLiveEffect) {
                 if let asset { LivePhotoEffectSheet(asset: asset) }
+            }
+            .sheet(isPresented: $editingAudioMix) {
+                if let asset { AudioMixSheet(asset: asset) }
             }
             .sheet(isPresented: $pickingBurst) {
                 if burstMembers.count > 1 { BurstPickerView(members: burstMembers) }
@@ -318,9 +334,11 @@ struct InfoView: View {
             }
             if let kind = asset.isLivePhoto
                 ? "Live Photo"
-                : asset.isCinematic
-                    ? "Cinematic"
-                    : asset.isSlowMotion ? "Slow motion" : asset.isTimeLapse ? "Time-lapse" : nil
+                : asset.isSpatial
+                    ? "Spatial Video"
+                    : asset.isCinematic
+                        ? "Cinematic"
+                        : asset.isSlowMotion ? "Slow motion" : asset.isTimeLapse ? "Time-lapse" : nil
             {
                 LabeledContent("Taken as", value: kind)
             }
@@ -330,6 +348,10 @@ struct InfoView: View {
             if asset.isLivePhoto && asset.activeLiveEffect != .live {
                 LabeledContent("Live effect", value: asset.activeLiveEffect.title)
                     .accessibilityIdentifier("info-live-effect")
+            }
+            if let mix = asset.edit?.audioMix {
+                LabeledContent("Audio Mix", value: mix.title)
+                    .accessibilityIdentifier("info-audio-mix")
             }
             if let slow = asset.playback {
                 LabeledContent(

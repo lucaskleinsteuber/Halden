@@ -142,6 +142,22 @@ fn check_edit(edit: &Value) -> Result<(), String> {
     {
         return Err("edit.liveKeyFrameMs must be an integer between 0 and 600000.".into());
     }
+    if let Some(audio_mix) = map.get("audioMix")
+        && !audio_mix.is_null()
+        && !audio_mix
+            .as_str()
+            .is_some_and(|s| matches!(s, "standard" | "in_frame" | "studio" | "cinematic"))
+    {
+        return Err("edit.audioMix must be standard, in_frame, studio or cinematic.".into());
+    }
+    if let Some(intensity) = map.get("audioMixIntensity")
+        && !intensity.is_null()
+        && !intensity
+            .as_f64()
+            .is_some_and(|n| n.is_finite() && (0.0..=1.0).contains(&n))
+    {
+        return Err("edit.audioMixIntensity must be between 0 and 1.".into());
+    }
     if edit.to_string().len() > MAX_EDIT_BYTES {
         return Err(format!(
             "edit may be at most {MAX_EDIT_BYTES} bytes as JSON."

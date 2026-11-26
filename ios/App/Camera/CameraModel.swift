@@ -212,7 +212,10 @@ final class CameraModel {
 
     /// The next mode to the right (1) or left (-1) on the screen, as after a swipe.
     func switchMode(by step: Int) {
-        let modes = CameraMode.strip
+        let modes = CameraMode.strip.filter { candidate in
+            (candidate != .dual || backend.state.canMultiCam)
+                && (candidate != .spatial || backend.state.capabilities.canSpatialVideo)
+        }
         guard let index = modes.firstIndex(of: mode), modes.indices.contains(index + step) else { return }
         switchTo(modes[index + step])
     }
@@ -562,8 +565,12 @@ final class CameraModel {
             takeNightPhoto(seconds: nightSeconds, at: now, place: place, settings: settings)
             return
         }
-        let raw = !isPortrait && settings.captureRAW && backend.state.canRAW
-        let autoDepth = mode == .photo && backend.state.subjectDetected && backend.state.canDepth && !raw
+        let proRAW =
+            !isPortrait
+            && ProDeviceRules.effectiveProRAW(
+                enabled: settings.captureProRAW, capabilities: backend.state.capabilities)
+        let raw = !isPortrait && !proRAW && settings.captureRAW && backend.state.canRAW
+        let autoDepth = mode == .photo && backend.state.subjectDetected && backend.state.canDepth && !raw && !proRAW
         let aspectRatio = settings.photoAspectRatio
         let style = settings.photographicStyle
         let filter = settings.photoFilter
@@ -573,8 +580,8 @@ final class CameraModel {
         let request = PhotoRequest(
             format: settings.photoFormat, flash: settings.flash, location: place,
             trueNorth: location.compass?.trueNorth ?? false, takenAt: now,
-            live: !isPortrait && settings.livePhotos && backend.state.canLive && !raw,
-            resolution: settings.photoResolution, raw: raw,
+            live: !isPortrait && settings.livePhotos && backend.state.canLive && !raw && !proRAW,
+            resolution: settings.photoResolution, raw: raw, proRAW: proRAW,
             prioritizeFaster: settings.prioritizeFasterShooting,
             mirrorFrontCamera: settings.mirrorFrontCamera,
             captureDepth: isPortrait || autoDepth,
@@ -685,9 +692,14 @@ final class CameraModel {
 
     private func startRecording() {
         let now = Date()
+        let current = settings()
         let url = FileManager.default.temporaryDirectory.appendingPathComponent("\(UUID().uuidString).mov")
+        let useExternal = ProDeviceRules.shouldRecordToExternalStorage(
+            enabled: current.recordToExternalStorage, storage: backend.state.externalStorage,
+            format: current.proVideoFormat)
         let request = VideoRequest(
-            url: url, location: place(at: now), takenAt: now, timeZone: .current, mode: mode)
+            url: url, location: place(at: now), takenAt: now, timeZone: .current, mode: mode,
+            preferExternalStorage: useExternal)
         guard backend.startRecording(request) else {
             problem = "The video could not be started."
             return

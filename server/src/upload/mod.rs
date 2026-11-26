@@ -95,7 +95,7 @@ pub struct ClientMetadata {
     pub duration_ms: Option<u64>,
     /// Shown in the app, never used for a path on the server.
     pub original_filename: Option<String>,
-    /// How a video was taken: `slowmo`, `timelapse` or `cinematic`. Other values are kept but not used.
+    /// How a video was taken: `slowmo`, `timelapse`, `cinematic` or `spatial`. Other values are kept but not used.
     pub capture_mode: Option<String>,
     /// Shared identifier for photos taken together in one burst.
     pub burst_id: Option<String>,
@@ -108,7 +108,7 @@ impl ClientMetadata {
     pub fn known_capture_mode(&self) -> Option<&str> {
         self.capture_mode
             .as_deref()
-            .filter(|mode| matches!(*mode, "slowmo" | "timelapse" | "cinematic"))
+            .filter(|mode| matches!(*mode, "slowmo" | "timelapse" | "cinematic" | "spatial"))
     }
 
     /// The burst identifier, if non-empty.

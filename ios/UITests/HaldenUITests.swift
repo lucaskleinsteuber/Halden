@@ -1367,4 +1367,124 @@ final class HaldenUITests: XCTestCase {
             .matching(NSPredicate(format: "label CONTAINS 'ui-tests' OR value CONTAINS 'ui-tests'")).firstMatch
         XCTAssertTrue(name.waitForExistence(timeout: 5), "the server's name")
     }
+
+    /// Newer / Pro iPhone features work on capable hardware and stay completely hidden on basic devices.
+    @MainActor
+    func testProDeviceFeaturesAndCapabilityGating() {
+        let app = XCUIApplication()
+        app.launchArguments = [
+            "-ui-testing-signed-in", "-ui-testing-library", "10", "-ui-testing-ssd", "-ui-testing-macro",
+        ]
+        app.launch()
+        XCTAssertTrue(app.buttons["shutter"].waitForExistence(timeout: 30))
+
+        // Macro toggle appears and flips between on and off.
+        let macro = app.buttons["macro-toggle"]
+        XCTAssertTrue(macro.waitForExistence(timeout: 5), "macro toggle visible on capable device")
+        macro.tap()
+        XCTAssertEqual(macro.label, "Macro off")
+        macro.tap()
+        XCTAssertEqual(macro.label, "Macro on")
+
+        // Drawer shows Apple ProRAW on capable device.
+        app.buttons["camera-controls-toggle"].tap()
+        let drawer = app.descendants(matching: .any)["camera-drawer"]
+        XCTAssertTrue(drawer.waitForExistence(timeout: 5))
+        let window = app.windows.firstMatch
+        let screenWidth = window.frame.width
+        func scrollDrawerTo(_ chip: XCUIElement) {
+            for _ in 0..<8 where chip.frame.maxX > screenWidth - 8 || chip.frame.minX < 8 {
+                let chipY = drawer.frame.maxY - 24
+                let origin = window.coordinate(withNormalizedOffset: .zero)
+                let from = origin.withOffset(
+                    CGVector(dx: chip.frame.minX < 8 ? screenWidth * 0.2 : screenWidth * 0.85, dy: chipY))
+                let to = origin.withOffset(
+                    CGVector(dx: chip.frame.minX < 8 ? screenWidth * 0.85 : screenWidth * 0.2, dy: chipY))
+                from.press(forDuration: 0.02, thenDragTo: to)
+            }
+        }
+        let proRAW = app.buttons["drawer-proraw"]
+        XCTAssertTrue(proRAW.waitForExistence(timeout: 5), "ProRAW chip shown on Pro hardware")
+        scrollDrawerTo(proRAW)
+        proRAW.tap()
+        app.buttons["camera-controls-toggle"].tap()
+
+        // Video mode shows ProRes / Log selector and USB-C SSD badge.
+        app.buttons["mode-video"].tap()
+        XCTAssertTrue(app.buttons["camera-controls-toggle"].waitForExistence(timeout: 5))
+        app.buttons["camera-controls-toggle"].tap()
+        XCTAssertTrue(drawer.waitForExistence(timeout: 5))
+        let proResChip = app.buttons["drawer-prores"]
+        XCTAssertTrue(proResChip.waitForExistence(timeout: 5), "ProRes chip shown on Pro hardware")
+        scrollDrawerTo(proResChip)
+        proResChip.tap()
+        let logPill = app.buttons["drawer-provideo-prores_log"]
+        XCTAssertTrue(logPill.waitForExistence(timeout: 5))
+        logPill.tap()
+        XCTAssertTrue(
+            app.descendants(matching: .any)["external-storage-badge"].waitForExistence(timeout: 5),
+            "USB-C SSD badge shown for ProRes Log")
+        app.buttons["camera-controls-toggle"].tap()
+
+        // Spatial Video mode is present and shows landscape guidance.
+        for mode in ["photo", "portrait", "panorama", "dual", "spatial"] {
+            let button = app.buttons["mode-\(mode)"]
+            XCTAssertTrue(button.waitForExistence(timeout: 5), "mode-\(mode) should exist")
+            button.tap()
+            Thread.sleep(forTimeInterval: 0.45)
+        }
+        XCTAssertTrue(
+            app.descendants(matching: .any)["spatial-hint"].waitForExistence(timeout: 5),
+            "Spatial landscape hint shown")
+
+        // Audio Mix sheet on a video in the library saves non-destructively into Info.
+        let tabs = Tabs(app)
+        tabs.buttons["Photos"].tap()
+        let firstVideo = app.collectionViews["library-grid"].cells.firstMatch
+        XCTAssertTrue(firstVideo.waitForExistence(timeout: 15))
+        firstVideo.tap()
+        let audioMixButton = app.buttons["audio-mix"]
+        XCTAssertTrue(audioMixButton.waitForExistence(timeout: 10), "Audio Mix button on video")
+        audioMixButton.tap()
+        let studio = app.buttons["audio-mix-studio"]
+        XCTAssertTrue(studio.waitForExistence(timeout: 5))
+        studio.tap()
+        app.buttons["audio-mix-save"].tap()
+        app.buttons["info"].tap()
+        XCTAssertTrue(
+            app.descendants(matching: .any)["info-audio-mix"].waitForExistence(timeout: 5),
+            "Audio Mix shown in Info")
+        app.buttons["Done"].firstMatch.tap()
+
+        // Relaunch simulating a basic device (e.g. iPhone 15): all Pro-only controls must be hidden.
+        app.terminate()
+        app.launchArguments = [
+            "-ui-testing-signed-in", "-ui-testing-library", "5", "-ui-testing-basic-device",
+            "-ui-testing-ssd", "-ui-testing-macro",
+        ]
+        app.launch()
+        XCTAssertTrue(app.buttons["shutter"].waitForExistence(timeout: 30))
+        XCTAssertFalse(app.buttons["macro-toggle"].exists, "Macro hidden on basic device")
+        XCTAssertFalse(app.buttons["mode-spatial"].exists, "Spatial mode hidden on basic device")
+        app.buttons["camera-controls-toggle"].tap()
+        XCTAssertTrue(app.descendants(matching: .any)["camera-drawer"].waitForExistence(timeout: 5))
+        XCTAssertFalse(app.buttons["drawer-proraw"].exists, "ProRAW hidden on basic device")
+        app.buttons["camera-controls-toggle"].tap()
+        app.buttons["mode-video"].tap()
+        XCTAssertTrue(app.buttons["camera-controls-toggle"].waitForExistence(timeout: 5))
+        app.buttons["camera-controls-toggle"].tap()
+        XCTAssertTrue(app.descendants(matching: .any)["camera-drawer"].waitForExistence(timeout: 5))
+        XCTAssertFalse(app.buttons["drawer-prores"].exists, "ProRes hidden on basic device")
+        XCTAssertFalse(app.descendants(matching: .any)["external-storage-badge"].exists, "SSD hidden on basic device")
+
+        let basicTabs = Tabs(app)
+        basicTabs.buttons["Settings"].tap()
+        XCTAssertTrue(app.buttons["camera-settings"].waitForExistence(timeout: 10))
+        app.buttons["camera-settings"].tap()
+        let rawToggle = app.switches["settings-raw"]
+        for _ in 0..<4 where !rawToggle.exists { app.swipeUp() }
+        XCTAssertTrue(rawToggle.waitForExistence(timeout: 5))
+        XCTAssertFalse(app.switches["settings-proraw"].exists, "ProRAW setting hidden on basic device")
+        XCTAssertFalse(app.switches["settings-external-storage"].exists, "SSD setting hidden on basic device")
+    }
 }

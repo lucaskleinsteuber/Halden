@@ -49,6 +49,16 @@ public struct AppSettings: Codable, Sendable, Equatable {
     public var photoResolution = PhotoResolution.mp24
     /// Capture Bayer RAW (DNG) alongside the processed photo, when supported by the camera.
     public var captureRAW = false
+    /// Capture Apple ProRAW (up to 48 MP) on Pro iPhones that support it.
+    public var captureProRAW = false
+    /// Video codec on Pro iPhones (Standard HEVC, Apple ProRes, or Apple ProRes Log).
+    public var proVideoFormat = ProVideoFormat.standard
+    /// Record video directly to a connected USB-C external storage device when available.
+    public var recordToExternalStorage = false
+    /// Show the macro toggle button in the camera when close to a subject (Pro / newer iPhones).
+    public var macroControl = true
+    /// Current macro switching mode (Auto / On / Off).
+    public var macroMode = MacroMode.auto
     public var videoResolution = VideoResolution.uhd4K
     public var videoFrameRate = 60
     public var videoHDR = false
@@ -123,6 +133,7 @@ public struct AppSettings: Codable, Sendable, Equatable {
     public var keptExposureBias = 0.0
     public var preserveLivePhoto = true
     public var preserveResolution = false
+    public var preserveMacro = false
     /// Manual camera values stay when the camera closes (else everything goes back to automatic).
     public var keepManualSettings = false
     /// The manual values kept, when they are.
@@ -157,7 +168,8 @@ public struct AppSettings: Codable, Sendable, Equatable {
 
     enum CodingKeys: String, CodingKey {
         case uploadOverCellular, videosOnlyOnWiFi, onlyOnHomeNetwork, keepLocalCopies
-        case photoFormat, photoAspectRatio, photoResolution, captureRAW
+        case photoFormat, photoAspectRatio, photoResolution, captureRAW, captureProRAW
+        case proVideoFormat, recordToExternalStorage, macroControl, macroMode
         case videoResolution, videoFrameRate, videoHDR, autoLowLightFPS, lockVideoCamera, lockVideoWhiteBalance
         case flash, showGrid, showLevel, mirrorFrontCamera, lensCorrection
         case livePhotos, slowMotionRate, timeLapseInterval
@@ -168,7 +180,7 @@ public struct AppSettings: Codable, Sendable, Equatable {
         case preserveMode, keptMode, preserveStyle, preservePortraitZoom, preserveNightMode, preserveActionMode,
             preserveExposure,
             keptExposureBias,
-            preserveLivePhoto, preserveResolution
+            preserveLivePhoto, preserveResolution, preserveMacro
         case keepManualSettings, keptManual, tripKilometres, videoCopy, makeSmallCopies
         case locationAccuracyLimit, inaccurateLocation
         case locateScreenshots, screenshotPlaceMaxMinutes, locateScreenRecordings
@@ -190,6 +202,11 @@ public struct AppSettings: Codable, Sendable, Equatable {
         read(.photoAspectRatio, into: &settings.photoAspectRatio)
         read(.photoResolution, into: &settings.photoResolution)
         read(.captureRAW, into: &settings.captureRAW)
+        read(.captureProRAW, into: &settings.captureProRAW)
+        read(.proVideoFormat, into: &settings.proVideoFormat)
+        read(.recordToExternalStorage, into: &settings.recordToExternalStorage)
+        read(.macroControl, into: &settings.macroControl)
+        read(.macroMode, into: &settings.macroMode)
         read(.videoResolution, into: &settings.videoResolution)
         read(.videoFrameRate, into: &settings.videoFrameRate)
         read(.videoHDR, into: &settings.videoHDR)
@@ -235,6 +252,7 @@ public struct AppSettings: Codable, Sendable, Equatable {
         read(.keptExposureBias, into: &settings.keptExposureBias)
         read(.preserveLivePhoto, into: &settings.preserveLivePhoto)
         read(.preserveResolution, into: &settings.preserveResolution)
+        read(.preserveMacro, into: &settings.preserveMacro)
         read(.keepManualSettings, into: &settings.keepManualSettings)
         read(.keptManual, into: &settings.keptManual)
         read(.tripKilometres, into: &settings.tripKilometres)

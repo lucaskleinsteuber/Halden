@@ -280,10 +280,10 @@ taken (`[storage] path_template`). Two photos from the same second get `_2`, `_3
 - `role`: `original` (default), `paired_video` (Live Photo video), `raw` or `stream` (a video's
   small copy, see below). The original has to be there first.
 - `mimeType`: `image/heic`, `image/heif`, `image/jpeg`, `image/png`, `image/tiff`, `image/webp`,
-  `image/gif`, `image/avif`, `image/x-adobe-dng`, `image/x-canon-cr3`, `image/x-fuji-raf`,
-  `video/quicktime`, `video/mp4`, `video/x-matroska`, `video/webm`. Anything else: `415`.
+  `image/gif`, `image/avif`, `image/x-adobe-dng`, `image/dng`, `image/x-canon-cr3`, `image/x-fuji-raf`,
+  `video/quicktime` (including H.264, HEVC, MV-HEVC Spatial and Apple ProRes), `video/mp4`, `video/x-matroska`, `video/webm`. Anything else: `415`.
 - `captureMode`: for videos `slowmo` (recorded at a high frame rate, played with a slow part),
-  `timelapse` or `cinematic`; it becomes the asset's `captureMode`. Other values are kept but not used.
+  `timelapse`, `cinematic` or `spatial`; it becomes the asset's `captureMode`. Other values are kept but not used.
 - `burstId`: optional identifier (at most 64 bytes) shared by photos taken together in a burst;
   stored on photos and carried by `GET /assets/{id}` and `GET /sync`. Ignored on videos.
 - `metadata` is optional and every field in it too. Unknown fields are kept but not used. When the
@@ -368,7 +368,7 @@ finished before (a finished upload stays stored).
 ```
 
 `takenAtSource` is `client`, `exif` or `upload`; `location.source` is `client` or `exif`. `seq`
-changes with every change to the asset. `captureMode` is `slowmo`, `timelapse`, `cinematic` or `null`;
+changes with every change to the asset. `captureMode` is `slowmo`, `timelapse`, `cinematic`, `spatial` or `null`;
 `burstId` is the shared burst identifier for photos shot in a burst (otherwise `null`);
 `playback` is the slow part of a slow-motion video (see `PATCH`) or `null` to play it as
 recorded.
@@ -430,6 +430,8 @@ and never changes the file. `null` goes back to the original. Version 1 fields: 
 - `portraitLighting`: optional Portrait Lighting effect (`studio`, `contour`, `stage`, `stageMono`, `highKeyMono`).
 - `liveEffect`: optional Live Photo playback effect (`live`, `loop`, `bounce`, `long_exposure`).
 - `liveKeyFrameMs`: optional key-photo timestamp in milliseconds (`0…600000`) within the Live Photo video.
+- `audioMix`: optional Audio Mix rendering style (`standard`, `in_frame`, `studio`, `cinematic`) for Spatial Audio videos.
+- `audioMixIntensity`: optional Audio Mix intensity (`0.0…1.0`).
 
 The asset object carries it as `edit`. `restore: ["takenAt", "location"]`
 drops corrections and shows the originals again. Answers with the asset.

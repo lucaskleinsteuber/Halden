@@ -10,6 +10,19 @@ part of the first versions.
 
 ### Added
 
+- Newer / Pro iPhone features and server Pro format support (`ProDevices`, `AudioMixSheet`,
+  `thumbnail.rs`, `edits.rs`):
+  - Strictly capability-gated **Apple ProRAW** (up to 48 MP), **Apple ProRes** & **Apple Log**
+    video, **External USB-C SSD** direct recording (`AVExternalStorageDeviceDiscoverySession`)
+    with `USB-C` badge, **Spatial Video** mode (MV-HEVC, `captureMode = "spatial"`),
+    **Macro Control** toggle + Preserve Settings, iPhone 16+ **Camera Control** sliders
+    (`AVCaptureSystemZoomSlider`, `AVCaptureSystemExposureBiasSlider`, `AVCaptureIndexPicker`),
+    and **Spatial 3D Audio** (`firstOrderAmbisonics`) + post-capture **Audio Mix**
+    (`CNAssetSpatialAudioInfo.audioMix` stored non-destructively as `audioMix`/`audioMixIntensity`
+    in `EditRecipe`).
+  - Server decodes DNG (`image/x-adobe-dng`, `image/dng`), Apple ProRes `.mov` and MV-HEVC Spatial
+    videos into thumbnails/previews, accepts `captureMode = "spatial"`, and validates `audioMix`
+    edits.
 - Apple Watch camera remote app (`HaldenWatch`, `HaldenWatchProtocol`, `WatchCameraBridge`,
   `HaldenWatchUITests`):
   - New watchOS target embedded in the iPhone app with live ~8 fps JPEG preview over

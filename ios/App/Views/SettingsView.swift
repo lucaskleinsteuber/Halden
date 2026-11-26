@@ -241,6 +241,8 @@ struct UploadSettings: View {
 struct CameraSettings: View {
     @Environment(AppModel.self) private var app
 
+    private var capabilities: DeviceCapabilities { app.camera.backend.state.capabilities }
+
     var body: some View {
         Form {
             Section {
@@ -297,6 +299,14 @@ struct CameraSettings: View {
                     Explained("RAW (Bayer DNG)", "Keep a RAW file alongside the photo when the camera supports it.")
                 }
                 .accessibilityIdentifier("settings-raw")
+                if capabilities.canProRAW {
+                    Toggle(isOn: app.setting(\.captureProRAW)) {
+                        Explained(
+                            "Apple ProRAW",
+                            "Capture 12-bit DNG with Apple computational pipeline up to 48 MP on Pro iPhones.")
+                    }
+                    .accessibilityIdentifier("settings-proraw")
+                }
             }
 
             Section {
@@ -315,6 +325,26 @@ struct CameraSettings: View {
                 }
                 Toggle(isOn: app.setting(\.videoHDR)) {
                     Explained("HDR", "Brighter highlights on HDR screens; looks different elsewhere.")
+                }
+                if capabilities.hasProVideo {
+                    Picker(selection: app.setting(\.proVideoFormat)) {
+                        ForEach(ProVideoFormat.available(for: capabilities)) { format in
+                            Text(format.title).tag(format)
+                        }
+                    } label: {
+                        Explained(
+                            "Pro video format",
+                            "Record Apple ProRes or flat Apple Log for professional colour grading.")
+                    }
+                    .accessibilityIdentifier("settings-pro-video")
+                }
+                if capabilities.canExternalStorage {
+                    Toggle(isOn: app.setting(\.recordToExternalStorage)) {
+                        Explained(
+                            "Record to external storage",
+                            "Write videos directly to a connected USB-C SSD when attached.")
+                    }
+                    .accessibilityIdentifier("settings-external-storage")
                 }
                 Toggle(isOn: app.setting(\.autoLowLightFPS)) {
                     Explained(
@@ -340,12 +370,18 @@ struct CameraSettings: View {
                         "Allow audio playback",
                         "Let music or podcasts keep playing while recording video.")
                 }
+                let audioModes: [AudioChannelMode] =
+                    capabilities.canSpatialAudio ? [.spatial, .stereo, .mono] : [.stereo, .mono]
                 Picker(selection: app.setting(\.audioChannelMode)) {
-                    ForEach(AudioChannelMode.allCases) { mode in
+                    ForEach(audioModes) { mode in
                         Text(mode.title).tag(mode)
                     }
                 } label: {
-                    Explained("Record sound", "Stereo captures directional sound; Mono uses a single channel.")
+                    Explained(
+                        "Record sound",
+                        capabilities.canSpatialAudio
+                            ? "Spatial Audio enables Audio Mix; Stereo is directional; Mono uses one channel."
+                            : "Stereo captures directional sound; Mono uses a single channel.")
                 }
                 .accessibilityIdentifier("settings-audio-channel")
                 Toggle(isOn: app.setting(\.windNoiseRemoval)) {
@@ -410,6 +446,14 @@ struct CameraSettings: View {
                     Explained("Show Detected Text", "Offer a Live Text button when text is spotted in the viewfinder.")
                 }
                 .accessibilityIdentifier("settings-live-text")
+                if capabilities.canMacroControl {
+                    Toggle(isOn: app.setting(\.macroControl)) {
+                        Explained(
+                            "Macro Control",
+                            "Show a camera toggle to switch to the Ultra Wide lens for close-up photos and videos.")
+                    }
+                    .accessibilityIdentifier("settings-macro-control")
+                }
             }
 
             Section("Composition") {
@@ -488,6 +532,12 @@ struct PreserveCameraSettingsView: View {
                     Explained("Resolution & RAW", "Keep 48 MP and RAW choices between sessions.")
                 }
                 .accessibilityIdentifier("preserve-resolution")
+                if app.camera.backend.state.capabilities.canMacroControl {
+                    Toggle(isOn: app.setting(\.preserveMacro)) {
+                        Explained("Macro Control", "Preserve your manual Macro toggle instead of resetting to Auto.")
+                    }
+                    .accessibilityIdentifier("preserve-macro")
+                }
                 Toggle(isOn: app.setting(\.keepManualSettings)) {
                     Explained(
                         "Manual values",
@@ -495,9 +545,7 @@ struct PreserveCameraSettingsView: View {
                 }
                 .accessibilityIdentifier("preserve-manual")
             } footer: {
-                Text(
-                    "Additional options for styles, night mode, portrait zoom and action mode follow as they are added."
-                )
+                Text("Everything left off returns to its sensible default when the camera closes.")
             }
         }
         .navigationTitle("Preserve Settings")

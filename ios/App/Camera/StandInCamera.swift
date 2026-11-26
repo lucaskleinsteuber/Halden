@@ -9,6 +9,10 @@ import UIKit
 @MainActor
 @Observable
 final class StandInCamera: CaptureBackend {
+    private static var basicDevice: Bool {
+        ProcessInfo.processInfo.arguments.contains("-ui-testing-basic-device")
+    }
+
     private(set) var state = CameraState(
         ready: true, side: .back, canFlip: true, presets: [0.5, 1, 2], zoom: 1, zoomRange: 0.5...10,
         hasFlash: true, hasTorch: true, canLive: true, canRAW: true,
@@ -17,8 +21,14 @@ final class StandInCamera: CaptureBackend {
         canDepth: true,
         subjectDetected: ProcessInfo.processInfo.arguments.contains("-ui-testing-subject"),
         canCinematic: true,
-        canMultiCam: true,
+        canMultiCam: !ProcessInfo.processInfo.arguments.contains("-ui-testing-basic-device"),
         canWindNoiseRemoval: true,
+        capabilities: ProcessInfo.processInfo.arguments.contains("-ui-testing-basic-device") ? .basic : .all,
+        externalStorage: ProcessInfo.processInfo.arguments.contains("-ui-testing-ssd")
+            && !ProcessInfo.processInfo.arguments.contains("-ui-testing-basic-device")
+            ? ExternalStorageInfo(displayName: "Halden SSD", freeBytes: 512 * 1024 * 1024 * 1024) : nil,
+        macroActive: ProcessInfo.processInfo.arguments.contains("-ui-testing-macro")
+            && !ProcessInfo.processInfo.arguments.contains("-ui-testing-basic-device"),
         manualLimits: ManualLimits(shutter: (1.0 / 8000)...1, iso: 50...3200, exposureBias: -8...8))
     private(set) var readings =
         ProcessInfo.processInfo.arguments.contains("-ui-testing-night")
@@ -85,14 +95,23 @@ final class StandInCamera: CaptureBackend {
         let fpsText = CameraControls.frameRateLabel(video.frameRate)
         let hdrSuffix = video.hdr ? " · HDR" : ""
         let autoSuffix = video.autoLowLightFPS ? " · Auto" : ""
+        let proFormat = ProDeviceRules.effectiveVideoFormat(
+            wanted: video.proVideoFormat, capabilities: state.capabilities)
+        let proSuffix =
+            switch proFormat {
+            case .standard: ""
+            case .proRes: " · ProRes"
+            case .proResLog: " · ProRes Log"
+            }
         state.videoFormat =
             switch mode {
             case .photo, .portrait, .panorama, .dual: nil
             case .video:
-                "\(video.resolution == .uhd4K ? "4K" : "1080p") · \(fpsText)\(hdrSuffix)\(autoSuffix)\(video.actionMode ? " · Action" : "")"
+                "\(video.resolution == .uhd4K ? "4K" : "1080p") · \(fpsText)\(proSuffix)\(hdrSuffix)\(autoSuffix)\(video.actionMode ? " · Action" : "")"
             case .cinematic: "Cinematic · \(CinematicRules.formatAperture(video.cinematicAperture))"
             case .slowMotion: "1080p · \(video.slowMotionRate) fps"
             case .timeLapse: video.timeLapseInterval.map { "every \(CameraMode.intervalText($0))" } ?? "Auto"
+            case .spatial: "Spatial · 1080p · 30 fps"
             }
     }
 
@@ -148,7 +167,7 @@ final class StandInCamera: CaptureBackend {
         let data = await Task.detached { SampleMedia.photo(seed: seed) }.value
         guard let data else { return nil }
         var photo = TakenPhoto(data: data, heic: false, width: 1600, height: 1200)
-        if request.raw {
+        if request.raw || request.proRAW {
             photo.rawData = data
         } else if request.live {
             let movie = FileManager.default.temporaryDirectory.appendingPathComponent("\(UUID().uuidString).mov")

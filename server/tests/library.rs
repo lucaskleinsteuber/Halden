@@ -1250,3 +1250,142 @@ async fn live_photo_effect_derived_file_uploads_replaces_deletes_and_syncs() {
     );
     api.stop().await;
 }
+
+/// DNG (ProRAW/Bayer) originals get server-generated JPEG thumbnails & previews, ProRes `.mov`
+/// originals get video thumbnails via ffmpeg, Spatial videos keep `captureMode = "spatial"`, and
+/// `EditRecipe` validates `audioMix` and `audioMixIntensity`.
+#[tokio::test]
+async fn pro_formats_dng_prores_and_spatial_store_originals_make_thumbnails_and_sync() {
+    let api = Api::start_with(|config| config.jobs.thumbnail_delay_minutes = 0).await;
+    let token = owner(&api).await;
+
+    // 1. Upload a TIFF-structured DNG original (`image/x-adobe-dng`) and verify server thumbnail + preview.
+    let mut dng_bytes = Vec::new();
+    let sample = image::DynamicImage::new_rgb8(640, 480);
+    sample
+        .write_to(
+            &mut std::io::Cursor::new(&mut dng_bytes),
+            image::ImageFormat::Tiff,
+        )
+        .unwrap();
+    let dng_id = Uuid::new_v4().to_string();
+    api.upload(
+        &token,
+        &dng_id,
+        &dng_bytes,
+        "image/x-adobe-dng",
+        json!({ "takenAt": 1_795_443_740_000_i64 }),
+    )
+    .await;
+    let dng_asset = wait_for_files(&api, &token, &dng_id, &["thumbnail", "preview"]).await;
+    let dng_thumb = dng_asset["files"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|f| f["role"] == "thumbnail")
+        .expect("dng thumbnail");
+    assert_eq!(dng_thumb["mimeType"], "image/jpeg");
+    assert_eq!(dng_thumb["width"], 512);
+
+    // 2. Upload a real Apple ProRes 422 `.mov` (when ffmpeg is installed) and verify server thumbnails.
+    if tool("ffmpeg") {
+        let dir = tempfile::tempdir().unwrap();
+        let prores = dir.path().join("prores.mov");
+        let made = std::process::Command::new("ffmpeg")
+            .args([
+                "-loglevel",
+                "error",
+                "-f",
+                "lavfi",
+                "-i",
+                "testsrc=duration=1:size=320x240:rate=24",
+                "-c:v",
+                "prores_ks",
+                "-profile:v",
+                "2",
+                "-pix_fmt",
+                "yuv422p10le",
+                "-y",
+            ])
+            .arg(&prores)
+            .status()
+            .unwrap();
+        assert!(made.success(), "ffmpeg should create a ProRes 422 clip");
+        let prores_id = Uuid::new_v4().to_string();
+        api.upload(
+            &token,
+            &prores_id,
+            &std::fs::read(&prores).unwrap(),
+            "video/quicktime",
+            json!({ "takenAt": 1_795_443_750_000_i64 }),
+        )
+        .await;
+        let prores_asset =
+            wait_for_files(&api, &token, &prores_id, &["thumbnail", "preview"]).await;
+        assert!(
+            prores_asset["files"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|f| f["role"] == "thumbnail" && f["mimeType"] == "image/jpeg")
+        );
+    }
+
+    // 3. Spatial video keeps `captureMode = "spatial"` across GET and /sync, and validates Audio Mix edits.
+    let spatial_id = Uuid::new_v4().to_string();
+    let mut spatial_meta = taken(1_795_443_760_000, None);
+    spatial_meta["captureMode"] = json!("spatial");
+    api.upload(
+        &token,
+        &spatial_id,
+        &random_bytes(512),
+        "video/quicktime",
+        spatial_meta,
+    )
+    .await;
+
+    let spatial_path = format!("/api/v1/assets/{spatial_id}");
+    let got = api.get(&spatial_path, &token).await;
+    assert_eq!(got.status, 200);
+    assert_eq!(got.body["captureMode"], "spatial");
+
+    let synced = api.get("/api/v1/sync?since=0", &token).await;
+    let found = synced.body["assets"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|a| a["id"] == spatial_id.as_str())
+        .unwrap();
+    assert_eq!(found["captureMode"], "spatial");
+
+    let mix_ok = api
+        .call(
+            Method::PATCH,
+            &spatial_path,
+            Some(&token),
+            Some(json!({
+                "edit": { "version": 2, "audioMix": "studio", "audioMixIntensity": 0.75 }
+            })),
+        )
+        .await;
+    assert_eq!(mix_ok.status, 200, "{}", mix_ok.body);
+    assert_eq!(mix_ok.body["edit"]["audioMix"], "studio");
+    assert_eq!(mix_ok.body["edit"]["audioMixIntensity"], 0.75);
+
+    for bad in [
+        json!({ "version": 2, "audioMix": "concert" }),
+        json!({ "version": 2, "audioMix": "studio", "audioMixIntensity": 1.5 }),
+        json!({ "version": 2, "audioMix": "studio", "audioMixIntensity": -0.1 }),
+    ] {
+        let refused = api
+            .call(
+                Method::PATCH,
+                &spatial_path,
+                Some(&token),
+                Some(json!({ "edit": bad })),
+            )
+            .await;
+        assert_eq!(refused.status, 422, "expected 422 for {bad}");
+    }
+    api.stop().await;
+}

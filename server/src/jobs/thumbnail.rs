@@ -139,6 +139,44 @@ async fn decode(
         "image/jpeg" | "image/png" | "image/tiff" | "image/webp" | "image/gif" => {
             read_image(ctx, path.to_path_buf()).await
         }
+        "image/x-adobe-dng" | "image/dng" => {
+            if let Ok(image) = read_image(ctx, path.to_path_buf()).await {
+                return Ok(image);
+            }
+            let ffmpeg = ctx
+                .tools
+                .ffmpeg
+                .as_ref()
+                .ok_or("could not decode DNG and ffmpeg is not installed")?;
+            let converted = ctx.scratch().join(format!("{}.png", uuid::Uuid::new_v4()));
+            let result = ctx
+                .tools
+                .run(
+                    "ffmpeg",
+                    ffmpeg,
+                    &tools::args(&[
+                        &"-nostdin",
+                        &"-loglevel",
+                        &"error",
+                        &"-i",
+                        &path,
+                        &"-frames:v",
+                        &"1",
+                        &"-vf",
+                        &"scale='min(2048,iw)':-2",
+                        &"-y",
+                        &converted,
+                    ]),
+                    timeout,
+                )
+                .await;
+            let image = match result {
+                Ok(()) => read_image(ctx, converted.clone()).await,
+                Err(error) => Err(error.to_string()),
+            };
+            let _ = tokio::fs::remove_file(&converted).await;
+            image
+        }
         "image/heic" | "image/heif" | "image/avif" => {
             let heif = ctx
                 .tools

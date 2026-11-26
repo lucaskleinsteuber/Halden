@@ -75,6 +75,20 @@ the design comes after that. What works today is described below.
   (`isGeometricDistortionCorrectionEnabled`), hardware lens-smudge detection hints
   (`cameraLensSmudgeDetectionStatus`, dismissible banner), and optional camera-lens
   (`primaryConstituentDeviceSwitchingBehavior`) and white-balance locks while recording video.
+- **Newer & Pro iPhone features** (`ProDevices`, `AudioMixSheet`, capability-gated via
+  `DeviceCapabilities`):
+  - Every Pro feature stays hidden on iPhones that do not support it (such as iPhone 15);
+    `StandInCamera` advertises full capabilities in UI tests (and hides them with
+    `-ui-testing-basic-device`).
+  - **Apple ProRAW** up to 48 MP (`isAppleProRAWEnabled`), **Apple ProRes** & **Apple Log**
+    (`AVVideoCodecType.proRes422`, `AVCaptureColorSpace.appleLog`), **External USB-C SSD**
+    direct capture (`AVExternalStorageDeviceDiscoverySession` with `USB-C` badge), **Spatial
+    Video** mode (`isSpatialVideoCaptureEnabled`, MV-HEVC, server `captureMode = "spatial"`),
+    **Macro Control** yellow flower toggle + Preserve Settings, iPhone 16+ **Camera Control**
+    sliders (`AVCaptureSystemZoomSlider`, `AVCaptureSystemExposureBiasSlider`,
+    `AVCaptureIndexPicker` for Photographic Styles), and **Spatial 3D Audio**
+    (`firstOrderAmbisonics`) with post-capture **Audio Mix** (`CNAssetSpatialAudioInfo.audioMix`,
+    saved non-destructively in `EditRecipe` as `audioMix` / `audioMixIntensity`).
 - **Apple Watch camera remote** (`HaldenWatch`, `HaldenWatchProtocol`, `WatchCameraBridge`):
   - Companion watchOS target streaming throttled low-resolution JPEG previews (~8 fps, ≤ 28 KB
     adaptive quality) over `WatchConnectivity` while the iPhone camera is open, never stalling the

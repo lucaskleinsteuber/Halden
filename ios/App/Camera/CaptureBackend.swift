@@ -3,10 +3,12 @@ import HaldenKit
 import UIKit
 
 enum CameraMode: String, CaseIterable, Sendable {
-    case photo, portrait, panorama, dual, video, cinematic, slowMotion, timeLapse
+    case photo, portrait, panorama, dual, video, cinematic, slowMotion, timeLapse, spatial
 
     /// Everything except still/panorama/dual modes is recorded as video with start/stop.
-    var records: Bool { self == .video || self == .cinematic || self == .slowMotion || self == .timeLapse }
+    var records: Bool {
+        self == .video || self == .cinematic || self == .slowMotion || self == .timeLapse || self == .spatial
+    }
 
     /// Still-photo capture modes (4:3 / 1:1 / 16:9 viewfinder).
     var isStill: Bool { self == .photo || self == .portrait }
@@ -17,6 +19,7 @@ enum CameraMode: String, CaseIterable, Sendable {
         case .cinematic: "cinematic"
         case .slowMotion: "slowmo"
         case .timeLapse: "timelapse"
+        case .spatial: "spatial"
         default: nil
         }
     }
@@ -35,6 +38,11 @@ struct CaptureOptions: Equatable, Sendable {
     var live: Bool
     var photoResolution: PhotoResolution
     var captureRAW: Bool
+    var captureProRAW: Bool
+    var proVideoFormat: ProVideoFormat
+    var recordToExternalStorage: Bool
+    var macroControl: Bool
+    var macroMode: MacroMode
     var prioritizeFasterShooting: Bool
     var allowAudioPlayback: Bool
     var mirrorFrontCamera: Bool
@@ -67,6 +75,11 @@ struct CaptureOptions: Equatable, Sendable {
         live = settings.livePhotos
         photoResolution = settings.photoResolution
         captureRAW = settings.captureRAW
+        captureProRAW = settings.captureProRAW
+        proVideoFormat = settings.proVideoFormat
+        recordToExternalStorage = settings.recordToExternalStorage
+        macroControl = settings.macroControl
+        macroMode = settings.macroMode
         prioritizeFasterShooting = settings.prioritizeFasterShooting
         allowAudioPlayback = settings.allowAudioPlayback
         mirrorFrontCamera = settings.mirrorFrontCamera
@@ -131,6 +144,14 @@ struct CameraState: Equatable, Sendable {
     var canMultiCam = false
     /// True when hardware wind noise removal is available on the active microphone input.
     var canWindNoiseRemoval = false
+    /// Capabilities available only on newer / Pro iPhones (ProRAW, ProRes, Log, SSD, Spatial, Macro, Camera Control, Spatial Audio).
+    var capabilities = DeviceCapabilities()
+    /// Connected USB-C external storage device, if any.
+    var externalStorage: ExternalStorageInfo?
+    /// True when the camera is close enough for the Macro Control toggle button to appear.
+    var macroActive = false
+    /// True while the iPhone 16+ Camera Control overlay is in fullscreen appearance.
+    var controlsFullscreen = false
     /// What can be set by hand on this camera now; `nil` when nothing.
     var manualLimits: ManualLimits?
     /// The video format actually used (the wished one may not exist on this camera).
@@ -164,6 +185,8 @@ struct PhotoRequest: Sendable {
     var resolution = PhotoResolution.mp24
     /// Also capture Bayer DNG when supported.
     var raw = false
+    /// Capture Apple ProRAW (up to 48 MP) when supported by the device.
+    var proRAW = false
     /// Prefer faster capture over maximum processing latency.
     var prioritizeFaster = true
     /// Mirror front-camera photos so they match the preview.
@@ -179,8 +202,10 @@ struct VideoRequest: Sendable {
     var location: ClientLocation?
     var takenAt: Date
     var timeZone: TimeZone
-    /// Video, slow motion or time-lapse.
+    /// Video, slow motion, cinematic, spatial or time-lapse.
     var mode = CameraMode.video
+    /// Write directly to a connected USB-C external storage device when available.
+    var preferExternalStorage = false
 }
 
 /// A camera for the camera screen: the real one (`DeviceCamera`), or the stand-in that the

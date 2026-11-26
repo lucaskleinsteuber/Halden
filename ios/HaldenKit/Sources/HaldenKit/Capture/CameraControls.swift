@@ -272,7 +272,9 @@ public enum CameraControls {
         if !settings.preserveResolution {
             next.photoResolution = .mp24
             next.captureRAW = false
+            next.captureProRAW = false
         }
+        if !settings.preserveMacro { next.macroMode = .auto }
         if !settings.keepManualSettings { next.keptManual = nil }
         return next
     }

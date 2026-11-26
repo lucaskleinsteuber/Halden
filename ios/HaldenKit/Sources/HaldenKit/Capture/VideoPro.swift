@@ -3,6 +3,7 @@ import Foundation
 
 /// Audio channel configuration for video capture (`AVCaptureDeviceInput.multichannelAudioMode`).
 public enum AudioChannelMode: String, Codable, Sendable, CaseIterable, Identifiable {
+    case spatial
     case stereo
     case mono
 
@@ -10,6 +11,7 @@ public enum AudioChannelMode: String, Codable, Sendable, CaseIterable, Identifia
 
     public var title: String {
         switch self {
+        case .spatial: "Spatial Audio"
         case .stereo: "Stereo"
         case .mono: "Mono"
         }
@@ -17,6 +19,7 @@ public enum AudioChannelMode: String, Codable, Sendable, CaseIterable, Identifia
 
     public var shortLabel: String {
         switch self {
+        case .spatial: "SPATIAL"
         case .stereo: "STEREO"
         case .mono: "MONO"
         }

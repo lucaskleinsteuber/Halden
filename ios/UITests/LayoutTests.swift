@@ -98,6 +98,13 @@ final class LayoutTests: XCTestCase {
             app.buttons["mode-dual"].tap()
             settle(1.2)
             shot("camera-dual")
+            if app.buttons["mode-spatial"].exists {
+                app.buttons["mode-spatial"].tap()
+                settle(1.0)
+                shot("camera-spatial")
+                app.buttons["mode-dual"].tap()
+                settle(0.6)
+            }
             app.buttons["mode-panorama"].tap()
             settle(0.6)
         }
@@ -113,6 +120,15 @@ final class LayoutTests: XCTestCase {
                 app.buttons["camera-controls-toggle"].tap()
                 settle()
                 shot("camera-controls-video")
+                let proResChip = app.buttons["drawer-prores"]
+                scrollDrawerTo(proResChip)
+                if proResChip.exists {
+                    proResChip.tap()
+                    settle(0.5)
+                    shot("camera-controls-pro")
+                    proResChip.tap()
+                    settle(0.3)
+                }
                 let scopesChip = app.buttons["drawer-scopes"]
                 scrollDrawerTo(scopesChip)
                 scopesChip.tap()
@@ -162,6 +178,18 @@ final class LayoutTests: XCTestCase {
         settle(2)
         shot("map")
         sections.buttons["Library"].tap()
+        settle()
+
+        // Audio Mix sheet on the first tile (a video).
+        grid.cells.element(boundBy: 0).tap()
+        if app.buttons["audio-mix"].waitForExistence(timeout: 8) {
+            app.buttons["audio-mix"].tap()
+            settle()
+            shot("audio-mix-sheet")
+            app.buttons["audio-mix-cancel"].tap()
+            settle()
+        }
+        app.navigationBars.buttons.firstMatch.tap()
         settle()
 
         // A photo full screen and the editor (the second one: the first is a video, whose file

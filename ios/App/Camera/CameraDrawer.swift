@@ -7,7 +7,7 @@ import SwiftUI
 struct CameraDrawer: View {
     enum Panel: Hashable {
         case night, aperture, lighting, style, filter, exposure, aspectRatio, timer, resolution, videoFrameRate,
-            cinematicAperture, scopes, timeLapseInterval
+            proVideoFormat, cinematicAperture, scopes, timeLapseInterval
     }
 
     let camera: CameraModel
@@ -33,6 +33,8 @@ struct CameraDrawer: View {
                         cinematicButtons
                     } else if camera.mode == .video {
                         videoButtons
+                    } else if camera.mode == .spatial {
+                        audioAndScopeChips
                     } else if camera.mode == .slowMotion {
                         slowMotionButtons
                     } else {
@@ -69,14 +71,18 @@ struct CameraDrawer: View {
 
         // Live Photo
         if state.canLive {
+            let liveActive = settings.livePhotos && !settings.captureRAW && !settings.captureProRAW
             drawerChip(
-                symbol: settings.livePhotos && !settings.captureRAW ? "livephoto" : "livephoto.slash", text: "LIVE",
-                active: settings.livePhotos && !settings.captureRAW,
-                label: settings.livePhotos ? "Live Photo on" : "Live Photo off", id: "drawer-live"
+                symbol: liveActive ? "livephoto" : "livephoto.slash", text: "LIVE",
+                active: liveActive,
+                label: liveActive ? "Live Photo on" : "Live Photo off", id: "drawer-live"
             ) {
                 update {
                     $0.livePhotos.toggle()
-                    if $0.livePhotos { $0.captureRAW = false }
+                    if $0.livePhotos {
+                        $0.captureRAW = false
+                        $0.captureProRAW = false
+                    }
                 }
                 camera.settingsChanged()
             }
@@ -158,6 +164,23 @@ struct CameraDrawer: View {
             }
         }
 
+        // Apple ProRAW (only on Pro iPhones that support it)
+        if state.capabilities.canProRAW {
+            drawerChip(
+                symbol: nil, text: "ProRAW", active: settings.captureProRAW,
+                label: settings.captureProRAW ? "Apple ProRAW on" : "Apple ProRAW off", id: "drawer-proraw"
+            ) {
+                update {
+                    $0.captureProRAW.toggle()
+                    if $0.captureProRAW {
+                        $0.livePhotos = false
+                        $0.captureRAW = false
+                    }
+                }
+                camera.settingsChanged()
+            }
+        }
+
         // Bayer RAW (DNG)
         if state.canRAW {
             drawerChip(
@@ -166,7 +189,10 @@ struct CameraDrawer: View {
             ) {
                 update {
                     $0.captureRAW.toggle()
-                    if $0.captureRAW { $0.livePhotos = false }
+                    if $0.captureRAW {
+                        $0.livePhotos = false
+                        $0.captureProRAW = false
+                    }
                 }
                 camera.settingsChanged()
             }
@@ -287,6 +313,18 @@ struct CameraDrawer: View {
             camera.settingsChanged()
         }
 
+        if state.capabilities.hasProVideo {
+            let effective = ProDeviceRules.effectiveVideoFormat(
+                wanted: settings.proVideoFormat, capabilities: state.capabilities)
+            drawerChip(
+                symbol: nil, text: effective.shortLabel,
+                active: effective != .standard || expanded == .proVideoFormat,
+                label: "Pro video \(effective.title)", id: "drawer-prores"
+            ) {
+                expanded = expanded == .proVideoFormat ? nil : .proVideoFormat
+            }
+        }
+
         drawerChip(
             symbol: "moon.stars", text: "AUTO FPS", active: settings.autoLowLightFPS,
             label: settings.autoLowLightFPS ? "Auto low-light FPS on" : "Auto low-light FPS off",
@@ -300,12 +338,17 @@ struct CameraDrawer: View {
     }
 
     @ViewBuilder private var audioAndScopeChips: some View {
+        let effectiveAudio = ProDeviceRules.effectiveAudioChannel(
+            wanted: settings.audioChannelMode, capabilities: state.capabilities)
         drawerChip(
-            symbol: "waveform", text: settings.audioChannelMode.shortLabel,
-            active: settings.audioChannelMode == .mono,
-            label: "Audio \(settings.audioChannelMode.title)", id: "drawer-audio"
+            symbol: "waveform", text: effectiveAudio.shortLabel,
+            active: effectiveAudio != .stereo,
+            label: "Audio \(effectiveAudio.title)", id: "drawer-audio"
         ) {
-            update { $0.audioChannelMode = $0.audioChannelMode == .stereo ? .mono : .stereo }
+            let choices: [AudioChannelMode] =
+                state.capabilities.canSpatialAudio ? [.spatial, .stereo, .mono] : [.stereo, .mono]
+            let next = choices[((choices.firstIndex(of: effectiveAudio) ?? 0) + 1) % choices.count]
+            update { $0.audioChannelMode = next }
             camera.settingsChanged()
         }
 
@@ -523,6 +566,20 @@ struct CameraDrawer: View {
                             id: "drawer-fps-\(fps)"
                         ) {
                             update { $0.videoFrameRate = fps }
+                            camera.settingsChanged()
+                            expanded = nil
+                        }
+                    }
+                }
+
+            case .proVideoFormat:
+                optionRow {
+                    ForEach(ProVideoFormat.available(for: state.capabilities)) { format in
+                        optionPill(
+                            format.title, selected: settings.proVideoFormat == format,
+                            id: "drawer-provideo-\(format.rawValue)"
+                        ) {
+                            update { $0.proVideoFormat = format }
                             camera.settingsChanged()
                             expanded = nil
                         }
