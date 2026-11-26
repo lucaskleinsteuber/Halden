@@ -454,6 +454,7 @@ final class LayoutTests: XCTestCase {
         }
     }
 
+    @MainActor
     private func collect(
         _ element: XCUIElementSnapshot, path: [Int], scrolls: Bool, bar: XCUIElement.ElementType?,
         into seen: inout [Seen]
