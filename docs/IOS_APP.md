@@ -422,8 +422,8 @@ the biggest iPhone, each also with big text, keeping a screenshot of every scree
 ios/layout-tests.sh
 ```
 
-Measurements (launch, the camera's start, memory and processor while scrolling through 50,000
-photos) run only on purpose:
+Measurements (launch, camera start, mode-switch latency, zoom glide, Metal viewfinder toggle &
+memory, scrolling 50,000 photos, and the 50,000-photo map) run only on purpose:
 
 ```sh
 TEST_RUNNER_HALDEN_MEASURE=1 ios/ui-tests.sh -only-testing:HaldenUITests/PerformanceTests

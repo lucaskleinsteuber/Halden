@@ -89,7 +89,7 @@ struct PhotoView: View {
                     .accessibilityIdentifier("delete")
                 }
                 ToolbarSpacer(.flexible, placement: .bottomBar)
-                ToolbarItem(placement: .bottomBar) {
+                ToolbarItemGroup(placement: .bottomBar) {
                     Button {
                         editing = true
                     } label: {
@@ -97,10 +97,8 @@ struct PhotoView: View {
                     }
                     .accessibilityLabel("Edit")
                     .accessibilityIdentifier("edit")
-                }
-                if asset?.isLivePhoto == true {
-                    ToolbarSpacer(.flexible, placement: .bottomBar)
-                    ToolbarItem(placement: .bottomBar) {
+
+                    if asset?.isLivePhoto == true {
                         Button {
                             editingLiveEffect = true
                         } label: {
@@ -109,10 +107,7 @@ struct PhotoView: View {
                         .accessibilityLabel("Live Photo effects")
                         .accessibilityIdentifier("live-effects")
                     }
-                }
-                if asset?.isSlowMotion == true {
-                    ToolbarSpacer(.flexible, placement: .bottomBar)
-                    ToolbarItem(placement: .bottomBar) {
+                    if asset?.isSlowMotion == true {
                         Button {
                             editingSlowMotion = true
                         } label: {
@@ -121,10 +116,7 @@ struct PhotoView: View {
                         .accessibilityLabel("Slow part")
                         .accessibilityIdentifier("slow-motion")
                     }
-                }
-                if asset?.isCinematic == true {
-                    ToolbarSpacer(.flexible, placement: .bottomBar)
-                    ToolbarItem(placement: .bottomBar) {
+                    if asset?.isCinematic == true {
                         Button {
                             editingCinematic = true
                         } label: {
@@ -133,10 +125,7 @@ struct PhotoView: View {
                         .accessibilityLabel("Cinematic focus")
                         .accessibilityIdentifier("cinematic-edit")
                     }
-                }
-                if asset?.isVideo == true && AudioMixSheet.isSupportedOnThisDevice {
-                    ToolbarSpacer(.flexible, placement: .bottomBar)
-                    ToolbarItem(placement: .bottomBar) {
+                    if asset?.isVideo == true && AudioMixSheet.isSupportedOnThisDevice {
                         Button {
                             editingAudioMix = true
                         } label: {
@@ -145,10 +134,7 @@ struct PhotoView: View {
                         .accessibilityLabel("Audio Mix")
                         .accessibilityIdentifier("audio-mix")
                     }
-                }
-                if burstMembers.count > 1 {
-                    ToolbarSpacer(.flexible, placement: .bottomBar)
-                    ToolbarItem(placement: .bottomBar) {
+                    if burstMembers.count > 1 {
                         Button {
                             pickingBurst = true
                         } label: {

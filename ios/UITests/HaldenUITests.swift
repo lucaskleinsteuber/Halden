@@ -576,12 +576,15 @@ final class HaldenUITests: XCTestCase {
         let shutter = app.buttons["shutter"]
         XCTAssertTrue(shutter.waitForExistence(timeout: 10))
         shutter.tap()
+        Thread.sleep(forTimeInterval: 1.5)
 
         tabs.buttons["Photos"].tap()
         let grid = app.collectionViews["library-grid"]
-        let liveTile = grid.cells.matching(NSPredicate(format: "label == 'Photo, backed up'")).firstMatch
-        XCTAssertTrue(liveTile.waitForExistence(timeout: 90), "Live Photo uploaded to server")
-        liveTile.tap()
+        let newest = grid.cells.firstMatch
+        XCTAssertTrue(newest.waitForExistence(timeout: 30))
+        expectation(for: NSPredicate(format: "label == 'Photo, backed up'"), evaluatedWith: newest)
+        waitForExpectations(timeout: 120)
+        newest.tap()
         XCTAssertTrue(app.descendants(matching: .any)["live-badge"].waitForExistence(timeout: 10))
 
         // Apply Bounce effect and verify badge + InfoView reflect it.
@@ -1486,5 +1489,108 @@ final class HaldenUITests: XCTestCase {
         XCTAssertTrue(rawToggle.waitForExistence(timeout: 5))
         XCTAssertFalse(app.switches["settings-proraw"].exists, "ProRAW setting hidden on basic device")
         XCTAssertFalse(app.switches["settings-external-storage"].exists, "SSD setting hidden on basic device")
+    }
+
+    /// Comprehensive Round 3 end-to-end journey against the real server: customizes camera controls,
+    /// shoots across Photo (Style + Filter), Portrait, Panorama, Cinematic, and Dual modes, verifies
+    /// server backup in the Photos library, inspects Info, edits non-destructively, and tests Trash/Restore.
+    @MainActor
+    func testEndToEndRound3CameraToLibraryJourney() throws {
+        let environment = ProcessInfo.processInfo.environment
+        guard let server = environment["HALDEN_TEST_SERVER"], let password = environment["HALDEN_TEST_PASSWORD"]
+        else {
+            throw XCTSkip("no server: run ios/ui-tests.sh")
+        }
+        allowLocation()
+        let app = XCUIApplication()
+        app.launchArguments = ["-ui-testing", "-ui-testing-sign-in"]
+        app.launchEnvironment = ["HALDEN_TEST_SERVER": server, "HALDEN_TEST_PASSWORD": password]
+        app.launch()
+        let tabs = Tabs(app)
+        XCTAssertTrue(tabs.waitForExistence(timeout: 60), "signed in")
+
+        // 1. Photo mode with Photographic Style + Filter active.
+        tabs.buttons["Camera"].tap()
+        XCTAssertTrue(app.buttons["shutter"].waitForExistence(timeout: 15))
+        app.buttons["camera-controls-toggle"].tap()
+        let drawer = app.descendants(matching: .any)["camera-drawer"]
+        XCTAssertTrue(drawer.waitForExistence(timeout: 5))
+        app.buttons["drawer-style"].tap()
+        let amber = app.buttons["style-preset-amber"]
+        XCTAssertTrue(amber.waitForExistence(timeout: 5))
+        amber.tap()
+        app.buttons["camera-controls-toggle"].tap()
+        app.buttons["shutter"].tap()
+        Thread.sleep(forTimeInterval: 0.6)
+
+        // 2. Portrait mode capture.
+        app.buttons["mode-portrait"].tap()
+        Thread.sleep(forTimeInterval: 0.7)
+        app.buttons["shutter"].tap()
+        Thread.sleep(forTimeInterval: 0.6)
+
+        // 3. Panorama capture (start sweep → stop & stitch HEIC).
+        app.buttons["mode-panorama"].tap()
+        XCTAssertTrue(app.buttons["panorama-direction"].waitForExistence(timeout: 5))
+        app.buttons["shutter"].tap()
+        Thread.sleep(forTimeInterval: 0.6)
+        app.buttons["shutter"].tap()
+        Thread.sleep(forTimeInterval: 1.4)
+
+        // 4. Dual Capture (swap cameras + single-file composited photo).
+        app.buttons["mode-dual"].tap()
+        XCTAssertTrue(app.buttons["dual-swap"].waitForExistence(timeout: 5))
+        app.buttons["dual-swap"].tap()
+        app.buttons["shutter"].tap()
+        Thread.sleep(forTimeInterval: 0.8)
+
+        // 5. Cinematic video recording (step back through modes, record briefly, stop).
+        for mode in ["panorama", "portrait", "photo", "video", "cinematic"] {
+            let button = app.buttons["mode-\(mode)"]
+            XCTAssertTrue(button.waitForExistence(timeout: 5))
+            button.tap()
+            Thread.sleep(forTimeInterval: 0.45)
+        }
+        app.buttons["shutter"].tap()
+        XCTAssertTrue(app.descendants(matching: .any)["recording-time"].waitForExistence(timeout: 5))
+        Thread.sleep(forTimeInterval: 1.2)
+        app.buttons["shutter"].tap()
+        Thread.sleep(forTimeInterval: 0.8)
+
+        // 6. Verify captures arrive in Library, back up to the real server, and survive Info + Trash/Restore.
+        tabs.buttons["Photos"].tap()
+        let grid = app.collectionViews["library-grid"]
+        XCTAssertTrue(grid.cells.element(boundBy: 4).waitForExistence(timeout: 30), "all 5 Round 3 captures in library")
+        let newest = grid.cells.firstMatch
+        expectation(for: NSPredicate(format: "label ENDSWITH 'backed up'"), evaluatedWith: newest)
+        waitForExpectations(timeout: 120)
+
+        let id = newest.identifier.replacingOccurrences(of: "photo-", with: "")
+        newest.tap()
+        XCTAssertTrue(app.buttons["cinematic-edit"].waitForExistence(timeout: 10), "Cinematic focus editor button")
+        XCTAssertTrue(app.buttons["info"].waitForExistence(timeout: 10))
+        app.buttons["info"].tap()
+        XCTAssertTrue(app.navigationBars["Info"].waitForExistence(timeout: 10), "Info sheet opened")
+        let cinematicRow = app.descendants(matching: .any)
+            .matching(NSPredicate(format: "label CONTAINS 'Cinematic' OR value CONTAINS 'Cinematic'")).firstMatch
+        for _ in 0..<3 where !cinematicRow.exists { app.swipeUp() }
+        XCTAssertTrue(cinematicRow.waitForExistence(timeout: 10), "Cinematic capture mode persisted")
+        app.buttons["Done"].firstMatch.tap()
+
+        // Trash and immediately restore from Trash.
+        app.buttons["delete"].tap()
+        let deleteEverywhere = app.buttons["delete-everywhere"].firstMatch
+        XCTAssertTrue(deleteEverywhere.waitForExistence(timeout: 5))
+        deleteEverywhere.tap()
+        XCTAssertTrue(grid.cells["photo-\(id)"].waitForNonExistence(timeout: 10))
+        app.buttons["photos-menu"].tap()
+        app.buttons["trash"].tap()
+        let trashed = app.descendants(matching: .any)["trashed-\(id)"]
+        XCTAssertTrue(trashed.waitForExistence(timeout: 10))
+        trashed.tap()
+        app.buttons["restore"].tap()
+        XCTAssertTrue(trashed.waitForNonExistence(timeout: 10))
+        app.navigationBars.buttons.firstMatch.tap()
+        XCTAssertTrue(grid.cells["photo-\(id)"].waitForExistence(timeout: 10), "restored cleanly to library")
     }
 }

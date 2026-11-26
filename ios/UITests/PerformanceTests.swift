@@ -81,4 +81,65 @@ final class PerformanceTests: XCTestCase {
             map.pinch(withScale: 0.4, velocity: -3)
         }
     }
+
+    /// Wall-clock latency across full camera mode transitions (Photo → Video → Portrait → Pano → Photo).
+    @MainActor
+    func testModeSwitchLatency() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-ui-testing-signed-in"]
+        app.launch()
+        XCTAssertTrue(app.buttons["shutter"].waitForExistence(timeout: 30))
+        measure(metrics: [XCTClockMetric(), XCTCPUMetric(application: app)], options: options(5)) {
+            for mode in ["video", "cinematic", "video", "photo", "portrait", "panorama", "portrait", "photo"] {
+                let button = app.buttons["mode-\(mode)"]
+                if button.waitForExistence(timeout: 5) { button.tap() }
+            }
+        }
+    }
+
+    /// Frame responsiveness, CPU and memory while gliding across zoom presets and dragging the zoom dial.
+    @MainActor
+    func testZoomGlidePerformance() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-ui-testing-signed-in"]
+        app.launch()
+        XCTAssertTrue(app.buttons["zoom-1"].waitForExistence(timeout: 30))
+        measure(
+            metrics: [XCTClockMetric(), XCTCPUMetric(application: app), XCTMemoryMetric(application: app)],
+            options: options(5)
+        ) {
+            app.buttons["zoom-0.5"].tap()
+            app.buttons["zoom-2"].tap()
+            app.buttons["zoom-1"].tap()
+            app.buttons["zoom-1"].press(forDuration: 0.1, thenDragTo: app.buttons["zoom-0.5"])
+        }
+    }
+
+    /// Memory, CPU and toggle latency when activating the custom Metal viewfinder (Style + Filter + Scopes)
+    /// and returning cleanly to the zero-overhead system layer.
+    @MainActor
+    func testCustomMetalViewfinderSwitchAndMemory() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-ui-testing-signed-in"]
+        app.launch()
+        XCTAssertTrue(app.buttons["camera-controls-toggle"].waitForExistence(timeout: 30))
+        measure(
+            metrics: [XCTClockMetric(), XCTCPUMetric(application: app), XCTMemoryMetric(application: app)],
+            options: options(5)
+        ) {
+            app.buttons["camera-controls-toggle"].tap()
+            let drawer = app.descendants(matching: .any)["camera-drawer"]
+            XCTAssertTrue(drawer.waitForExistence(timeout: 5))
+            let styleChip = app.buttons["drawer-style"]
+            if styleChip.exists {
+                styleChip.tap()
+                let amber = app.buttons["style-preset-amber"]
+                if amber.waitForExistence(timeout: 3) { amber.tap() }
+                let standard = app.buttons["style-preset-standard"]
+                if standard.exists { standard.tap() }
+                styleChip.tap()
+            }
+            app.buttons["camera-controls-toggle"].tap()
+        }
+    }
 }

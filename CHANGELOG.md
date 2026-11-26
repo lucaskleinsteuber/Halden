@@ -10,6 +10,14 @@ part of the first versions.
 
 ### Added
 
+- Round 3 benchmarks and expanded test coverage (`PerformanceTests`, `round3_integration.rs`,
+  `Round3RegressionTests`, `testEndToEndRound3CameraToLibraryJourney`):
+  - Added camera mode-switch latency, zoom-glide, and custom Metal viewfinder memory/CPU
+    benchmarks to `PerformanceTests` and recorded consolidated Round 3 results in
+    `Local/benchmarks/c16-summary.md`.
+  - Added multi-device Round 3 server integration & `EditRecipe` v2 validation tests
+    (`server/tests/round3_integration.rs`), `HaldenKit` regression & offline-queue matrix tests
+    (`Round3RegressionTests`), and an end-to-end camera-to-library UI journey test.
 - Newer / Pro iPhone features and server Pro format support (`ProDevices`, `AudioMixSheet`,
   `thumbnail.rs`, `edits.rs`):
   - Strictly capability-gated **Apple ProRAW** (up to 48 MP), **Apple ProRes** & **Apple Log**
@@ -49,6 +57,12 @@ part of the first versions.
     Live Photos in full screen.
   - Stored in `EditRecipe` (`liveEffect`, `liveKeyFrameMs`), rendered on-device, cached locally,
     and uploaded/replaced/removed on the server under `PUT`/`DELETE /assets/{id}/files/live_effect`.
+
+### Fixed
+
+- Grouped `PhotoView`'s bottom editing buttons into a single `ToolbarItemGroup` so all controls
+  stay reachable on Cinematic and Slow-motion videos, and positioned Dual Capture's Photo/Video and
+  swap buttons opposite the Picture-in-Picture window with clean top-bar clearance.
 
 ## 25.11.2026
 

@@ -62,8 +62,14 @@ struct DualPreviewOverlay: View {
                 .accessibilityLabel(swapped ? "Back camera picture in picture" : "Front camera picture in picture")
                 .accessibilityIdentifier("dual-pip-window")
 
-                // Top-center compact pill: Photo/Video toggle + Swap lenses (hidden while recording).
+                // Top pill: Photo/Video toggle + Swap lenses, opposite the PiP when PiP is at the top.
                 if !recording {
+                    let pillAlignment: Alignment =
+                        switch corner {
+                        case .topRight: .topLeading
+                        case .topLeft: .topTrailing
+                        case .bottomLeft, .bottomRight: .top
+                        }
                     VStack {
                         HStack(spacing: 8) {
                             Button {
@@ -91,7 +97,9 @@ struct DualPreviewOverlay: View {
                             .accessibilityLabel("Swap dual cameras")
                             .accessibilityIdentifier("dual-swap")
                         }
-                        .padding(.top, 10)
+                        .frame(maxWidth: .infinity, alignment: pillAlignment)
+                        .padding(.horizontal, 14)
+                        .padding(.top, 32)
                         Spacer()
                     }
                 }

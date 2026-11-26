@@ -114,7 +114,7 @@ final class StandInPhotoLibrary: PhotoLibrary, @unchecked Sendable {
 
     /// New in Apple Photos: into Halden once, a Live Photo with its video after the photo.
     @Test func newPhotosComeInOnce() async throws {
-        let (database, files, library, sync, root) = try world()
+        let (database, _, library, sync, root) = try world()
         defer { try? FileManager.default.removeItem(at: root) }
         library.add(item("before"))
         #expect(

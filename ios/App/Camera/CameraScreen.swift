@@ -836,7 +836,7 @@ struct CameraScreen<Gallery: View>: View {
                     .contentShape(.rect)
             }
             .accessibilityIdentifier("video-format")
-        } else if camera.mode == .panorama {
+        } else if camera.mode == .panorama || camera.mode == .dual {
             Color.clear
         } else {
             drawerToggleButton
