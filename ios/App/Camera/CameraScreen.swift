@@ -185,7 +185,12 @@ struct CameraScreen<Gallery: View>: View {
                     }
                 }
                 // While the mode changes: blurred and still, as in Apple's camera.
-                .overlay { SwitchBlur(on: camera.switching).allowsHitTesting(false) }
+                .overlay {
+                    SwitchBlur(on: camera.switching).allowsHitTesting(false)
+                    if camera.switching {
+                        Color.clear.allowsHitTesting(false).accessibilityIdentifier("camera-switching")
+                    }
+                }
                 .scaleEffect(focusing ? 2.5 : 1)
                 .clipped()
                 .animation(.easeOut(duration: 0.2), value: focusing)

@@ -404,7 +404,9 @@ final class StandInPreview: UIView {
         addSubview(lookImageView)
         let label = UILabel()
         label.text = "Stand-in camera"
-        label.textColor = .white.withAlphaComponent(0.8)
+        label.textColor = .white
+        label.shadowColor = .black.withAlphaComponent(0.65)
+        label.shadowOffset = CGSize(width: 0, height: 1)
         label.font = .preferredFont(forTextStyle: .headline)
         label.translatesAutoresizingMaskIntoConstraints = false
         addSubview(label)
@@ -427,14 +429,14 @@ final class StandInPreview: UIView {
             lookImageView.image = nil
             return
         }
-        let renderer = UIGraphicsImageRenderer(size: CGSize(width: 240, height: 320))
+        let renderer = UIGraphicsImageRenderer(size: CGSize(width: 96, height: 128))
         let base = renderer.image { ctx in
             let colors = [UIColor.systemTeal.cgColor, UIColor.systemIndigo.cgColor] as CFArray
             if let cgGradient = CGGradient(
                 colorsSpace: CGColorSpaceCreateDeviceRGB(), colors: colors, locations: [0, 1])
             {
                 ctx.cgContext.drawLinearGradient(
-                    cgGradient, start: .zero, end: CGPoint(x: 0, y: 320), options: [])
+                    cgGradient, start: .zero, end: CGPoint(x: 0, y: 128), options: [])
             }
         }
         if var ci = CIImage(image: base) {

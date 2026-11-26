@@ -361,6 +361,12 @@ final class LayoutTests: XCTestCase {
         .scrollView, .table, .collectionView, .map, .webView, .textView,
     ]
     private static let bars: Set<XCUIElement.ElementType> = [.navigationBar, .toolbar, .tabBar]
+    /// System `.bottomBar` toolbar items: iOS 26.5 wraps floating bottom-bar groups in an `Other`
+    /// container rather than `Toolbar`, while Apple still owns their segment widths and 36 pt height.
+    private static let systemBarButtons: Set<String> = [
+        "share", "delete", "edit", "live-effects", "slow-motion", "cinematic-edit", "audio-mix", "info",
+        "remove-chosen", "add-to-album", "link-chosen", "delete-chosen", "edit-original", "edit-auto",
+    ]
     /// Meant to be partly outside: the modes beside the chosen one, as in Apple's camera.
     private static let mayStickOut = ["mode-"]
     /// Lie on purpose over another control (none yet).
@@ -368,6 +374,11 @@ final class LayoutTests: XCTestCase {
 
     @MainActor
     private func check(_ app: XCUIApplication, _ name: String, file: StaticString = #filePath, line: UInt = #line) {
+        let switching = app.descendants(matching: .any)["camera-switching"]
+        if switching.exists {
+            _ = switching.waitForNonExistence(timeout: 8)
+            Thread.sleep(forTimeInterval: 0.35)
+        }
         let screenshot = XCUIScreen.main.screenshot()
         let attachment = XCTAttachment(screenshot: screenshot)
         attachment.name = name
@@ -445,7 +456,10 @@ final class LayoutTests: XCTestCase {
         }
 
         // 3. Our own buttons big enough to hit.
-        for button in controls where button.type == .button && !button.identifier.isEmpty && !button.inBar {
+        for button in controls
+        where button.type == .button && !button.identifier.isEmpty && !button.inBar
+            && !Self.systemBarButtons.contains(button.identifier)
+        {
             if button.frame.width < 43.5 || button.frame.height < 43.5 {
                 XCTFail(
                     "\(name): \(button.name) is only \(button.frame.width)×\(button.frame.height) points",

@@ -6,7 +6,7 @@ The server and the iPhone app have version numbers of their own (semantic versio
 from 0.1.0 on 25.11.2026; a heading names the versions released that day. Everything before is
 part of the first versions.
 
-## 26.11.2026 – Server 0.2.0, App 0.2.0
+## 27.11.2026 – Server 0.2.0, App 0.2.0
 
 ### Added
 

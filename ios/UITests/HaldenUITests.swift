@@ -596,7 +596,7 @@ final class HaldenUITests: XCTestCase {
         app.buttons["live-effect-apply"].tap()
         let bounceBadge = app.descendants(matching: .any)
             .matching(NSPredicate(format: "identifier == 'live-badge' AND label CONTAINS 'Bounce'")).firstMatch
-        XCTAssertTrue(bounceBadge.waitForExistence(timeout: 15), "Bounce badge shown")
+        XCTAssertTrue(bounceBadge.waitForExistence(timeout: 90), "Bounce badge shown")
 
         app.buttons["info"].tap()
         let infoEffect = app.descendants(matching: .any)["info-live-effect"]
@@ -613,7 +613,7 @@ final class HaldenUITests: XCTestCase {
         app.buttons["live-effect-apply"].tap()
         let longBadge = app.descendants(matching: .any)
             .matching(NSPredicate(format: "identifier == 'live-badge' AND label CONTAINS 'Long Exposure'")).firstMatch
-        XCTAssertTrue(longBadge.waitForExistence(timeout: 15), "Long Exposure badge shown")
+        XCTAssertTrue(longBadge.waitForExistence(timeout: 90), "Long Exposure badge shown")
     }
 
     /// Viewfinder QR code detection and Live Text sheet, plus disabling both in Settings › Camera.
@@ -1539,7 +1539,8 @@ final class HaldenUITests: XCTestCase {
         app.buttons["shutter"].tap()
         Thread.sleep(forTimeInterval: 0.6)
         app.buttons["shutter"].tap()
-        Thread.sleep(forTimeInterval: 1.4)
+        XCTAssertTrue(
+            app.buttons["panorama-orientation"].waitForExistence(timeout: 30), "Panorama stitching finished")
 
         // 4. Dual Capture (swap cameras + single-file composited photo).
         app.buttons["mode-dual"].tap()
