@@ -42,7 +42,8 @@ the design comes after that. What works today is described below.
   plus the chevron that opens the expandable iOS 26 control drawer above the modes (also opened
   by swiping up over the mode strip); for videos the format sits in the middle. The drawer holds
   flash, Live Photo, EV (−2…+2), aspect ratio (4:3, 16:9, 1:1), timer (off/3/5/10 s), photo
-  resolution (12/24/48 MP) and Bayer RAW (DNG) in photo mode, and 1080p/4K, 24/25 (PAL)/30/60
+  resolution (12/24/48 MP) and Bayer RAW (DNG, switching to the physical 1× wide sensor at 12 MP
+  on non-Pro iPhones such as iPhone 15) in photo mode, and 1080p/4K, 24/25 (PAL)/30/60
   fps, HDR and auto low-light FPS in video mode. Non-4:3 aspect ratios are stored non-destructively
   as `EditRecipe.crop` so Halden keeps the full original while Apple Photos receives the cropped
   copy. Settings › Camera mirrors Apple's layout (Preserve Settings, Top Bar Controls, Formats,
@@ -91,15 +92,18 @@ the design comes after that. What works today is described below.
     saved non-destructively in `EditRecipe` as `audioMix` / `audioMixIntensity`).
 - **Apple Watch camera remote** (`HaldenWatch`, `HaldenWatchProtocol`, `WatchCameraBridge`):
   - Companion watchOS target streaming throttled low-resolution JPEG previews (~8 fps, ≤ 28 KB
-    adaptive quality) over `WatchConnectivity` while the iPhone camera is open, never stalling the
-    iPhone shutter when unreachable or busy.
-  - Supports immediate shutter, 3-second self-timer, camera flip, Digital Crown zoom
-    (`.digitalCrownRotation`), and post-capture photo preview on the Watch.
+    adaptive quality) encoded off the main thread directly from camera pixel buffers over
+    `WatchConnectivity` while the iPhone camera is open, never stalling the iPhone shutter when
+    unreachable or busy.
+  - Supports immediate shutter, one-shot 3-second countdown (without altering the iPhone's
+    self-timer setting), camera flip, Digital Crown zoom (`.digitalCrownRotation`), and
+    post-capture photo preview on the Watch.
 - **Dual Capture & View Outside the Frame** (`DualCapture`, `MultiCamEngine`, `DualPreviewOverlay`):
   - **Dual mode (Double Take)**: simultaneous front + back camera capture via
     `AVCaptureMultiCamSession` (on MultiCam devices, including iPhone 15) with a draggable
-    corner-snapping Picture-in-Picture window, one-tap lens swap, and Photo/Video toggle saving a
-    single composited HEIC/JPEG photo (`DualCompositor`) or `.mov` video.
+    corner-snapping Picture-in-Picture window, one-tap lens swap (from either the PiP button or
+    main flip button), 1×–5× back-camera zoom, and Photo/Video toggle saving a single composited
+    HEIC/JPEG photo (`DualCompositor`) or `.mov` video with microphone audio and GPS metadata.
   - **View Outside the Frame**: optional setting under Settings › Camera › Composition that shows
     a dimmed peripheral surround outside the photo crop frame at zoom ≥ 1×.
 - **Scanner, Live Text & Visual Look Up** (`Scanner`, `ScannerOverlays`, `Viewer`):

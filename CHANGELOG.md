@@ -6,15 +6,14 @@ The server and the iPhone app have version numbers of their own (semantic versio
 from 0.1.0 on 25.11.2026; a heading names the versions released that day. Everything before is
 part of the first versions.
 
-## 26.11.2026
+## 26.11.2026 – Server 0.2.0, App 0.2.0
 
 ### Added
 
 - Round 3 benchmarks and expanded test coverage (`PerformanceTests`, `round3_integration.rs`,
   `Round3RegressionTests`, `testEndToEndRound3CameraToLibraryJourney`):
   - Added camera mode-switch latency, zoom-glide, and custom Metal viewfinder memory/CPU
-    benchmarks to `PerformanceTests` and recorded consolidated Round 3 results in
-    `Local/benchmarks/c16-summary.md`.
+    benchmarks to `PerformanceTests`.
   - Added multi-device Round 3 server integration & `EditRecipe` v2 validation tests
     (`server/tests/round3_integration.rs`), `HaldenKit` regression & offline-queue matrix tests
     (`Round3RegressionTests`), and an end-to-end camera-to-library UI journey test.
@@ -57,17 +56,6 @@ part of the first versions.
     Live Photos in full screen.
   - Stored in `EditRecipe` (`liveEffect`, `liveKeyFrameMs`), rendered on-device, cached locally,
     and uploaded/replaced/removed on the server under `PUT`/`DELETE /assets/{id}/files/live_effect`.
-
-### Fixed
-
-- Grouped `PhotoView`'s bottom editing buttons into a single `ToolbarItemGroup` so all controls
-  stay reachable on Cinematic and Slow-motion videos, and positioned Dual Capture's Photo/Video and
-  swap buttons opposite the Picture-in-Picture window with clean top-bar clearance.
-
-## 25.11.2026
-
-### Added
-
 - Panorama mode (`Panorama`, `PanoramaGuide`, `PanoramaStitcher`, `PanoramaOverlay`):
   - New **Pano** camera mode for horizontal and vertical panoramas with tappable direction arrow
     reversal, orientation toggle, yellow guide line, and CoreMotion "Move slower." / "Keep arrow
@@ -150,6 +138,23 @@ part of the first versions.
 
 - The tab bar (Camera, Photos, Settings) is visible in the camera again, with clear space above
   it so the shutter row never crowds or overlaps it.
+- Grouped `PhotoView`'s bottom editing buttons into a single `ToolbarItemGroup` so all controls
+  stay reachable on Cinematic and Slow-motion videos, and positioned Dual Capture's Photo/Video and
+  swap buttons opposite the Picture-in-Picture window with clean top-bar clearance.
+- Enabled native Bayer RAW (DNG) capture on non-Pro iPhones by switching to the physical 1× wide
+  camera at 12 MP with `AVCapturePhotoQualityPrioritization.speed` and locked 1.0× zoom, and
+  guarded still-photo-while-recording when Apple Log is active.
+- Streamed Apple Watch live camera previews off the main thread directly from camera pixel buffers
+  instead of UIKit view snapshots, kept one-shot Watch 3-second timers from overwriting the
+  iPhone's self-timer, and synced countdown, lens side and zoom bounds to the Watch.
+- Wired the main camera flip button in Dual Capture mode to swap primary/secondary lenses, cleared
+  stale Portrait blur when entering Dual mode, and added microphone audio and GPS metadata to
+  Dual Capture `.mov` videos.
+- Aligned embedded Portrait depth and matte auxiliary maps to the primary photo's EXIF orientation,
+  extracted depth/matte in `EditView` even when a preview JPEG is cached, applied non-destructive
+  edits to Long Exposure / Key Photo stills and Spatial Audio Mixes in full screen, scaled
+  `BurstPickerView` and `LivePhotoEffectSheet` labels for XXXL Dynamic Type, and validated
+  Portrait/Cinematic edit fields and burst tombstones on the server.
 
 ## 25.11.2026 – App 0.1.0
 
