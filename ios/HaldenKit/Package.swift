@@ -7,21 +7,26 @@ import PackageDescription
 
 let package = Package(
     name: "HaldenKit",
-    platforms: [.iOS(.v26), .macOS(.v26)],
+    platforms: [.iOS(.v26), .macOS(.v26), .watchOS(.v26)],
     products: [
-        .library(name: "HaldenKit", targets: ["HaldenKit"])
+        .library(name: "HaldenKit", targets: ["HaldenKit"]),
+        .library(name: "HaldenWatchProtocol", targets: ["HaldenWatchProtocol"]),
     ],
     dependencies: [
         .package(url: "https://github.com/groue/GRDB.swift.git", exact: "7.11.1")
     ],
     targets: [
         .target(
+            name: "HaldenWatchProtocol",
+            dependencies: []
+        ),
+        .target(
             name: "HaldenKit",
-            dependencies: [.product(name: "GRDB", package: "GRDB.swift")]
+            dependencies: ["HaldenWatchProtocol", .product(name: "GRDB", package: "GRDB.swift")]
         ),
         .testTarget(
             name: "HaldenKitTests",
-            dependencies: ["HaldenKit"]
+            dependencies: ["HaldenKit", "HaldenWatchProtocol"]
         ),
     ],
     swiftLanguageModes: [.v6]

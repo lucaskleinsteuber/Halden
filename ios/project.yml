@@ -5,6 +5,7 @@ options:
   bundleIdPrefix: com.lucas.halden
   deploymentTarget:
     iOS: "26.0"
+    watchOS: "26.0"
   createIntermediateGroups: true
 configFiles:
   Debug: Config/Base.xcconfig
@@ -32,8 +33,12 @@ targets:
       - path: Shared
     dependencies:
       - package: HaldenKit
+      - package: HaldenKit
+        product: HaldenWatchProtocol
       - target: HaldenWidgets
       - target: HaldenLockedCamera
+      - target: HaldenWatch
+        embed: true
     info:
       path: App/Info.plist
       properties:
@@ -116,6 +121,46 @@ targets:
         CODE_SIGN_STYLE: Automatic
         GENERATE_INFOPLIST_FILE: NO
         SKIP_INSTALL: YES
+  # Apple Watch camera remote (live preview via WatchConnectivity, shutter, 3 s timer, crown zoom).
+  HaldenWatch:
+    type: application
+    platform: watchOS
+    sources:
+      - path: Watch
+        excludes: ["Info.plist"]
+    dependencies:
+      - package: HaldenKit
+        product: HaldenWatchProtocol
+    info:
+      path: Watch/Info.plist
+      properties:
+        CFBundleDisplayName: Halden
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        WKApplication: true
+        WKCompanionAppBundleIdentifier: com.lucas.halden.ios
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.lucas.halden.ios.watchkitapp
+        PRODUCT_NAME: HaldenWatch
+        WATCHOS_DEPLOYMENT_TARGET: "26.0"
+        TARGETED_DEVICE_FAMILY: "4"
+        CODE_SIGN_STYLE: Automatic
+        GENERATE_INFOPLIST_FILE: NO
+        SKIP_INSTALL: YES
+  HaldenWatchUITests:
+    type: bundle.ui-testing
+    platform: watchOS
+    sources:
+      - path: WatchUITests
+    dependencies:
+      - target: HaldenWatch
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.lucas.halden.ios.watchkitapp.uitests
+        TEST_TARGET_NAME: HaldenWatch
+        WATCHOS_DEPLOYMENT_TARGET: "26.0"
+        GENERATE_INFOPLIST_FILE: YES
   HaldenUITests:
     type: bundle.ui-testing
     platform: iOS
@@ -137,3 +182,11 @@ schemes:
     test:
       targets:
         - HaldenUITests
+  HaldenWatch:
+    build:
+      targets:
+        HaldenWatch: all
+        HaldenWatchUITests: [test]
+    test:
+      targets:
+        - HaldenWatchUITests

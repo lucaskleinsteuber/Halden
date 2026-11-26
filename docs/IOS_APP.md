@@ -75,6 +75,12 @@ the design comes after that. What works today is described below.
   (`isGeometricDistortionCorrectionEnabled`), hardware lens-smudge detection hints
   (`cameraLensSmudgeDetectionStatus`, dismissible banner), and optional camera-lens
   (`primaryConstituentDeviceSwitchingBehavior`) and white-balance locks while recording video.
+- **Apple Watch camera remote** (`HaldenWatch`, `HaldenWatchProtocol`, `WatchCameraBridge`):
+  - Companion watchOS target streaming throttled low-resolution JPEG previews (~8 fps, ≤ 28 KB
+    adaptive quality) over `WatchConnectivity` while the iPhone camera is open, never stalling the
+    iPhone shutter when unreachable or busy.
+  - Supports immediate shutter, 3-second self-timer, camera flip, Digital Crown zoom
+    (`.digitalCrownRotation`), and post-capture photo preview on the Watch.
 - **Dual Capture & View Outside the Frame** (`DualCapture`, `MultiCamEngine`, `DualPreviewOverlay`):
   - **Dual mode (Double Take)**: simultaneous front + back camera capture via
     `AVCaptureMultiCamSession` (on MultiCam devices, including iPhone 15) with a draggable

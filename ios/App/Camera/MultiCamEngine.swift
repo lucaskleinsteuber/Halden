@@ -220,10 +220,15 @@ final class MultiCamEngine: NSObject, AVCaptureVideoDataOutputSampleBufferDelega
             self.recordingURL = nil
             self.recordingStart = nil
             input.markAsFinished()
+            let box = CarriedWriter(writer: writer)
             writer.finishWriting {
-                done(writer.status == .completed ? url : nil)
+                done(box.writer.status == .completed ? url : nil)
             }
         }
+    }
+
+    private struct CarriedWriter: @unchecked Sendable {
+        let writer: AVAssetWriter
     }
 
     private func appendVideoFrameIfRecording(sampleBuffer: CMSampleBuffer) {

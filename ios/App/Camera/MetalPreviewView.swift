@@ -12,13 +12,13 @@ final class MetalPreviewView: MTKView, MTKViewDelegate {
     private let ciContext: CIContext?
     private let colorSpace = CGColorSpaceCreateDeviceRGB()
     private let lock = NSLock()
-    private var latestImage: CIImage?
-    private var activeStyle: PhotographicStyle?
-    private var activeFilter: PhotoFilter?
-    private var portraitAperture: Double?
-    private var portraitLighting: PortraitLighting?
-    private var extraTransform: (@Sendable (CIImage) -> CIImage)?
-    private var frameObserver: (@Sendable (CIImage) -> Void)?
+    nonisolated(unsafe) private var latestImage: CIImage?
+    nonisolated(unsafe) private var activeStyle: PhotographicStyle?
+    nonisolated(unsafe) private var activeFilter: PhotoFilter?
+    nonisolated(unsafe) private var portraitAperture: Double?
+    nonisolated(unsafe) private var portraitLighting: PortraitLighting?
+    nonisolated(unsafe) private var extraTransform: (@Sendable (CIImage) -> CIImage)?
+    nonisolated(unsafe) private var frameObserver: (@Sendable (CIImage) -> Void)?
 
     init(frame: CGRect = .zero) {
         let device = MTLCreateSystemDefaultDevice()

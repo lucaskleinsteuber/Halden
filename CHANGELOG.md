@@ -10,6 +10,11 @@ part of the first versions.
 
 ### Added
 
+- Apple Watch camera remote app (`HaldenWatch`, `HaldenWatchProtocol`, `WatchCameraBridge`,
+  `HaldenWatchUITests`):
+  - New watchOS target embedded in the iPhone app with live ~8 fps JPEG preview over
+    `WatchConnectivity`, shutter, 3-second timer, camera flip, Digital Crown zoom, and
+    post-capture photo preview.
 - Dual Capture (Double Take) and View Outside the Frame (`DualCapture`, `MultiCamEngine`,
   `DualPreviewOverlay`):
   - New **Dual** camera mode on MultiCam-capable iPhones (`AVCaptureMultiCamSession`) capturing

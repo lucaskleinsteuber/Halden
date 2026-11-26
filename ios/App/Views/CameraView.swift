@@ -5,6 +5,7 @@ import SwiftUI
 /// photo left of the shutter opens full screen with "All Photos" to the library.
 struct CameraView: View {
     @Environment(AppModel.self) private var app
+    @State private var watchBridge = WatchCameraBridge()
 
     var body: some View {
         CameraScreen(camera: app.camera, settings: app.settings) { change in
@@ -13,6 +14,13 @@ struct CameraView: View {
             LastPhotoButton(camera: app.camera)
         }
         .toolbarColorScheme(.dark, for: .tabBar)
+        .onAppear { watchBridge.attach(to: app.camera) }
+        .onDisappear { watchBridge.detach() }
+        .onChange(of: app.camera.lastShot) { _, image in
+            if let image { watchBridge.sendLastPhoto(image) }
+        }
+        .onChange(of: app.camera.mode) { _, _ in watchBridge.sendState() }
+        .onChange(of: app.camera.recording) { _, _ in watchBridge.sendState() }
     }
 }
 
