@@ -101,10 +101,25 @@ final class RealServer: @unchecked Sendable {
                 "-c",
                 """
                 parent=$1; shift
+                child=""
+                stop_child() {
+                    if [ -n "$child" ]; then
+                        kill "$child" 2> /dev/null
+                        for _ in 1 2 3 4 5 6 7 8 9 10; do
+                            kill -0 "$child" 2> /dev/null || exit 0
+                            sleep 0.1
+                        done
+                        kill -9 "$child" 2> /dev/null
+                    fi
+                    exit 0
+                }
+                trap stop_child TERM INT HUP
                 "$@" & child=$!
-                trap 'kill $child 2> /dev/null; wait $child; exit 0' TERM
-                while kill -0 "$parent" 2> /dev/null && kill -0 $child 2> /dev/null; do sleep 1; done
-                kill $child 2> /dev/null; wait $child
+                while kill -0 "$parent" 2> /dev/null && kill -0 "$child" 2> /dev/null; do
+                    sleep 0.2 &
+                    wait $! 2> /dev/null
+                done
+                stop_child
                 """,
                 "halden-e2e", String(ProcessInfo.processInfo.processIdentifier), Self.binary.path,
             ] + base + ["serve"]
@@ -688,6 +703,20 @@ final class PairingTerminal: @unchecked Sendable {
     }
 
     func finish() {
+        let deadline = Date().addingTimeInterval(4)
+        while process.isRunning && Date() < deadline {
+            Thread.sleep(forTimeInterval: 0.05)
+        }
+        if process.isRunning {
+            process.terminate()
+        }
         process.waitUntilExit()
+    }
+
+    deinit {
+        if process.isRunning {
+            process.terminate()
+            process.waitUntilExit()
+        }
     }
 }

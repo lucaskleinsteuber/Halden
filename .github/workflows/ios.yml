@@ -40,7 +40,7 @@ jobs:
         working-directory: ios/HaldenKit
         env:
           HALDEN_SERVER: ${{ github.workspace }}/server/target/debug/halden
-        run: swift test
+        run: swift test --no-parallel
       - name: App build and UI tests in the simulator (against the real server)
         working-directory: ios
         env:
