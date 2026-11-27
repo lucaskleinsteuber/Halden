@@ -674,6 +674,8 @@ struct EndToEndTests {
 final class PairingTerminal: @unchecked Sendable {
     let process = Process()
     let output = Pipe()
+    private let lock = NSLock()
+    private var buffer = Data()
 
     init(server: RealServer) throws {
         process.executableURL = RealServer.binary
@@ -684,13 +686,26 @@ final class PairingTerminal: @unchecked Sendable {
     }
 
     func code() throws -> String {
-        var text = ""
         let handle = output.fileHandleForReading
-        while !text.contains("Valid until") {
-            let piece = handle.availableData
-            if piece.isEmpty { break }
-            text += String(decoding: piece, as: UTF8.self)
+        handle.readabilityHandler = { [weak self] readable in
+            let piece = readable.availableData
+            if piece.isEmpty {
+                readable.readabilityHandler = nil
+            } else if let self {
+                self.lock.withLock { self.buffer.append(piece) }
+            }
         }
+        defer { handle.readabilityHandler = nil }
+        let deadline = Date().addingTimeInterval(15)
+        var text = ""
+        while !text.contains("Valid until") && Date() < deadline {
+            text = lock.withLock { String(decoding: buffer, as: UTF8.self) }
+            if text.contains("Valid until") || (!process.isRunning && handle.readabilityHandler == nil) {
+                break
+            }
+            Thread.sleep(forTimeInterval: 0.02)
+        }
+        text = lock.withLock { String(decoding: buffer, as: UTF8.self) }
         guard
             let line = text.split(separator: "\n").first(where: {
                 $0.trimmingCharacters(in: .whitespaces).hasPrefix("Code")

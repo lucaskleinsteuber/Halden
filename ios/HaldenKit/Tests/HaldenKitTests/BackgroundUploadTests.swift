@@ -41,6 +41,7 @@ struct BackgroundUploadTests {
         _ = try await client.send(upload: uploadId, offset: 0, piece: piece)
 
         let background = BackgroundUploads(database: database, files: files, configuration: .ephemeral)
+        defer { background.invalidate() }
         let ended = Counter()
         background.ended = { ended.add() }
         #expect(await background.handOver(client: client, permit: .all, settings: AppSettings()) == 2)
@@ -83,6 +84,7 @@ struct BackgroundUploadTests {
             database: database, files: files, assetId: UUID().uuidString, fileName: "v.mov", kind: "video",
             mimeType: "video/quicktime", metadata: UploadMetadata(takenAt: 1))
         let background = BackgroundUploads(database: database, files: files, configuration: .ephemeral)
+        defer { background.invalidate() }
         let cellular = UploadRules.permit(
             on: NetworkSituation(kind: .cellular, expensive: true), atHome: false, settings: AppSettings())
         #expect(await background.handOver(client: client, permit: cellular, settings: AppSettings()) == 0)

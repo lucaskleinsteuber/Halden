@@ -86,8 +86,8 @@ public enum SmallVideos {
             throw writer.error ?? reader.error ?? CocoaError(.fileWriteUnknown)
         }
         writer.startSession(atSourceTime: .zero)
-        try await copy(frames, into: pictures, reader: reader)
-        if let sound, let soundInput { try await copy(sound, into: soundInput, reader: reader) }
+        try await copy(frames, into: pictures, reader: reader, writer: writer)
+        if let sound, let soundInput { try await copy(sound, into: soundInput, reader: reader, writer: writer) }
         await writer.finishWriting()
         if writer.status != .completed || reader.status == .failed {
             try? FileManager.default.removeItem(at: destination)
@@ -96,10 +96,23 @@ public enum SmallVideos {
     }
 
     private static func copy(
-        _ output: AVAssetReaderTrackOutput, into input: AVAssetWriterInput, reader: AVAssetReader
+        _ output: AVAssetReaderTrackOutput, into input: AVAssetWriterInput, reader: AVAssetReader,
+        writer: AVAssetWriter
     ) async throws {
         while let sample = output.copyNextSampleBuffer() {
+            var waited = 0
             while !input.isReadyForMoreMediaData {
+                if writer.status != .writing || reader.status == .failed {
+                    input.markAsFinished()
+                    throw writer.error ?? reader.error ?? CocoaError(.fileWriteUnknown)
+                }
+                waited += 1
+                if waited > 6_000 {
+                    input.markAsFinished()
+                    writer.cancelWriting()
+                    reader.cancelReading()
+                    throw writer.error ?? reader.error ?? CocoaError(.fileWriteUnknown)
+                }
                 try await Task.sleep(for: .milliseconds(5))
             }
             if !input.append(sample) { break }

@@ -45,8 +45,21 @@ public enum SampleMedia {
         writer.startSession(atSourceTime: .zero)
         let frames = max(1, Int(seconds * 30))
         for frame in 0..<frames {
-            while !input.isReadyForMoreMediaData { try await Task.sleep(for: .milliseconds(2)) }
-            guard let pool = adaptor.pixelBufferPool else { throw writer.error ?? CocoaError(.fileWriteUnknown) }
+            var waited = 0
+            while !input.isReadyForMoreMediaData {
+                if writer.status != .writing {
+                    throw writer.error ?? CocoaError(.fileWriteUnknown)
+                }
+                waited += 1
+                if waited > 5_000 {
+                    writer.cancelWriting()
+                    throw writer.error ?? CocoaError(.fileWriteUnknown)
+                }
+                try await Task.sleep(for: .milliseconds(2))
+            }
+            guard writer.status == .writing, let pool = adaptor.pixelBufferPool else {
+                throw writer.error ?? CocoaError(.fileWriteUnknown)
+            }
             var buffer: CVPixelBuffer?
             CVPixelBufferPoolCreatePixelBuffer(nil, pool, &buffer)
             guard let buffer else { throw CocoaError(.fileWriteUnknown) }
@@ -59,7 +72,9 @@ public enum SampleMedia {
                 draw(in: context, seed: seed, frame: frame, width: width, height: height)
             }
             CVPixelBufferUnlockBaseAddress(buffer, [])
-            adaptor.append(buffer, withPresentationTime: CMTime(value: CMTimeValue(frame), timescale: 30))
+            if !adaptor.append(buffer, withPresentationTime: CMTime(value: CMTimeValue(frame), timescale: 30)) {
+                throw writer.error ?? CocoaError(.fileWriteUnknown)
+            }
         }
         input.markAsFinished()
         await writer.finishWriting()

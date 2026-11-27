@@ -47,6 +47,7 @@ public final class APIClient: Sendable {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.tlsMinimumSupportedProtocolVersion = .TLSv13
         configuration.timeoutIntervalForRequest = timeout
+        configuration.timeoutIntervalForResource = max(timeout * 4, 300)
         configuration.httpMaximumConnectionsPerHost = 4
         configuration.waitsForConnectivity = false
         configuration.requestCachePolicy = .reloadIgnoringLocalCacheData

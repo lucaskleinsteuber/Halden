@@ -115,6 +115,11 @@ public final class BackgroundUploads: NSObject, URLSessionDataDelegate, @uncheck
         for task in await session.allTasks { task.cancel() }
     }
 
+    /// Releases the underlying `URLSession` and its strong delegate reference (used by tests).
+    public func invalidate() {
+        session.finishTasksAndInvalidate()
+    }
+
     /// From the app delegate: the system woke the app for this session's events.
     public func handleEvents(completion: @escaping @Sendable () -> Void) {
         lock.withLock { eventsDone = completion }

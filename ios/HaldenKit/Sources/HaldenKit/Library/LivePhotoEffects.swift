@@ -415,10 +415,21 @@ public enum LivePhotoEffectRenderer {
 
         let frameDuration = CMTime(value: 1, timescale: max(1, fps))
         for (index, frame) in frames.enumerated() {
+            var waited = 0
             while !input.isReadyForMoreMediaData {
+                if writer.status != .writing {
+                    throw writer.error ?? LivePhotoEffectError.encodeFailed
+                }
+                waited += 1
+                if waited > 6_000 {
+                    writer.cancelWriting()
+                    throw writer.error ?? LivePhotoEffectError.encodeFailed
+                }
                 try await Task.sleep(for: .milliseconds(5))
             }
-            guard let pool = adaptor.pixelBufferPool else { throw LivePhotoEffectError.encodeFailed }
+            guard writer.status == .writing, let pool = adaptor.pixelBufferPool else {
+                throw writer.error ?? LivePhotoEffectError.encodeFailed
+            }
             var pixelBuffer: CVPixelBuffer?
             CVPixelBufferPoolCreatePixelBuffer(nil, pool, &pixelBuffer)
             guard let buffer = pixelBuffer else { throw LivePhotoEffectError.encodeFailed }

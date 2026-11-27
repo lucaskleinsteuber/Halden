@@ -38,9 +38,16 @@ jobs:
           git diff --exit-code -- Halden.xcodeproj
       - name: HaldenKit (with the chain against the real server)
         working-directory: ios/HaldenKit
+        timeout-minutes: 15
         env:
           HALDEN_SERVER: ${{ github.workspace }}/server/target/debug/halden
-        run: swift test --no-parallel
+        run: swift test --no-parallel --event-stream-output-path /tmp/haldenkit-events.jsonl
+      - name: HaldenKit event stream on failure
+        if: failure() || cancelled()
+        run: |
+          if [ -f /tmp/haldenkit-events.jsonl ]; then
+            tail -n 40 /tmp/haldenkit-events.jsonl
+          fi
       - name: App build and UI tests in the simulator (against the real server)
         working-directory: ios
         env:
