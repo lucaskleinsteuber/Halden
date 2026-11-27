@@ -20,10 +20,6 @@ struct CameraScreen<Gallery: View>: View {
     @State private var focusTouches = 0
     @State private var flash = false
     @State private var pinchStart = 1.0
-    /// While the zoom dial is dragged: the zoom it started at.
-    @State private var dialStart: Double?
-    @State private var dialShown = false
-    @State private var dialTouches = 0
     @State private var showManual = false
     @State private var showControls = false
     @State private var drawerPanel: CameraDrawer.Panel?
@@ -43,16 +39,23 @@ struct CameraScreen<Gallery: View>: View {
     @State private var shutterConsumedGesture = false
     @State private var hardwareBurstTask: Task<Void, Never>?
     @State private var cameraVisible = false
-    /// The highlight that glides between the lens buttons.
-    @Namespace private var lens
 
     private var state: CameraState { camera.backend.state }
     static var topBarHeight: CGFloat { 44 }
+    static var exposesTestValues: Bool { CameraTesting.exposesValues }
 
     var body: some View {
         ZStack {
             Color.black.ignoresSafeArea()
             viewfinder
+            if !camera.mode.isStill || settings.photoAspectRatio == .sixteenByNine {
+                // Where the picture runs behind the modes and the shutter: a shade, so they stay readable.
+                LinearGradient(colors: [.clear, .black.opacity(0.6)], startPoint: .top, endPoint: .bottom)
+                    .frame(height: 300)
+                    .frame(maxHeight: .infinity, alignment: .bottom)
+                    .ignoresSafeArea()
+                    .allowsHitTesting(false)
+            }
             controls
             if let left = camera.countdown {
                 Text("\(left)")
@@ -113,6 +116,7 @@ struct CameraScreen<Gallery: View>: View {
         ) {
             if let text = activeTextSheet { DetectedTextSheet(text: text) }
         }
+        .onChange(of: showControls && drawerPanel == .filter) { _, open in camera.backend.sampleLooks(open) }
         .onChange(of: state.lensSmudged) { _, smudged in if !smudged { smudgeDismissed = false } }
         .onChange(of: state.side) { _, _ in smudgeDismissed = false }
         .onChange(of: camera.shots) {
@@ -173,17 +177,6 @@ struct CameraScreen<Gallery: View>: View {
                 .overlay {
                     if settings.showGrid { ThirdsGrid().allowsHitTesting(false) }
                 }
-                .overlay(alignment: .top) {
-                    if state.focusLocked {
-                        Text("AE/AF LOCK")
-                            .font(.caption.bold())
-                            .padding(.horizontal, 6)
-                            .background(.yellow, in: .rect(cornerRadius: 4))
-                            .foregroundStyle(.black)
-                            .padding(.top, fullFrame ? Self.topBarHeight + 70 : 10)
-                            .allowsHitTesting(false)
-                    }
-                }
                 // While the mode changes: blurred and still, as in Apple's camera.
                 .overlay {
                     SwitchBlur(on: camera.switching).allowsHitTesting(false)
@@ -195,6 +188,8 @@ struct CameraScreen<Gallery: View>: View {
                 .clipped()
                 .animation(.easeOut(duration: 0.2), value: focusing)
                 .accessibilityIdentifier("camera-preview")
+                // For the UI tests: how often the camera was rebuilt (a filter must not do it).
+                .accessibilityValue(Self.exposesTestValues ? "\(camera.backend.reconfigurations)" : "")
             } else {
                 Text(state.problem ?? "Starting the camera…")
                     .foregroundStyle(.white)
@@ -205,12 +200,10 @@ struct CameraScreen<Gallery: View>: View {
         }
         .aspectRatio(ratio, contentMode: .fit)
         .overlay(alignment: .topTrailing) {
-            if state.ready, let scopes = camera.backend.liveScopes, settings.showHistogram || settings.showWaveform {
-                LiveScopesOverlay(
-                    data: scopes, showHistogram: settings.showHistogram, showWaveform: settings.showWaveform
-                )
-                .padding(.top, fullFrame ? Self.topBarHeight + 56 : 12)
-                .padding(.trailing, 12)
+            if state.ready, settings.showHistogram || settings.showWaveform {
+                ScopesLayer(backend: camera.backend, settings: settings)
+                    .padding(.top, fullFrame ? Self.topBarHeight + 56 : 12)
+                    .padding(.trailing, 12)
             }
         }
         .overlay {
@@ -221,33 +214,18 @@ struct CameraScreen<Gallery: View>: View {
                         kind: Binding(get: { camera.dualKind }, set: { camera.dualKind = $0 }),
                         swapped: camera.dualSwapped,
                         recording: camera.recording,
-                        pipImage: camera.backend.dualPipImage,
+                        backend: camera.backend,
                         onSwap: { camera.swapDualCameras() }
                     )
                 } else if camera.mode == .panorama {
-                    PanoramaOverlay(
-                        direction: camera.panoramaDirection,
-                        capturing: camera.isPanoramaCapturing,
-                        stitching: camera.panoramaStitching,
-                        progress: motion.panoramaProgress,
-                        offAxis: motion.panoramaOffAxis,
-                        hint: motion.panoramaHint,
-                        onReverse: { camera.reversePanoramaDirection() },
-                        onToggleOrientation: { camera.togglePanoramaOrientation() }
-                    )
+                    PanoramaLayer(camera: camera, motion: motion)
                 } else if camera.isNightCapturing {
-                    NightHoldStillOverlay(
-                        offset: motion.holdStillOffset, secondsLeft: camera.nightCaptureSecondsLeft)
+                    NightHoldLayer(camera: camera, motion: motion)
                 } else if settings.showLevel {
-                    LevelOverlay(reading: motion.reading)
+                    LevelLayer(motion: motion)
                 }
-                if OutsideFrameMath.isActive(
-                    enabled: settings.viewOutsideTheFrame, isPhotoMode: camera.mode == .photo,
-                    zoom: camera.zoom, hasUltraWide: state.presets.contains(0.5))
-                {
-                    OutsideFrameOverlay(zoom: camera.zoom)
-                        .accessibilityElement(children: .ignore)
-                        .accessibilityIdentifier("outside-frame-overlay")
+                if settings.viewOutsideTheFrame && camera.mode == .photo {
+                    OutsideFrameLayer(camera: camera)
                 }
                 if let focusPoint {
                     GeometryReader { geo in
@@ -282,130 +260,42 @@ struct CameraScreen<Gallery: View>: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: fullFrame ? .center : .top)
         .padding(.top, fullFrame ? 0 : Self.topBarHeight)
         .ignoresSafeArea(edges: fullFrame ? .all : [])
-        // The frame glides into its new shape under the blur.
-        .animation(.snappy(duration: 0.28), value: ratio)
+        // No glide between 4:3 and 16:9: the picture and everything on it change shape together,
+        // at once, under the short blur, so nothing moves out of step.
     }
 
     /// Laid out like Apple's camera: the modes start where the 4:3 picture ends, so the lens
-    /// buttons lie on its lower edge; what room is left goes below the shutter, always leaving at
-    /// least `bottomGap` above the bottom safe area (the floating tab bar).
+    /// buttons lie on its lower edge; the room left is shared out between the modes and the
+    /// shutter and below the shutter, always at least `bottomGap` above the tab bar.
     private var controls: some View {
         GeometryReader { geometry in
             let below = geometry.size.height - Self.topBarHeight - geometry.size.width * 4 / 3
-            let rest = max(below - Self.modeHeight - Self.shutterHeight, Self.bottomGap)
-            controlStack.frame(width: geometry.size.width).padding(.bottom, rest)
+            let free = max(below - Self.modeHeight - Self.shutterHeight, Self.bottomGap)
+            let gap = min(max((free - Self.bottomGap) * 0.4, 0), 20)
+            controlStack(gap: gap).frame(width: geometry.size.width).padding(.bottom, free - gap)
         }
     }
 
     static var modeHeight: CGFloat { 44 }
     static var shutterHeight: CGFloat { 84 }
-    static var bottomGap: CGFloat { 16 }
+    static var bottomGap: CGFloat { 10 }
 
-    private var controlStack: some View {
+    private func controlStack(gap: CGFloat) -> some View {
         VStack(spacing: 0) {
             topBar
-            if state.lensSmudged && !smudgeDismissed {
-                Button {
-                    smudgeDismissed = true
-                } label: {
-                    Label("Clean Camera Lens", systemImage: "sparkles")
-                        .font(.caption.bold())
-                        .foregroundStyle(.yellow)
-                        .padding(.horizontal, 12)
-                        .frame(minWidth: 44, minHeight: 44)
-                        .background(.black.opacity(0.75), in: .capsule)
-                }
-                .padding(.top, 8)
-                .accessibilityIdentifier("lens-smudge-hint")
-            }
-            if camera.mode == .video
-                && ActionModeRules.needsMoreLight(actionMode: settings.actionMode, iso: camera.backend.readings.iso)
-            {
-                Label(ActionModeRules.lowLightHint, systemImage: "figure.run")
-                    .font(.caption.bold())
-                    .foregroundStyle(.black)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 6)
-                    .background(.yellow, in: .capsule)
-                    .padding(.top, 8)
-                    .accessibilityIdentifier("action-low-light-hint")
-            } else if camera.mode == .portrait, let hint = state.portraitHint {
-                Text(hint.rawValue)
-                    .font(.caption.bold())
-                    .foregroundStyle(.black)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 6)
-                    .background(.yellow, in: .capsule)
-                    .padding(.top, 8)
-                    .accessibilityIdentifier("portrait-hint")
-            } else if camera.mode == .photo && state.subjectDetected && state.canDepth {
-                Label("Depth", systemImage: "f.cursive.circle.fill")
-                    .font(.caption2.bold())
-                    .foregroundStyle(.yellow)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 4)
-                    .background(.black.opacity(0.6), in: .capsule)
-                    .padding(.top, 8)
-                    .accessibilityLabel("Automatic portrait depth active")
-                    .accessibilityIdentifier("portrait-auto-depth")
-            } else if camera.mode == .photo && !camera.isNightCapturing
-                && (camera.nightSuggestedSeconds != nil || settings.nightMode != .auto)
-            {
-                let activeSeconds = camera.nightActiveSeconds
-                Button {
+            CameraHints(
+                camera: camera, settings: settings, smudgeDismissed: $smudgeDismissed,
+                openNight: {
                     withAnimation(.snappy(duration: 0.2)) {
                         showManual = false
                         showControls = true
                         drawerPanel = .night
                     }
-                } label: {
-                    HStack(spacing: 4) {
-                        Image(systemName: "moon.stars.fill")
-                        Text(
-                            settings.nightMode.label(
-                                suggested: camera.nightSuggestedSeconds, onTripod: camera.isOnTripod)
-                        )
-                        .monospacedDigit()
-                    }
-                    .font(.caption.bold())
-                    .foregroundStyle(activeSeconds > 0 ? .yellow : .white)
-                    .padding(.horizontal, 12)
-                    .frame(minWidth: 44, minHeight: 44)
-                    .background(.black.opacity(0.65), in: .capsule)
                 }
-                .padding(.top, 6)
-                .accessibilityLabel(
-                    activeSeconds > 0
-                        ? "Night Mode \(activeSeconds) seconds" : "Night Mode off"
-                )
-                .accessibilityIdentifier("night-mode-badge")
-            } else if camera.mode == .spatial {
-                Label("Rotate iPhone to landscape for Spatial Video", systemImage: "view.3d")
-                    .font(.caption.bold())
-                    .foregroundStyle(.black)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 6)
-                    .background(.yellow, in: .capsule)
-                    .padding(.top, 8)
-                    .accessibilityIdentifier("spatial-hint")
-            }
-            if camera.mode.records && state.capabilities.canExternalStorage,
-                let storage = state.externalStorage,
-                ProDeviceRules.shouldRecordToExternalStorage(
-                    enabled: settings.recordToExternalStorage, storage: storage, format: settings.proVideoFormat)
-            {
-                Label(
-                    "\(storage.badgeLabel) · \(storage.displayName)",
-                    systemImage: "externaldrive.connected.to.line.below"
-                )
-                .font(.caption2.bold())
-                .foregroundStyle(.yellow)
-                .padding(.horizontal, 10)
-                .padding(.vertical, 4)
-                .background(.black.opacity(0.65), in: .capsule)
-                .padding(.top, 6)
-                .accessibilityLabel("Recording to \(storage.displayName)")
-                .accessibilityIdentifier("external-storage-badge")
+            )
+            .padding(.top, 6)
+            if camera.mode.records && !camera.recording && camera.mode != .spatial {
+                videoFormatMenu.padding(.top, 2)
             }
             Spacer(minLength: 0)
             if let problem = camera.problem {
@@ -421,67 +311,86 @@ struct CameraScreen<Gallery: View>: View {
                     .padding(.bottom, 4)
                     .transition(.opacity)
             }
-            if showControls && !camera.recording {
-                CameraDrawer(camera: camera, settings: settings, update: update, expanded: $drawerPanel)
-                    .padding(.bottom, 4)
-                    .transition(.opacity.combined(with: .move(edge: .bottom)))
-            } else {
-                if let focalBadge {
-                    Text(focalBadge.label)
-                        .font(.caption.bold().monospacedDigit())
-                        .foregroundStyle(.yellow)
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 4)
-                        .background(.black.opacity(0.65), in: .capsule)
-                        .padding(.bottom, 4)
-                        .transition(.opacity)
-                        .accessibilityIdentifier("focal-length-badge")
-                } else if camera.mode == .photo && !camera.recording && camera.burstCount == 0
-                    && (state.detectedQR != nil || state.detectedText != nil)
-                {
-                    ViewfinderScannerBar(
-                        qr: settings.scanQRCodes ? state.detectedQR : nil,
-                        detectedText: settings.showLiveText ? state.detectedText : nil,
-                        onTapQR: { code in
-                            if case .url(let url) = code.kind {
-                                openURL(url)
-                            } else {
-                                activeQRSheet = code
-                            }
-                        },
-                        onTapText: { text in activeTextSheet = text }
-                    )
-                    .padding(.bottom, 6)
-                }
-                zoomControl.frame(height: 56)
-                    .overlay(alignment: .leading) {
-                        if state.capabilities.canMacroControl && settings.macroControl
-                            && (camera.mode == .photo || camera.mode == .video)
-                            && (state.macroActive || settings.macroMode != .auto)
-                            && !dialShown
-                        {
-                            let macroOn = settings.macroMode != .off
-                            Button {
-                                update { $0.macroMode = macroOn ? .off : .on }
-                                camera.settingsChanged()
-                            } label: {
-                                Image(systemName: "camera.macro")
-                                    .font(.body.weight(.semibold))
-                                    .foregroundStyle(macroOn ? .black : .white)
-                                    .frame(width: 44, height: 44)
-                                    .background(macroOn ? Color.yellow : Color.black.opacity(0.55), in: .circle)
-                            }
-                            .padding(.leading, 16)
-                            .accessibilityLabel(macroOn ? "Macro on" : "Macro off")
-                            .accessibilityIdentifier("macro-toggle")
-                        }
-                    }
+            if showControls && !camera.recording && drawerPanel != nil {
+                // The details of a control lie over the picture, above the lens buttons.
+                CameraDrawer(
+                    camera: camera, settings: settings, update: update, expanded: $drawerPanel, part: .detail
+                )
+                .padding(.bottom, 6)
+                .transition(.opacity)
             }
+            if let focalBadge {
+                Text(focalBadge.label)
+                    .font(.caption.bold().monospacedDigit())
+                    .foregroundStyle(.yellow)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 4)
+                    .background(.black.opacity(0.65), in: .capsule)
+                    .padding(.bottom, 4)
+                    .transition(.opacity)
+                    .accessibilityIdentifier("focal-length-badge")
+            } else if camera.mode == .photo && !camera.recording && camera.burstCount == 0 && !showControls
+                && (state.detectedQR != nil || state.detectedText != nil)
+            {
+                ViewfinderScannerBar(
+                    qr: settings.scanQRCodes ? state.detectedQR : nil,
+                    detectedText: settings.showLiveText ? state.detectedText : nil,
+                    onTapQR: { code in
+                        if case .url(let url) = code.kind {
+                            openURL(url)
+                        } else {
+                            activeQRSheet = code
+                        }
+                    },
+                    onTapText: { text in activeTextSheet = text }
+                )
+                .padding(.bottom, 6)
+            }
+            ZoomButtons(camera: camera, focalBadge: $focalBadge, focalBadgeTicks: $focalBadgeTicks)
+                .frame(height: 56)
+                .overlay(alignment: .leading) {
+                    if state.capabilities.canMacroControl && settings.macroControl
+                        && (camera.mode == .photo || camera.mode == .video)
+                        && (state.macroActive || settings.macroMode != .auto)
+                    {
+                        let macroOn = settings.macroMode != .off
+                        Button {
+                            update { $0.macroMode = macroOn ? .off : .on }
+                            camera.settingsChanged()
+                        } label: {
+                            Image(systemName: "camera.macro")
+                                .font(.body.weight(.semibold))
+                                .foregroundStyle(macroOn ? .black : .white)
+                                .frame(width: 44, height: 44)
+                                .background(macroOn ? Color.yellow : Color.black.opacity(0.55), in: .circle)
+                        }
+                        .padding(.leading, 16)
+                        .accessibilityLabel(macroOn ? "Macro on" : "Macro off")
+                        .accessibilityIdentifier("macro-toggle")
+                    }
+                }
             if camera.recording || camera.burstCount > 0 || camera.isPanoramaCapturing {
                 Color.clear.frame(height: Self.modeHeight)
+            } else if showControls {
+                // Like Apple's camera: the controls take the place of the modes while open.
+                CameraDrawer(
+                    camera: camera, settings: settings, update: update, expanded: $drawerPanel, part: .chips
+                )
+                .frame(height: Self.modeHeight)
+                .transition(.opacity)
+                .simultaneousGesture(
+                    DragGesture(minimumDistance: 18)
+                        .onEnded { value in
+                            guard abs(value.translation.height) > abs(value.translation.width),
+                                value.translation.height > 24
+                            else { return }
+                            withAnimation(.snappy(duration: 0.2)) { showControls = false }
+                        }
+                )
             } else {
                 modeStrip
                     .frame(height: Self.modeHeight)
+                    .transition(.opacity)
                     .simultaneousGesture(
                         DragGesture(minimumDistance: 18)
                             .onEnded { value in
@@ -499,6 +408,7 @@ struct CameraScreen<Gallery: View>: View {
                             }
                     )
             }
+            Color.clear.frame(height: gap)
             shutterRow.frame(height: Self.shutterHeight)
         }
         .opacity(state.controlsFullscreen ? 0.15 : 1)
@@ -519,27 +429,29 @@ struct CameraScreen<Gallery: View>: View {
         let split = (items.count + 1) / 2
         let left = Array(items.prefix(split))
         let right = Array(items.dropFirst(split))
-        return HStack(spacing: 0) {
+        // The middle is the middle of the screen, however many buttons each side has.
+        return ZStack {
             HStack(spacing: 0) {
                 ForEach(left) { control in topControlView(control) }
-            }
-            // In the middle, with the room left between the buttons (never on top of them).
-            Color.clear
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .overlay { topMiddle }
-            HStack(spacing: 0) {
+                Spacer(minLength: 0)
                 ForEach(right) { control in topControlView(control) }
-                if camera.mode.records && !camera.recording {
-                    drawerToggleButton
-                }
             }
+            topMiddle.frame(maxWidth: 180)
         }
         .font(.title3)
         .frame(height: Self.topBarHeight)
         .padding(.horizontal, 12)
-        .background(
-            camera.mode.records || settings.photoAspectRatio == .sixteenByNine
-                ? Color.black.opacity(0.25) : .clear)
+        // Where the picture goes up to the top (videos, 16:9), a band behind the buttons keeps
+        // them readable and the picture's edge from cutting through them.
+        .background {
+            if !camera.mode.isStill || settings.photoAspectRatio == .sixteenByNine {
+                LinearGradient(colors: [.black.opacity(0.7), .black.opacity(0)], startPoint: .top, endPoint: .bottom)
+                    .padding(.bottom, -28)
+                    .ignoresSafeArea(edges: .top)
+                    // Only a shade: touches go through to what lies under it.
+                    .allowsHitTesting(false)
+            }
+        }
     }
 
     @ViewBuilder private func topControlView(_ control: TopBarControl) -> some View {
@@ -579,6 +491,7 @@ struct CameraScreen<Gallery: View>: View {
             withAnimation(.snappy(duration: 0.2)) {
                 showControls = true
                 showManual = false
+                drawerPanel = .exposure
             }
         } label: {
             let bias = camera.manual.exposureBias
@@ -777,75 +690,73 @@ struct CameraScreen<Gallery: View>: View {
                 .background(.yellow, in: .capsule)
                 .accessibilityLabel("Burst \(camera.burstCount) photos")
                 .accessibilityIdentifier("burst-counter")
-        } else if camera.mode.records {
-            Menu {
-                switch camera.mode {
-                case .cinematic:
-                    Picker("Depth of field", selection: videoSetting(\.cinematicAperture)) {
-                        ForEach([2.0, 2.8, 4.0, 5.6, 8.0, 11.0, 16.0], id: \.self) { f in
-                            Text(CinematicRules.formatAperture(f)).tag(f)
-                        }
-                    }
-                    Picker("Audio", selection: videoSetting(\.audioChannelMode)) {
-                        ForEach(availableAudioChannels) { channel in
-                            Text(channel.title).tag(channel)
-                        }
-                    }
-                case .spatial:
-                    Picker("Audio", selection: videoSetting(\.audioChannelMode)) {
-                        ForEach(availableAudioChannels) { channel in
-                            Text(channel.title).tag(channel)
-                        }
-                    }
-                case .slowMotion:
-                    Picker("Frame rate", selection: videoSetting(\.slowMotionRate)) {
-                        Text("240 fps").tag(240)
-                        Text("120 fps").tag(120)
-                    }
-                case .timeLapse:
-                    Picker("A picture", selection: videoSetting(\.timeLapseInterval)) {
-                        Text("Automatic").tag(0.0)
-                        ForEach([0.5, 1, 2, 5, 10], id: \.self) { seconds in
-                            Text("every \(CameraMode.intervalText(seconds))").tag(seconds)
-                        }
-                    }
-                default:
-                    Picker("Size", selection: videoSetting(\.videoResolution)) {
-                        Text("4K").tag(AppSettings.VideoResolution.uhd4K)
-                        Text("1080p").tag(AppSettings.VideoResolution.hd1080)
-                    }
-                    Picker("Frame rate", selection: videoSetting(\.videoFrameRate)) {
-                        ForEach(CameraControls.videoFrameRates, id: \.self) { rate in
-                            Text(CameraControls.frameRateLabel(rate)).tag(rate)
-                        }
-                    }
-                    Toggle("HDR", isOn: videoSetting(\.videoHDR))
-                    if state.capabilities.hasProVideo {
-                        Picker("Pro video", selection: videoSetting(\.proVideoFormat)) {
-                            ForEach(ProVideoFormat.available(for: state.capabilities)) { format in
-                                Text(format.title).tag(format)
-                            }
-                        }
-                    }
-                    Toggle("Auto low-light FPS", isOn: videoSetting(\.autoLowLightFPS))
-                }
-            } label: {
-                Text(state.videoFormat ?? "Video")
-                    .font(.caption.bold())
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.65)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 4)
-                    .background(.black.opacity(0.45), in: .capsule)
-                    .frame(minWidth: 44, minHeight: 44)
-                    .contentShape(.rect)
-            }
-            .accessibilityIdentifier("video-format")
         } else if camera.mode == .panorama || camera.mode == .dual {
             Color.clear
         } else {
             drawerToggleButton
         }
+    }
+
+    /// The video format, under the top bar: tap for size, frame rate, HDR and more.
+    private var videoFormatMenu: some View {
+        Menu {
+            switch camera.mode {
+            case .cinematic:
+                Picker("Depth of field", selection: videoSetting(\.cinematicAperture)) {
+                    ForEach([2.0, 2.8, 4.0, 5.6, 8.0, 11.0, 16.0], id: \.self) { f in
+                        Text(CinematicRules.formatAperture(f)).tag(f)
+                    }
+                }
+                Picker("Audio", selection: videoSetting(\.audioChannelMode)) {
+                    ForEach(availableAudioChannels) { channel in
+                        Text(channel.title).tag(channel)
+                    }
+                }
+            case .slowMotion:
+                Picker("Frame rate", selection: videoSetting(\.slowMotionRate)) {
+                    Text("240 fps").tag(240)
+                    Text("120 fps").tag(120)
+                }
+            case .timeLapse:
+                Picker("A picture", selection: videoSetting(\.timeLapseInterval)) {
+                    Text("Automatic").tag(0.0)
+                    ForEach([0.5, 1, 2, 5, 10], id: \.self) { seconds in
+                        Text("every \(CameraMode.intervalText(seconds))").tag(seconds)
+                    }
+                }
+            default:
+                Picker("Size", selection: videoSetting(\.videoResolution)) {
+                    Text("4K").tag(AppSettings.VideoResolution.uhd4K)
+                    Text("1080p").tag(AppSettings.VideoResolution.hd1080)
+                }
+                Picker("Frame rate", selection: videoSetting(\.videoFrameRate)) {
+                    ForEach(CameraControls.videoFrameRates, id: \.self) { rate in
+                        Text(CameraControls.frameRateLabel(rate)).tag(rate)
+                    }
+                }
+                Toggle("HDR", isOn: videoSetting(\.videoHDR))
+                if state.capabilities.hasProVideo {
+                    Picker("Pro video", selection: videoSetting(\.proVideoFormat)) {
+                        ForEach(ProVideoFormat.available(for: state.capabilities)) { format in
+                            Text(format.title).tag(format)
+                        }
+                    }
+                }
+                Toggle("Auto low-light FPS", isOn: videoSetting(\.autoLowLightFPS))
+            }
+        } label: {
+            Text(state.videoFormat ?? "Video")
+                .font(.caption2.bold())
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
+                .foregroundStyle(.white)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 4)
+                .background(.black.opacity(0.5), in: .capsule)
+                .frame(minHeight: 44)
+                .contentShape(.rect)
+        }
+        .accessibilityIdentifier("video-format")
     }
 
     /// A video setting changed right here; the camera takes it at once.
@@ -870,118 +781,36 @@ struct CameraScreen<Gallery: View>: View {
         }
     }
 
-    // MARK: Zoom
-
-    /// The lens buttons; dragged sideways they become a dial, like in Apple's camera.
-    private var zoomControl: some View {
-        let zoom = camera.zoom
-        let active = Zoom.activePreset(for: zoom, presets: state.presets)
-        return ZStack {
-            if dialShown {
-                ZoomDial(zoom: zoom, range: state.zoomRange, presets: state.presets)
-                    .transition(.opacity.combined(with: .scale(scale: 0.9, anchor: .bottom)))
-            } else {
-                HStack(spacing: 0) {
-                    ForEach(state.presets, id: \.self) { preset in
-                        let isActive = active == preset
-                        Button {
-                            if let badge = camera.tapZoomPreset(preset) {
-                                withAnimation(.snappy(duration: 0.2)) { focalBadge = badge }
-                                focalBadgeTicks += 1
-                            } else {
-                                focalBadge = nil
-                            }
-                        } label: {
-                            ZStack {
-                                // One highlight that glides to the chosen lens.
-                                if isActive {
-                                    Circle().fill(.black.opacity(0.55))
-                                        .matchedGeometryEffect(id: "lens", in: lens)
-                                        .frame(width: 38, height: 38)
-                                } else {
-                                    Circle().fill(.black.opacity(0.3)).frame(width: 28, height: 28)
-                                }
-                                Text(isActive ? Zoom.text(zoom) + "×" : Zoom.text(preset))
-                                    .font(.system(size: isActive ? 12 : 10, weight: .bold).monospacedDigit())
-                                    .lineLimit(1)
-                                    .minimumScaleFactor(0.7)
-                                    .foregroundStyle(isActive ? .yellow : .white)
-                                    .frame(width: 36)
-                                    .contentTransition(.numericText(value: isActive ? zoom : preset))
-                            }
-                            .frame(width: 44, height: 44)
-                            .contentShape(.circle)
-                        }
-                        .accessibilityLabel("Zoom \(Zoom.text(preset))")
-                        .accessibilityValue(isActive ? Zoom.text(zoom) + "×" : "")
-                        .accessibilityIdentifier("zoom-\(Zoom.text(preset))")
-                    }
-                }
-                .padding(.horizontal, 2)
-                .background(.black.opacity(0.25), in: .capsule)
-                .animation(.snappy(duration: 0.28), value: active)
-                .transition(.opacity)
-            }
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .contentShape(.rect)
-        .highPriorityGesture(dialDrag)
-        .sensoryFeedback(.selection, trigger: active)
-        .animation(.easeOut(duration: 0.2), value: dialShown)
-        .task(id: dialTouches) {
-            // The dial goes away a moment after the finger left it.
-            guard dialShown, dialStart == nil else { return }
-            try? await Task.sleep(for: .seconds(1.2))
-            if !Task.isCancelled, dialStart == nil { dialShown = false }
-        }
-    }
-
-    private var dialDrag: some Gesture {
-        DragGesture(minimumDistance: 10)
-            .onChanged { drag in
-                if dialStart == nil {
-                    dialStart = camera.zoom
-                    dialShown = true
-                }
-                let zoom = Zoom.dialed(
-                    from: dialStart ?? camera.zoom, points: -drag.translation.width, in: state.zoomRange)
-                camera.zoom(to: zoom, glide: false)
-            }
-            .onEnded { _ in
-                dialStart = nil
-                dialTouches += 1
-            }
-    }
-
     // MARK: Bottom
 
-    /// The modes, the chosen one in the middle; also changed by swiping over the picture.
+    /// The modes this iPhone can do, the chosen one in the middle; also changed by swiping over
+    /// the picture.
     private var visibleModes: [CameraMode] {
-        CameraMode.strip.filter { mode in
-            (mode != .dual || state.canMultiCam)
-                && (mode != .spatial || state.capabilities.canSpatialVideo)
-        }
+        CameraMode.strip.filter { CameraMode.available($0, state: state) }
     }
 
     private var modeStrip: some View {
         let modes = visibleModes
-        let chosen = Double(modes.firstIndex(of: camera.mode) ?? 0)
-        let middle = Double(modes.count - 1) / 2
-        let width = 86.0
+        let widths = modes.map { CameraMode.labelWidth($0.title, scale: textScale) }
+        let chosen = modes.firstIndex(of: camera.mode) ?? 0
+        // Each label as wide as its text; the chosen one's centre in the middle of the screen.
+        let before = widths.prefix(chosen).reduce(0, +)
+        let total = widths.reduce(0, +)
+        let shift = total / 2 - (before + widths[min(chosen, widths.count - 1)] / 2)
         return Color.clear
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .overlay {
                 HStack(spacing: 0) {
-                    ForEach(modes, id: \.self) { mode in
+                    ForEach(Array(modes.enumerated()), id: \.element) { index, mode in
                         Button {
                             camera.switchTo(mode)
                         } label: {
                             Text(mode.title.uppercased())
                                 .font(.footnote.weight(.semibold))
                                 .lineLimit(1)
-                                .minimumScaleFactor(0.72)
+                                .fixedSize()
                                 .foregroundStyle(mode == camera.mode ? .yellow : .white)
-                                .frame(width: width, height: 44)
+                                .frame(width: widths[index], height: 44)
                                 .contentShape(.rect)
                         }
                         .disabled(camera.recording)
@@ -989,13 +818,23 @@ struct CameraScreen<Gallery: View>: View {
                         .accessibilityIdentifier("mode-\(mode.rawValue)")
                     }
                 }
-                .offset(x: (middle - chosen) * width)
-                .animation(.snappy(duration: 0.3), value: camera.mode)
+                .fixedSize()
+                .offset(x: shift)
+                .animation(.snappy(duration: 0.25), value: camera.mode)
             }
             .clipped()
+            .mask(
+                LinearGradient(
+                    stops: [
+                        .init(color: .clear, location: 0), .init(color: .black, location: 0.12),
+                        .init(color: .black, location: 0.88), .init(color: .clear, location: 1),
+                    ], startPoint: .leading, endPoint: .trailing)
+            )
             .opacity(camera.recording || camera.burstCount > 0 ? 0 : 1)
             .accessibilityHidden(camera.recording || camera.burstCount > 0)
     }
+
+    @ScaledMetric(relativeTo: .footnote) private var textScale = 1.0
 
     private var shutterRow: some View {
         HStack {
@@ -1089,16 +928,18 @@ struct CameraScreen<Gallery: View>: View {
                     Text("\(camera.burstCount)")
                         .font(.title2.bold().monospacedDigit())
                         .foregroundStyle(.black)
-                } else if camera.recording || camera.mode.records || (camera.mode == .dual && camera.dualKind == .video)
-                {
-                    RoundedRectangle(cornerRadius: camera.recording ? 6 : 30)
-                        .fill(.red)
-                        .frame(width: camera.recording ? 30 : 62, height: camera.recording ? 30 : 62)
                 } else {
-                    Circle().fill(.white).frame(width: 64, height: 64)
+                    // One shape that changes: white circle (photo), red circle (video), red square
+                    // (recording), so switching modes or starting a video morphs instead of jumping.
+                    let video =
+                        camera.recording || camera.mode.records || (camera.mode == .dual && camera.dualKind == .video)
+                    RoundedRectangle(cornerRadius: camera.recording ? 6 : 32)
+                        .fill(video ? Color.red : Color.white)
+                        .frame(width: camera.recording ? 30 : 62, height: camera.recording ? 30 : 62)
                 }
             }
-            .animation(.snappy(duration: 0.25), value: camera.recording)
+            .animation(.snappy(duration: 0.22), value: camera.recording)
+            .animation(.easeInOut(duration: 0.2), value: camera.mode.records)
         }
         .disabled(!state.ready)
         .simultaneousGesture(shutterGesture)
@@ -1202,6 +1043,11 @@ struct CameraScreen<Gallery: View>: View {
     private func handleHardwareSecondary(_ phase: AVCaptureEventPhase) {
         if phase == .ended { camera.shutter() }
     }
+}
+
+/// Whether the UI tests run (then the screen tells them a few inner values).
+enum CameraTesting {
+    static let exposesValues = ProcessInfo.processInfo.arguments.contains { $0.hasPrefix("-ui-testing") }
 }
 
 extension CameraScreen where Gallery == EmptyView {
@@ -1455,7 +1301,7 @@ struct SwitchBlur: UIViewRepresentable {
         let blurred = view.effect != nil
         guard blurred != on else { return }
         let effect: UIVisualEffect? = on ? UIBlurEffect(style: .systemUltraThinMaterialDark) : nil
-        UIView.animate(withDuration: on ? 0.12 : 0.3, delay: 0, options: [.beginFromCurrentState]) {
+        UIView.animate(withDuration: on ? 0.08 : 0.18, delay: 0, options: [.beginFromCurrentState]) {
             view.effect = effect
         }
     }

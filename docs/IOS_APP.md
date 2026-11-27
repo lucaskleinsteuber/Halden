@@ -36,15 +36,20 @@ the design comes after that. What works today is described below.
   Photos and videos come out upright however the phone is held. The camera is set up when the
   app starts, all on a queue of its own, so its picture is there at once and the screen never
   waits for it.
-- **Camera screen**: laid out like Apple's camera, with the tab bar (Camera, Photos, Settings)
-  visible at the bottom and clear space between it and the shutter row. On top up to four
-  customizable controls (default: flash/light, manual controls, self-timer 3/5/10 s, Live Photo)
-  plus the chevron that opens the expandable iOS 26 control drawer above the modes (also opened
-  by swiping up over the mode strip); for videos the format sits in the middle. The drawer holds
-  flash, Live Photo, EV (−2…+2), aspect ratio (4:3, 16:9, 1:1), timer (off/3/5/10 s), photo
-  resolution (12/24/48 MP) and Bayer RAW (DNG, switching to the physical 1× wide sensor at 12 MP
-  on non-Pro iPhones such as iPhone 15) in photo mode, and 1080p/4K, 24/25 (PAL)/30/60
-  fps, HDR and auto low-light FPS in video mode. Non-4:3 aspect ratios are stored non-destructively
+- **Camera screen**: laid out like Apple's camera. Instead of the system tab bar (83 points) the
+  camera has its own slim one (`CameraTabBar`: three symbols, 44 points, fades out while
+  recording), which leaves room between the modes, the shutter and the bar. On top up to four
+  customizable controls (default: flash/light, manual controls, self-timer 3/5/10 s, Live Photo),
+  with the chevron for the control drawer always in the middle; for videos the format sits just
+  below the top bar. The drawer (also opened by swiping up over the modes) takes the modes' place
+  while open, and the details of a control (a slider, the styles, the filters) lie over the
+  picture above the lens buttons, so nothing jumps. It offers only what this iPhone can do and
+  nothing that is in the top bar already: Night, style, filter, EV (−2…+2), aspect ratio
+  (4:3, 16:9, 1:1), timer, photo resolution (only the sizes the camera really has) and Bayer RAW
+  (12 MP on the 1× lens, without Live Photo) in photo mode, and Action (where a format supports
+  it), 1080p/4K, 24/25 (PAL)/30/60 fps, HDR and auto low-light FPS in video mode. Hints (night,
+  depth, AE/AF lock, a smudged lens) share one line under the top bar and appear after half a
+  second, so a value near a threshold doesn't make them blink. Non-4:3 aspect ratios are stored non-destructively
   as `EditRecipe.crop` so Halden keeps the full original while Apple Photos receives the cropped
   copy. Settings › Camera mirrors Apple's layout (Preserve Settings, Top Bar Controls, Formats,
   Record Video, Shooting including faster capture prioritization, audio playback while filming,
@@ -76,11 +81,19 @@ the design comes after that. What works today is described below.
   (`isGeometricDistortionCorrectionEnabled`), hardware lens-smudge detection hints
   (`cameraLensSmudgeDetectionStatus`, dismissible banner), and optional camera-lens
   (`primaryConstituentDeviceSwitchingBehavior`) and white-balance locks while recording video.
-- **Newer & Pro iPhone features** (`ProDevices`, `AudioMixSheet`, capability-gated via
-  `DeviceCapabilities`):
-  - Every Pro feature stays hidden on iPhones that do not support it (such as iPhone 15);
-    `StandInCamera` advertises full capabilities in UI tests (and hides them with
-    `-ui-testing-basic-device`).
+- **Newer & Pro iPhone features** (`ProDevices`, `DeviceProfile`, `AudioMixSheet`,
+  capability-gated via `DeviceCapabilities`):
+  - Halden knows the iPhone model (`DeviceProfile`, from `utsname.machine`: name, chip, lenses,
+    48 MP, ProRAW, ProRes, Log, macro, Action, Cinematic, Spatial, Camera Control, USB-C
+    recording) for every iPhone from the 12 on. AVFoundation's runtime checks have the last
+    word; the profile can only rule out what they overstate (`DeviceProfile.effective`).
+    Settings › Camera › This iPhone names the model and lists what its camera can do; the
+    capabilities found when the back camera last ran are kept (`CapabilityCache`), so Settings is
+    right before the camera opens and while the front camera runs.
+  - Everything an iPhone can't do is hidden everywhere (camera, drawer, Settings), including
+    Cinematic, Portrait (depth), Action mode, wind noise removal and 24 MP where they're missing.
+    `StandInCamera` pretends to be a given iPhone with `-ui-testing-device iPhone15,4`, advertises
+    full capabilities otherwise (and hides them with `-ui-testing-basic-device`).
   - **Apple ProRAW** up to 48 MP (`isAppleProRAWEnabled`), **Apple ProRes** & **Apple Log**
     (`AVVideoCodecType.proRes422`, `AVCaptureColorSpace.appleLog`), **External USB-C SSD**
     direct capture (`AVExternalStorageDeviceDiscoverySession` with `USB-C` badge), **Spatial
@@ -160,6 +173,9 @@ the design comes after that. What works today is described below.
     1–3 s handheld, or 10–30 s when CoreMotion (`TripodDetector`) detects the iPhone is mounted on
     a tripod. The drawer slider lets you choose Off, Auto, or a manual duration (up to 10 s
     handheld / 30 s on tripod), with Preserve Settings support (`preserveNightMode`).
+  - "Auto" starts only in really dim light (ISO ≥ 1000 at 1/17 s or slower, or ISO ≥ 2500), not in
+    an ordinary room in the evening. All frames are asked for at once, so the camera takes them
+    back to back; once they are in, the camera is free for the next photo while they are combined.
   - Captures a burst of short exposures while showing a circular progress ring around the shutter
     and a live "Hold still" twin-crosshair target, aligns the frames with Vision
     (`VNHomographicImageRegistrationRequest`, translational fallback), merges them on Metal GPU
@@ -180,18 +196,27 @@ the design comes after that. What works today is described below.
     can be turned into a Portrait afterwards.
 - **Photographic Styles, Filters & Metal viewfinder** (`PhotoLooks`, `LookRenderer`,
   `MetalPreviewView`, `StylePadView`):
-  - **Custom Metal viewfinder**: when a non-default Photographic Style or Filter (or later
-    Portrait or live scopes) is active, `AVCaptureVideoDataOutput` frames pass through Core Image
-    and render on demand into an `MTKView` (`MetalPreviewView`). When inactive, the video output
-    is detached and the system `AVCaptureVideoPreviewLayer` runs with zero GPU overhead.
+  - **Custom Metal viewfinder**: when a non-default Photographic Style or Filter, Portrait or the
+    live scopes are active, preview-sized `AVCaptureVideoDataOutput` frames pass through Core
+    Image and are drawn into a `CAMetalLayer` (`MetalPreviewView`) on the frames' own queue, never
+    on the main thread; the system `AVCaptureVideoPreviewLayer` stops drawing meanwhile. In Photo
+    and Portrait the frame output stays attached (it also feeds Live Text and the filter buttons),
+    so a filter or style never rebuilds the capture session: it shows in the next frame.
+  - **Only what a change needs** (`CameraChangeScope`): a look goes into the next frame, lens
+    correction, QR scanning or the Cinematic aperture are set on the device, and only formats,
+    outputs and resolution reconfigure the session, with every property set only when it changes.
+    The short blur of a mode change ends with the first picture in the new mode (no fixed wait).
   - **Photographic Styles**: 15 presets (Standard, Amber, Gold, Rose Gold, Neutral, Cool Rose,
     Vibrant, Natural, Luminous, Dramatic, Quiet, Cozy, Ethereal, Muted B&W, Stark B&W) with a 2D
     Tone/Color control pad and Palette intensity slider, implemented non-destructively in Core
     Image and stored in `EditRecipe` (version 2) so they can be changed later in `EditView` ›
     Looks.
-  - **Filters**: Vivid, Vivid Warm, Vivid Cool, Dramatic, Dramatic Warm, Dramatic Cool, Mono,
-    Silvertone and Noir, stored in `EditRecipe` (version 2) and synced across devices with full
-    edit history.
+  - **Filters**: Vivid, Warm, Cool, Dramatic, Film, Faded, Mono, Noir and Sepia, each strong
+    enough to tell apart at a glance (a unit test renders a test picture through every filter and
+    style and checks that any two differ), shown as small live pictures in the camera and the
+    editor, with a strength slider (`filterIntensity`, 0…1). Stored in `EditRecipe` (version 2)
+    and synced across devices with full edit history; the filters of earlier versions still show
+    on photos that have them.
 - **Gestures, shutter & bursts** (`ShutterGestures`, `Bursts`, `BurstPickerView`,
   `HaldenShortcuts`):
   - **Focus & exposure sun**: tapping the picture focuses and shows a vertical sun slider beside
@@ -419,15 +444,20 @@ The layout of every screen is checked by `UITests/LayoutTests.swift`: nothing cu
 edge of the screen, no controls on top of each other, our buttons at least 44×44 points, and no
 button or text that can't be seen (too little contrast on the screenshot, such as white on
 white). It runs with the other UI tests, and on its own, without a server, on the smallest and
-the biggest iPhone, each also with big text, keeping a screenshot of every screen in
+the biggest iPhone and as an iPhone 15 (`HALDEN_DEVICE_PROFILE=iPhone15,4` on an iPhone 16
+simulator, same size), each also with big text, keeping a screenshot of every screen in
 `Local/screens/<date>/`:
 
 ```sh
 ios/layout-tests.sh
 ```
 
+The camera also measures itself on the iPhone (opening, mode change, turning around, a filter,
+shutter to thumbnail, shutter to the next photo) and shows the medians against the targets in
+Settings › Camera Timings (`CameraTimingLog`).
+
 Measurements (launch, camera start, mode-switch latency, zoom glide, Metal viewfinder toggle &
-memory, scrolling 50,000 photos, and the 50,000-photo map) run only on purpose:
+memory, filter switching, scrolling 50,000 photos, and the 50,000-photo map) run only on purpose:
 
 ```sh
 TEST_RUNNER_HALDEN_MEASURE=1 ios/ui-tests.sh -only-testing:HaldenUITests/PerformanceTests

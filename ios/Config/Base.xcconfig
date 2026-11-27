@@ -1,7 +1,7 @@
 // Settings of every build. The signing team is personal and lives in Local.xcconfig (not in
 // git): DEVELOPMENT_TEAM = <your team id>. Without it, builds for the simulator still work.
-MARKETING_VERSION = 0.2.0
-CURRENT_PROJECT_VERSION = 3
+MARKETING_VERSION = 0.3.0
+CURRENT_PROJECT_VERSION = 4
 IPHONEOS_DEPLOYMENT_TARGET = 26.0
 
 #include? "Local.xcconfig"

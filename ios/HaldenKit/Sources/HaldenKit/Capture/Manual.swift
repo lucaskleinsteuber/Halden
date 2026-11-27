@@ -53,16 +53,33 @@ public struct ManualLimits: Sendable, Equatable {
     public var exposureBias: ClosedRange<Double>
     public var canFocus: Bool
     public var canSetWhiteBalance: Bool
+    /// The colour temperatures this camera can really reach (beyond them its gains run out and
+    /// the slider would do nothing).
+    public var kelvin: ClosedRange<Double>
 
     public init(
         shutter: ClosedRange<Double>, iso: ClosedRange<Double>, exposureBias: ClosedRange<Double> = -8...8,
-        canFocus: Bool = true, canSetWhiteBalance: Bool = true
+        canFocus: Bool = true, canSetWhiteBalance: Bool = true,
+        kelvin: ClosedRange<Double> = ManualLimits.whiteBalanceKelvin
     ) {
         self.shutter = shutter
         self.iso = iso
         self.exposureBias = exposureBias
         self.canFocus = canFocus
         self.canSetWhiteBalance = canSetWhiteBalance
+        let lower = max(kelvin.lowerBound, Self.whiteBalanceKelvin.lowerBound)
+        let upper = min(kelvin.upperBound, Self.whiteBalanceKelvin.upperBound)
+        self.kelvin = lower < upper ? lower...upper : Self.whiteBalanceKelvin
+    }
+
+    /// The range of temperatures whose gains `gainsFit` accepts, found in 100 K steps.
+    public static func reachableKelvin(_ gainsFit: (Double) -> Bool) -> ClosedRange<Double> {
+        let steps = stride(from: whiteBalanceKelvin.lowerBound, through: whiteBalanceKelvin.upperBound, by: 100)
+        let fitting = steps.filter(gainsFit)
+        guard let lowest = fitting.first, let highest = fitting.last, lowest < highest else {
+            return whiteBalanceKelvin
+        }
+        return lowest...highest
     }
 
     public static let whiteBalanceKelvin: ClosedRange<Double> = 2500...10000
@@ -95,7 +112,7 @@ public struct ManualLimits: Sendable, Equatable {
             canSetWhiteBalance
             ? settings.whiteBalance.map {
                 ManualSettings.WhiteBalance(
-                    kelvin: min(max($0.kelvin, Self.whiteBalanceKelvin.lowerBound), Self.whiteBalanceKelvin.upperBound),
+                    kelvin: min(max($0.kelvin, kelvin.lowerBound), kelvin.upperBound),
                     tint: min(max($0.tint, Self.whiteBalanceTint.lowerBound), Self.whiteBalanceTint.upperBound))
             } : nil
         fitted.exposureBias = min(max(settings.exposureBias, exposureBias.lowerBound), exposureBias.upperBound)

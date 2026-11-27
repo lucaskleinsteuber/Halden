@@ -27,6 +27,7 @@ public struct EditRecipe: Codable, Sendable, Hashable {
         var tint: Double = 0
         var style: PhotographicStyle? = nil
         var filter: PhotoFilter? = nil
+        var filterIntensity: Double? = nil
         var portraitAperture: Double? = nil
         var portraitLighting: PortraitLighting? = nil
         var cinematicAperture: Double? = nil
@@ -43,7 +44,8 @@ public struct EditRecipe: Codable, Sendable, Hashable {
 
         enum CodingKeys: String, CodingKey {
             case version, exposure, brightness, contrast, highlights, shadows, saturation, vibrance, warmth, tint
-            case style, filter, portraitAperture, portraitLighting, cinematicAperture, cinematicFocusPoints
+            case style, filter, filterIntensity, portraitAperture, portraitLighting, cinematicAperture,
+                cinematicFocusPoints
             case liveEffect, liveKeyFrameMs, audioMix, audioMixIntensity
             case quarterTurns, straighten, crop, trimStartMs, trimEndMs
         }
@@ -69,6 +71,7 @@ public struct EditRecipe: Codable, Sendable, Hashable {
             read(.tint, &tint)
             style = try? container.decodeIfPresent(PhotographicStyle.self, forKey: .style)
             filter = try? container.decodeIfPresent(PhotoFilter.self, forKey: .filter)
+            filterIntensity = try? container.decodeIfPresent(Double.self, forKey: .filterIntensity)
             portraitAperture = try? container.decodeIfPresent(Double.self, forKey: .portraitAperture)
             portraitLighting = try? container.decodeIfPresent(PortraitLighting.self, forKey: .portraitLighting)
             cinematicAperture = try? container.decodeIfPresent(Double.self, forKey: .cinematicAperture)
@@ -150,6 +153,11 @@ public struct EditRecipe: Codable, Sendable, Hashable {
     public var filter: PhotoFilter? {
         get { box.values.filter }
         set { change { $0.filter = newValue } }
+    }
+    /// How strongly `filter` is applied (0…1); `nil` is full strength (and the value of older edits).
+    public var filterIntensity: Double? {
+        get { box.values.filterIntensity }
+        set { change { $0.filterIntensity = newValue } }
     }
     /// Portrait depth-of-field f-stop (1.4…16), when captured as or converted to Portrait.
     public var portraitAperture: Double? {
@@ -301,6 +309,11 @@ public struct EditRecipe: Codable, Sendable, Hashable {
         } else {
             fitted.style = nil
         }
+        if fitted.filter != nil, let intensity = filterIntensity.map(PhotoFilter.clampedIntensity), intensity < 0.995 {
+            fitted.filterIntensity = intensity
+        } else {
+            fitted.filterIntensity = nil
+        }
         fitted.portraitAperture = portraitAperture.map(PortraitMath.clampedAperture)
         fitted.portraitLighting = portraitLighting == .natural ? nil : portraitLighting
         fitted.cinematicAperture = cinematicAperture.map { CinematicRules.clampedAperture($0) }
@@ -374,7 +387,8 @@ public enum EditRenderer {
             output = filter.outputImage ?? output
         }
         if let photoFilter = recipe.filter {
-            output = LookRenderer.apply(style: nil, filter: photoFilter, to: output)
+            output = LookRenderer.apply(
+                style: nil, filter: photoFilter, filterIntensity: recipe.filterIntensity ?? 1, to: output)
         }
         if recipe.quarterTurns != 0 {
             let orientation: CGImagePropertyOrientation = [.up, .right, .down, .left][recipe.quarterTurns]

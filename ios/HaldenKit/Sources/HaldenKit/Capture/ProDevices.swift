@@ -1,8 +1,8 @@
 import Foundation
 
 /// Hardware capabilities found only on newer or Pro iPhones. Halden shows Pro controls only on
-/// devices that support them (`StandInCamera` advertises `.all` in tests unless `-ui-testing-basic-device`
-/// is passed).
+/// devices that support them (`StandInCamera` advertises `.all` in tests unless a device profile
+/// (`-ui-testing-device iPhone15,4`) or `-ui-testing-basic-device` is passed).
 public struct DeviceCapabilities: Codable, Sendable, Equatable {
     public var canProRAW = false
     public var canProRes = false
@@ -13,11 +13,23 @@ public struct DeviceCapabilities: Codable, Sendable, Equatable {
     public var canCameraControl = false
     public var canSpatialAudio = false
     public var canAudioMix = false
+    /// Action mode stabilization (`cinematicExtendedEnhanced`) in some video format.
+    public var canActionMode = false
+    /// Cinematic video (`isCinematicVideoCaptureSupported`).
+    public var canCinematic = false
+    /// Depth data for Portrait and automatic depth.
+    public var canDepth = false
+    /// Bayer RAW (DNG) on the main wide camera.
+    public var canBayerRAW = false
+    /// Wind noise removal on the microphone.
+    public var canWindNoiseRemoval = false
 
     public init(
         canProRAW: Bool = false, canProRes: Bool = false, canAppleLog: Bool = false,
         canExternalStorage: Bool = false, canSpatialVideo: Bool = false, canMacroControl: Bool = false,
-        canCameraControl: Bool = false, canSpatialAudio: Bool = false, canAudioMix: Bool = false
+        canCameraControl: Bool = false, canSpatialAudio: Bool = false, canAudioMix: Bool = false,
+        canActionMode: Bool = false, canCinematic: Bool = false, canDepth: Bool = false,
+        canBayerRAW: Bool = false, canWindNoiseRemoval: Bool = false
     ) {
         self.canProRAW = canProRAW
         self.canProRes = canProRes
@@ -28,14 +40,39 @@ public struct DeviceCapabilities: Codable, Sendable, Equatable {
         self.canCameraControl = canCameraControl
         self.canSpatialAudio = canSpatialAudio
         self.canAudioMix = canAudioMix
+        self.canActionMode = canActionMode
+        self.canCinematic = canCinematic
+        self.canDepth = canDepth
+        self.canBayerRAW = canBayerRAW
+        self.canWindNoiseRemoval = canWindNoiseRemoval
     }
 
-    public static let basic = DeviceCapabilities()
+    enum CodingKeys: String, CodingKey {
+        case canProRAW, canProRes, canAppleLog, canExternalStorage, canSpatialVideo, canMacroControl
+        case canCameraControl, canSpatialAudio, canAudioMix, canActionMode, canCinematic, canDepth, canBayerRAW
+        case canWindNoiseRemoval
+    }
+
+    /// Missing values (saved by an older version) are `false`.
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        func read(_ key: CodingKeys) -> Bool { (try? container.decodeIfPresent(Bool.self, forKey: key)) ?? false }
+        self.init(
+            canProRAW: read(.canProRAW), canProRes: read(.canProRes), canAppleLog: read(.canAppleLog),
+            canExternalStorage: read(.canExternalStorage), canSpatialVideo: read(.canSpatialVideo),
+            canMacroControl: read(.canMacroControl), canCameraControl: read(.canCameraControl),
+            canSpatialAudio: read(.canSpatialAudio), canAudioMix: read(.canAudioMix),
+            canActionMode: read(.canActionMode), canCinematic: read(.canCinematic), canDepth: read(.canDepth),
+            canBayerRAW: read(.canBayerRAW), canWindNoiseRemoval: read(.canWindNoiseRemoval))
+    }
+
+    public static let basic = DeviceCapabilities(canDepth: true, canBayerRAW: true)
 
     public static let all = DeviceCapabilities(
         canProRAW: true, canProRes: true, canAppleLog: true, canExternalStorage: true,
         canSpatialVideo: true, canMacroControl: true, canCameraControl: true,
-        canSpatialAudio: true, canAudioMix: true)
+        canSpatialAudio: true, canAudioMix: true, canActionMode: true, canCinematic: true, canDepth: true,
+        canBayerRAW: true, canWindNoiseRemoval: true)
 
     public var hasProVideo: Bool { canProRes || canAppleLog }
 }

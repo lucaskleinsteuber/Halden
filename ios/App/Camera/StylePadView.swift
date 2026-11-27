@@ -51,27 +51,33 @@ struct StylePadView: View {
                             .font(.caption2.monospacedDigit())
                             .foregroundStyle(.white.opacity(0.85))
                         Spacer()
-                        Text("Color \(signed(current.color))")
-                            .font(.caption2.monospacedDigit())
-                            .foregroundStyle(.white.opacity(0.85))
+                        // Black and white has no colour to turn up or down.
+                        if !current.preset.isMonochrome {
+                            Text("Color \(signed(current.color))")
+                                .font(.caption2.monospacedDigit())
+                                .foregroundStyle(.white.opacity(0.85))
+                        }
                     }
-                    HStack(spacing: 6) {
-                        Text("Palette")
-                            .font(.caption2.bold())
-                            .foregroundStyle(.white.opacity(0.85))
-                        Slider(
-                            value: Binding(
-                                get: { current.palette },
-                                set: { value in
-                                    var next = current
-                                    next.palette = value
-                                    style = next.isDefault ? nil : next
-                                }),
-                            in: 0...1
-                        )
-                        .tint(.yellow)
-                        .accessibilityLabel("Style palette")
-                        .accessibilityIdentifier("style-palette-slider")
+                    // Standard has no character of its own for the palette to scale.
+                    if current.preset != .standard {
+                        HStack(spacing: 6) {
+                            Text("Palette")
+                                .font(.caption2.bold())
+                                .foregroundStyle(.white.opacity(0.85))
+                            Slider(
+                                value: Binding(
+                                    get: { current.palette },
+                                    set: { value in
+                                        var next = current
+                                        next.palette = value
+                                        style = next.isDefault ? nil : next
+                                    }),
+                                in: 0...1
+                            )
+                            .tint(.yellow)
+                            .accessibilityLabel("Style palette")
+                            .accessibilityIdentifier("style-palette-slider")
+                        }
                     }
                     Button {
                         style = nil
@@ -128,7 +134,7 @@ struct StylePadView: View {
                         let color = min(max((value.location.x / w) * 2 - 1, -1), 1)
                         let tone = min(max(1 - (value.location.y / h) * 2, -1), 1)
                         var next = current
-                        next.color = (color * 20).rounded() / 20
+                        next.color = current.preset.isMonochrome ? 0 : (color * 20).rounded() / 20
                         next.tone = (tone * 20).rounded() / 20
                         style = next.isDefault ? nil : next
                     }
@@ -147,35 +153,116 @@ struct StylePadView: View {
     }
 }
 
-/// Horizontal filter strip (Original + all `PhotoFilter` cases), shared by camera drawer and editor.
+/// The filters as small pictures, each showing the live picture (or the photo being edited) with
+/// that filter, Original first; shared by the camera and the editor. Without a picture, plain
+/// buttons with the names.
 struct FilterStripView: View {
     @Binding var filter: PhotoFilter?
+    /// A small picture to show each filter on (the camera's live picture, a few times a second).
+    var sample: CGImage? = nil
+    /// The style applied underneath, so the tiles look like the result.
+    var style: PhotographicStyle? = nil
+    /// Small pictures (with a placeholder until the first sample arrives) instead of names; the
+    /// strip keeps one height either way, so nothing moves when the pictures come.
+    var pictures = false
+    @State private var tiles = FilterTiles()
 
     var body: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 8) {
-                chip("Original", selected: filter == nil, id: "filter-original") { filter = nil }
-                ForEach(PhotoFilter.allCases) { item in
-                    chip(item.title, selected: filter == item, id: "filter-\(item.rawValue)") { filter = item }
+        VStack(spacing: 0) {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    tile(nil, title: "Original", id: "filter-original")
+                    ForEach(PhotoFilter.allCases) { item in
+                        tile(item, title: item.title, id: "filter-\(item.rawValue)")
+                    }
                 }
+                .padding(.horizontal, 12)
             }
-            .padding(.horizontal, 12)
         }
-        .frame(height: 44)
+        .frame(height: pictures ? 84 : 44)
+        .task(id: TileKey(sample: sample.map(ObjectIdentifier.init), style: style)) {
+            await tiles.render(sample: sample, style: style)
+        }
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("filter-strip")
     }
 
-    private func chip(_ title: String, selected: Bool, id: String, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Text(title)
-                .font(.caption.bold())
-                .lineLimit(1)
-                .foregroundStyle(selected ? .black : .white)
-                .padding(.horizontal, 12)
-                .frame(minWidth: 44, minHeight: 44)
-                .background(selected ? Color.yellow : Color.black.opacity(0.65), in: .capsule)
+    private struct TileKey: Equatable {
+        var sample: ObjectIdentifier?
+        var style: PhotographicStyle?
+    }
+
+    @ViewBuilder private func tile(_ item: PhotoFilter?, title: String, id: String) -> some View {
+        let selected = filter == item
+        Button {
+            filter = item
+        } label: {
+            if pictures {
+                VStack(spacing: 3) {
+                    ZStack {
+                        Color.white.opacity(0.1)
+                        if let image = tiles.images[item?.rawValue ?? "original"] {
+                            Image(decorative: image, scale: 1).resizable().aspectRatio(contentMode: .fill)
+                                .frame(width: 56, height: 56)
+                                .allowsHitTesting(false)
+                        }
+                    }
+                    .frame(width: 56, height: 56)
+                    .clipShape(.rect(cornerRadius: 8))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 8).strokeBorder(selected ? Color.yellow : .clear, lineWidth: 2))
+                    Text(title)
+                        .font(.caption2.weight(selected ? .bold : .regular))
+                        .lineLimit(1)
+                        .fixedSize()
+                        .foregroundStyle(selected ? .yellow : .white)
+                }
+                .frame(minWidth: 56)
+                .contentShape(.rect)
+                .accessibilityElement(children: .ignore)
+            } else {
+                Text(title)
+                    .font(.caption.bold())
+                    .lineLimit(1)
+                    .fixedSize()
+                    .foregroundStyle(selected ? .black : .white)
+                    .padding(.horizontal, 12)
+                    .frame(minWidth: 44, minHeight: 44)
+                    .background(selected ? Color.yellow : Color.black.opacity(0.65), in: .capsule)
+            }
         }
+        .accessibilityLabel(title)
+        .accessibilityAddTraits(selected ? .isSelected : [])
         .accessibilityIdentifier(id)
+    }
+}
+
+/// Renders the filter tiles off the main thread whenever the sample changes.
+@MainActor
+@Observable
+final class FilterTiles {
+    private(set) var images: [String: CGImage] = [:]
+
+    func render(sample: CGImage?, style: PhotographicStyle?) async {
+        guard let sample else {
+            images = [:]
+            return
+        }
+        let rendered = await Task.detached(priority: .userInitiated) { () -> [String: CGImage] in
+            let base = CIImage(cgImage: sample)
+            let side = min(base.extent.width, base.extent.height)
+            let square = base.cropped(
+                to: CGRect(
+                    x: base.extent.midX - side / 2, y: base.extent.midY - side / 2, width: side, height: side))
+            var result: [String: CGImage] = [:]
+            for item in [nil] + PhotoFilter.allCases.map(Optional.some) {
+                let looked = LookRenderer.apply(style: style, filter: item, to: square).cropped(to: square.extent)
+                if let image = ImagePipeline.editContext.createCGImage(looked, from: square.extent) {
+                    result[item?.rawValue ?? "original"] = image
+                }
+            }
+            return result
+        }.value
+        if !Task.isCancelled { images = rendered }
     }
 }

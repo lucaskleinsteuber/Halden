@@ -55,11 +55,15 @@ final class AppModel {
     private(set) var cameraRequests = 0
     /// Goes up when the library should come to the front (from the camera, which has no tab bar).
     private(set) var photosRequests = 0
+    /// Goes up when Settings should come to the front (from the camera's own small tab bar).
+    private(set) var settingsRequests = 0
 
     let database: HaldenDatabase
     let files: FileLocations
     let tokens: any TokenStore
     let settingsStore: any SettingsStore
+    @ObservationIgnored private var saveTask: Task<Void, Never>?
+    @ObservationIgnored private var resignObserver: NSObjectProtocol?
     let actions: Actions
     let pipeline: ImagePipeline
     /// Previews and originals for the full-screen view and sharing.
@@ -125,6 +129,11 @@ final class AppModel {
         camera.keepManual = { [weak self] manual in self?.update { $0.keptManual = manual } }
         camera.updateSettings = { [weak self] change in self?.update(change) }
         camera.prepare()
+        resignObserver = NotificationCenter.default.addObserver(
+            forName: UIApplication.willResignActiveNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.saveSettingsNow() }
+        }
         networkWatcher.changed = { [weak self] situation in
             self?.network = situation
             // Back online, or onto Wi-Fi: go on at once instead of at the next round.
@@ -167,7 +176,8 @@ final class AppModel {
     func update(_ change: (inout AppSettings) -> Void) {
         let before = settings
         change(&settings)
-        settingsStore.save(settings)
+        guard settings != before else { return }
+        scheduleSave()
         // Upload rules or copies changed: apply them now.
         if before.uploadOverCellular != settings.uploadOverCellular
             || before.videosOnlyOnWiFi != settings.videosOnlyOnWiFi
@@ -176,6 +186,23 @@ final class AppModel {
         {
             refresh()
         }
+    }
+
+    /// Writes the settings a moment after the last change: dragging a slider changes them many
+    /// times a second, and each write encodes them all. Leaving the app writes them at once.
+    private func scheduleSave() {
+        saveTask?.cancel()
+        saveTask = Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(300))
+            guard let self, !Task.isCancelled else { return }
+            self.saveSettingsNow()
+        }
+    }
+
+    func saveSettingsNow() {
+        saveTask?.cancel()
+        saveTask = nil
+        settingsStore.save(settings)
     }
 
     /// The app's real database, files and Keychain; for UI tests (`-ui-testing`) an empty
@@ -930,6 +957,10 @@ final class AppModel {
 
     func showPhotos() {
         photosRequests += 1
+    }
+
+    func showSettings() {
+        settingsRequests += 1
     }
 
     private func backgroundUploadEnded() {

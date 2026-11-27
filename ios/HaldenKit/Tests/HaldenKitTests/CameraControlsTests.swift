@@ -42,6 +42,13 @@ import Testing
 
         let older = [(4032, 3024)]
         #expect(PhotoResolution.available(for: older) == [.mp12])
+
+        // 12 and 48 MP but nothing near 24 MP: 24 MP isn't offered (it would quietly be 12 MP).
+        let noTwentyFour = [(4032, 3024), (8064, 6048)]
+        #expect(PhotoResolution.available(for: noTwentyFour) == [.mp12, .mp48])
+        #expect(PhotoResolution.fitted(.mp24, in: [.mp12, .mp48]) == .mp12)
+        #expect(PhotoResolution.fitted(.mp48, in: [.mp12, .mp24]) == .mp24)
+        #expect(PhotoResolution.fitted(.mp24, in: [.mp12, .mp24, .mp48]) == .mp24)
         #expect(PhotoResolution.bestDimensionIndex(wanted: .mp48, in: older) == 0)
         #expect(PhotoResolution.bestDimensionIndex(wanted: .mp12, in: []) == nil)
     }

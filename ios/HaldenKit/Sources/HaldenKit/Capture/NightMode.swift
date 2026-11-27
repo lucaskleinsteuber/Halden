@@ -47,10 +47,12 @@ public enum NightMath {
         onTripod ? tripodMaxSeconds : handheldMaxSeconds
     }
 
-    /// True when the scene is dark enough to suggest Night Mode.
+    /// True when the scene is dark enough to suggest Night Mode: really dim light, where the
+    /// camera already exposes long at a high ISO. An ordinary room in the evening (ISO 800–1250
+    /// at 1/30 s on an iPhone 15) is not; there a normal photo is better and much faster.
     public static func isDark(iso: Double, shutterSeconds: Double) -> Bool {
         guard iso > 0, shutterSeconds > 0 else { return false }
-        return (iso >= 800 && shutterSeconds >= 1.0 / 35.0) || iso >= 1600
+        return (iso >= 1000 && shutterSeconds >= 1.0 / 17.0) || iso >= 2500
     }
 
     /// Suggested Night Mode capture duration: 1–3 s handheld, 10–30 s on a tripod, or `nil` in bright light.

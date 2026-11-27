@@ -25,6 +25,8 @@ struct EditView: View {
     @State private var depthMap: CIImage?
     @State private var portraitMatte: CIImage?
     @State private var shown: CGImage?
+    /// The photo, small, for the filter buttons.
+    @State private var filterSample: CGImage?
     @State private var problem: String?
     @State private var aspect: Double?
 
@@ -164,7 +166,23 @@ struct EditView: View {
                         FilterStripView(
                             filter: Binding(
                                 get: { recipe.filter },
-                                set: { recipe.filter = $0 }))
+                                set: {
+                                    recipe.filter = $0
+                                    recipe.filterIntensity = nil
+                                }),
+                            sample: filterSample, style: recipe.style, pictures: true)
+                        if recipe.filter != nil {
+                            HStack {
+                                Text("Strength").font(.footnote)
+                                Slider(
+                                    value: Binding(
+                                        get: { recipe.filterIntensity ?? 1 },
+                                        set: { recipe.filterIntensity = PhotoFilter.clampedIntensity($0) }),
+                                    in: 0...1
+                                )
+                                .accessibilityIdentifier("edit-filter-intensity")
+                            }
+                        }
                         portraitEditControls
                     }
                 case .shape:
@@ -346,6 +364,13 @@ struct EditView: View {
             portraitMatte = aux.matte
         }
         if base == nil { problem = "The photo isn't here and the server can't be reached." }
+        if let base {
+            filterSample = await Task.detached(priority: .utility) { () -> CGImage? in
+                let scale = 160 / max(base.extent.width, base.extent.height, 1)
+                let small = base.transformed(by: CGAffineTransform(scaleX: scale, y: scale))
+                return EditContext.shared.createCGImage(small, from: small.extent.integral)
+            }.value
+        }
         await render()
     }
 

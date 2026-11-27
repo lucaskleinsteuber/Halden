@@ -101,16 +101,18 @@ final class MotionTracker {
                 if let anchor = self.holdAnchor {
                     let drift = TripodDetector.holdStillOffset(
                         gravityX: g.x, gravityY: g.y, anchorX: anchor.x, anchorY: anchor.y)
-                    self.holdStillOffset = CGPoint(x: drift.dx, y: drift.dy)
+                    let offset = CGPoint(x: drift.dx, y: drift.dy)
+                    if self.holdStillOffset != offset { self.holdStillOffset = offset }
                 }
                 if let dir = self.panoramaDirection {
                     let dt = self.lastMotionTime.map { min(max(now - $0, 0), 0.2) } ?? (1.0 / 30.0)
                     let pano = self.panoramaGuide.update(
                         rotationX: rot.x, rotationY: rot.y, rotationZ: rot.z, dt: dt, direction: dir)
-                    self.panoramaProgress = pano.progress
-                    self.panoramaOffAxis = pano.offAxisNormalized
-                    self.panoramaHint = pano.hint
-                    self.panoramaCompleted = pano.completed
+                    // Only what changed, so only what shows it is drawn again.
+                    if self.panoramaProgress != pano.progress { self.panoramaProgress = pano.progress }
+                    if self.panoramaOffAxis != pano.offAxisNormalized { self.panoramaOffAxis = pano.offAxisNormalized }
+                    if self.panoramaHint != pano.hint { self.panoramaHint = pano.hint }
+                    if self.panoramaCompleted != pano.completed { self.panoramaCompleted = pano.completed }
                 }
                 self.lastMotionTime = now
             }

@@ -1,8 +1,9 @@
 import HaldenKit
 import SwiftUI
 
-/// The app's camera tab, with the tab bar at the bottom to reach Photos and Settings. The last
-/// photo left of the shutter opens full screen with "All Photos" to the library.
+/// The app's camera tab. Instead of the system tab bar (which took 83 points of the screen) it
+/// has its own slim one, icons only, that fades away while recording. The last photo left of
+/// the shutter opens full screen with "All Photos" to the library.
 struct CameraView: View {
     @Environment(AppModel.self) private var app
     @State private var watchBridge = WatchCameraBridge()
@@ -13,7 +14,16 @@ struct CameraView: View {
         } gallery: {
             LastPhotoButton(camera: app.camera)
         }
-        .toolbarColorScheme(.dark, for: .tabBar)
+        // Room for the slim tab bar beyond the home indicator's own space.
+        .safeAreaInset(edge: .bottom, spacing: 0) { Color.clear.frame(height: CameraTabBar.extraHeight) }
+        .overlay(alignment: .bottom) {
+            CameraTabBar(capturing: capturing) {
+                app.showPhotos()
+            } settings: {
+                app.showSettings()
+            }
+        }
+        .toolbar(.hidden, for: .tabBar)
         .onAppear { watchBridge.attach(to: app.camera) }
         .onDisappear { watchBridge.detach() }
         .onChange(of: app.camera.lastShot) { _, image in
@@ -25,6 +35,65 @@ struct CameraView: View {
         .onChange(of: app.camera.dualSwapped) { _, _ in watchBridge.sendState() }
         .onChange(of: app.camera.backend.state.side) { _, _ in watchBridge.sendState() }
         .onChange(of: app.camera.backend.state.zoomRange) { _, _ in watchBridge.sendState() }
+    }
+}
+
+extension CameraView {
+    /// While something is being recorded, the tab bar steps aside.
+    private var capturing: Bool {
+        let camera = app.camera
+        return camera.recording || camera.countdown != nil || camera.isPanoramaCapturing || camera.burstCount > 0
+            || camera.isNightCapturing
+    }
+}
+
+/// The camera's own tab bar: three symbols, no labels, 44 points high just above the home
+/// indicator. The camera tab is the one shown.
+struct CameraTabBar: View {
+    /// Points the bar needs beyond the bottom safe area.
+    static let extraHeight: CGFloat = 18
+    let capturing: Bool
+    let photos: () -> Void
+    let settings: () -> Void
+
+    var body: some View {
+        ZStack {
+            // Gone while recording (not only invisible), so nothing can tap or read it.
+            if !capturing {
+                HStack(spacing: 0) {
+                    item("camera.fill", label: "Camera", selected: true, id: "camera-tab-camera") {}
+                    item(
+                        "photo.on.rectangle", label: "Photos", selected: false, id: "camera-tab-photos",
+                        action: photos)
+                    item("gear", label: "Settings", selected: false, id: "camera-tab-settings", action: settings)
+                }
+                .padding(.horizontal, 6)
+                .frame(height: 44)
+                .background(.white.opacity(0.1), in: .capsule)
+                .transition(.opacity)
+                .accessibilityElement(children: .contain)
+                .accessibilityIdentifier("camera-tab-bar")
+            }
+        }
+        .frame(height: 44)
+        .padding(.bottom, 6)
+        .animation(.easeOut(duration: 0.2), value: capturing)
+        .ignoresSafeArea(edges: .bottom)
+    }
+
+    private func item(
+        _ symbol: String, label: String, selected: Bool, id: String, action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            Image(systemName: symbol)
+                .font(.body.weight(.semibold))
+                .foregroundStyle(selected ? .yellow : .white.opacity(0.85))
+                .frame(width: 64, height: 44)
+                .contentShape(.rect)
+        }
+        .accessibilityLabel(label)
+        .accessibilityAddTraits(selected ? .isSelected : [])
+        .accessibilityIdentifier(id)
     }
 }
 
@@ -79,7 +148,8 @@ private struct LastPhotoButton: View {
                 if attempt > 0 { try? await Task.sleep(for: .seconds(2)) }
                 if Task.isCancelled { return }
                 if let image = await picture(of: newest) {
-                    withAnimation(.easeOut(duration: 0.2)) { picture = image }
+                    // The same photo as the one shown already: swapped without a second animation.
+                    picture = image
                     camera.forgetLastShot()
                     return
                 }

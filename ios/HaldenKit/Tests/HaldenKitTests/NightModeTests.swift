@@ -10,9 +10,13 @@ import Testing
         #expect(!NightMath.isDark(iso: 100, shutterSeconds: 1.0 / 250))
         #expect(NightMath.suggestedSeconds(iso: 100, shutterSeconds: 1.0 / 250, onTripod: false) == nil)
 
-        // Dim indoor scene handheld: 1–3 s.
-        #expect(NightMath.isDark(iso: 1000, shutterSeconds: 1.0 / 25))
-        let dimHandheld = try #require(NightMath.suggestedSeconds(iso: 1000, shutterSeconds: 1.0 / 25, onTripod: false))
+        // An ordinary room in the evening: a normal photo, not Night Mode.
+        #expect(!NightMath.isDark(iso: 1000, shutterSeconds: 1.0 / 25))
+        #expect(!NightMath.isDark(iso: 1250, shutterSeconds: 1.0 / 30))
+
+        // Really dim light handheld: 1–3 s.
+        #expect(NightMath.isDark(iso: 1250, shutterSeconds: 1.0 / 15))
+        let dimHandheld = try #require(NightMath.suggestedSeconds(iso: 1250, shutterSeconds: 1.0 / 15, onTripod: false))
         #expect((1...3).contains(dimHandheld))
 
         // Very dark scene handheld vs tripod (up to 30 s on tripod).

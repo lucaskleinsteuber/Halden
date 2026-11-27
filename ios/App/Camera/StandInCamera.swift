@@ -13,23 +13,53 @@ final class StandInCamera: CaptureBackend {
         ProcessInfo.processInfo.arguments.contains("-ui-testing-basic-device")
     }
 
+    /// The iPhone the stand-in pretends to be (`-ui-testing-device iPhone15,4`), if any.
+    static let profile: DeviceProfile? = {
+        let arguments = ProcessInfo.processInfo.arguments
+        guard let index = arguments.firstIndex(of: "-ui-testing-device"), index + 1 < arguments.count else {
+            return nil
+        }
+        return DeviceProfile.named(arguments[index + 1])
+    }()
+
+    private static var capabilities: DeviceCapabilities {
+        if let profile { return profile.capabilities }
+        return basicDevice ? .basic : .all
+    }
+
+    private static var backPresets: [Double] { profile?.backZoomPresets ?? [0.5, 1, 2] }
+
+    private static var backRange: ClosedRange<Double> {
+        (backPresets.first ?? 1)...10
+    }
+
+    private static var resolutions: [PhotoResolution] {
+        if let profile { return profile.has48MP ? [.mp12, .mp24, .mp48] : [.mp12] }
+        return [.mp12, .mp24, .mp48]
+    }
+
     private(set) var state = CameraState(
-        ready: true, side: .back, canFlip: true, presets: [0.5, 1, 2], zoom: 1, zoomRange: 0.5...10,
-        hasFlash: true, hasTorch: true, canLive: true, canRAW: true,
-        availableResolutions: [.mp12, .mp24, .mp48],
+        ready: true, side: .back, canFlip: true, presets: StandInCamera.backPresets,
+        zoomRange: StandInCamera.backRange,
+        hasFlash: true, hasTorch: true, canLive: true, canRAW: StandInCamera.capabilities.canBayerRAW,
+        availableResolutions: StandInCamera.resolutions,
         lensSmudged: ProcessInfo.processInfo.arguments.contains("-ui-testing-smudge"),
         canDepth: true,
         subjectDetected: ProcessInfo.processInfo.arguments.contains("-ui-testing-subject"),
-        canCinematic: true,
-        canMultiCam: !ProcessInfo.processInfo.arguments.contains("-ui-testing-basic-device"),
-        canWindNoiseRemoval: true,
-        capabilities: ProcessInfo.processInfo.arguments.contains("-ui-testing-basic-device") ? .basic : .all,
+        canCinematic: StandInCamera.capabilities.canCinematic || StandInCamera.basicDevice,
+        canMultiCam: (StandInCamera.profile?.multiCam ?? true) && !StandInCamera.basicDevice,
+        canWindNoiseRemoval: StandInCamera.capabilities.canWindNoiseRemoval,
+        capabilities: StandInCamera.capabilities,
         externalStorage: ProcessInfo.processInfo.arguments.contains("-ui-testing-ssd")
-            && !ProcessInfo.processInfo.arguments.contains("-ui-testing-basic-device")
+            && StandInCamera.capabilities.canExternalStorage
             ? ExternalStorageInfo(displayName: "Halden SSD", freeBytes: 512 * 1024 * 1024 * 1024) : nil,
         macroActive: ProcessInfo.processInfo.arguments.contains("-ui-testing-macro")
-            && !ProcessInfo.processInfo.arguments.contains("-ui-testing-basic-device"),
-        manualLimits: ManualLimits(shutter: (1.0 / 8000)...1, iso: 50...3200, exposureBias: -8...8))
+            && StandInCamera.capabilities.canMacroControl,
+        manualLimits: ManualLimits(
+            shutter: (1.0 / 8000)...1, iso: 50...3200, exposureBias: -8...8, kelvin: 2500...9500))
+    private(set) var zoomNow = 1.0
+    private(set) var lookSample: CGImage?
+    private(set) var reconfigurations = 0
     private(set) var readings =
         ProcessInfo.processInfo.arguments.contains("-ui-testing-night")
             || ProcessInfo.processInfo.arguments.contains("-ui-testing-low-light")
@@ -48,9 +78,11 @@ final class StandInCamera: CaptureBackend {
     @ObservationIgnored private var dualSwapped = false
     @ObservationIgnored private var gliding: Task<Void, Never>?
     @ObservationIgnored private var watchFrameTask: Task<Void, Never>?
+    @ObservationIgnored private var options: CaptureOptions?
 
     func prepare(mode: CameraMode, options video: CaptureOptions) {
         self.mode = mode
+        options = video
         updatePreviewLook(mode: mode, options: video)
         if ProcessInfo.processInfo.arguments.contains("-ui-testing-smudge") {
             state.lensSmudged = true
@@ -60,8 +92,9 @@ final class StandInCamera: CaptureBackend {
     private func updatePreviewLook(mode: CameraMode, options video: CaptureOptions) {
         let scopesOn = video.showHistogram || video.showWaveform
         liveScopes = scopesOn ? LiveScopesAnalyzer.sample() : nil
+        let filter = video.filterIntensity > 0.005 ? video.filter : nil
         let custom = LookRenderer.needsCustomPreview(
-            style: mode.isStill ? video.style : nil, filter: mode.isStill ? video.filter : nil,
+            style: mode.isStill ? video.style : nil, filter: mode.isStill ? filter : nil,
             isPortrait: mode == .portrait, showScopes: scopesOn)
         state.customPreviewActive = custom
         let args = ProcessInfo.processInfo.arguments
@@ -75,7 +108,7 @@ final class StandInCamera: CaptureBackend {
             : nil
         standInPreview.applyLook(
             style: mode.isStill ? video.style : nil, filter: mode.isStill ? video.filter : nil,
-            portraitAperture: mode == .portrait ? video.portraitAperture : nil,
+            filterIntensity: video.filterIntensity, portraitAperture: mode == .portrait ? video.portraitAperture : nil,
             portraitLighting: mode == .portrait ? video.portraitLighting : nil)
     }
 
@@ -85,9 +118,25 @@ final class StandInCamera: CaptureBackend {
         watchFrameTask = nil
     }
 
+    func applyLook(_ options: CaptureOptions) {
+        self.options = options
+        updatePreviewLook(mode: mode, options: options)
+    }
+
+    func applyDevice(_ options: CaptureOptions) {
+        self.options = options
+        updatePreviewLook(mode: mode, options: options)
+    }
+
+    func sampleLooks(_ on: Bool) {
+        lookSample = on ? StandInPreview.scene : nil
+    }
+
     /// Takes about as long as the real camera to change its format.
     func setMode(_ mode: CameraMode, options video: CaptureOptions) async {
-        try? await Task.sleep(for: .milliseconds(250))
+        reconfigurations += 1
+        options = video
+        try? await Task.sleep(for: .milliseconds(200))
         self.mode = mode
         updatePreviewLook(mode: mode, options: video)
         state.canLive = mode == .photo
@@ -96,16 +145,16 @@ final class StandInCamera: CaptureBackend {
         if mode == .dual {
             state.presets = dualSwapped ? [1] : [1, 2]
             state.zoomRange = dualSwapped ? 1...1 : 1...5
-            state.zoom = 1
+            zoomNow = 1
         } else {
-            state.presets = state.side == .back ? [0.5, 1, 2] : [1]
-            state.zoomRange = state.side == .back ? 0.5...10 : 1...5
-            state.zoom = min(max(state.zoom, state.zoomRange.lowerBound), state.zoomRange.upperBound)
+            state.presets = state.side == .back ? Self.backPresets : [1]
+            state.zoomRange = state.side == .back ? Self.backRange : 1...5
+            zoomNow = min(max(zoomNow, state.zoomRange.lowerBound), state.zoomRange.upperBound)
         }
         state.portraitHint =
             mode == .portrait && ProcessInfo.processInfo.arguments.contains("-ui-testing-portrait-hint")
             ? .moveFartherAway : nil
-        state.availableResolutions = [.mp12, .mp24, .mp48]
+        state.availableResolutions = Self.resolutions
         let fpsText = CameraControls.frameRateLabel(video.frameRate)
         let hdrSuffix = video.hdr ? " · HDR" : ""
         let autoSuffix = video.autoLowLightFPS ? " · Auto" : ""
@@ -121,7 +170,8 @@ final class StandInCamera: CaptureBackend {
             switch mode {
             case .photo, .portrait, .panorama, .dual: nil
             case .video:
-                "\(video.resolution == .uhd4K ? "4K" : "1080p") · \(fpsText)\(proSuffix)\(hdrSuffix)\(autoSuffix)\(video.actionMode ? " · Action" : "")"
+                "\(video.resolution == .uhd4K ? "4K" : "1080p") · \(fpsText)\(proSuffix)\(hdrSuffix)\(autoSuffix)"
+                    + (video.actionMode && state.capabilities.canActionMode ? " · Action" : "")
             case .cinematic: "Cinematic · \(CinematicRules.formatAperture(video.cinematicAperture))"
             case .slowMotion: "1080p · \(video.slowMotionRate) fps"
             case .timeLapse: video.timeLapseInterval.map { "every \(CameraMode.intervalText($0))" } ?? "Auto"
@@ -129,11 +179,13 @@ final class StandInCamera: CaptureBackend {
             }
     }
 
-    func flip() {
+    func flip() async {
+        reconfigurations += 1
+        try? await Task.sleep(for: .milliseconds(150))
         state.side = state.side == .back ? .front : .back
-        state.presets = state.side == .back ? [0.5, 1, 2] : [1]
-        state.zoomRange = state.side == .back ? 0.5...10 : 1...5
-        state.zoom = 1
+        state.presets = state.side == .back ? Self.backPresets : [1]
+        state.zoomRange = state.side == .back ? Self.backRange : 1...5
+        zoomNow = 1
         state.hasFlash = state.side == .back
     }
 
@@ -142,16 +194,16 @@ final class StandInCamera: CaptureBackend {
         let target = min(max(factor, state.zoomRange.lowerBound), state.zoomRange.upperBound)
         gliding?.cancel()
         guard glide else {
-            state.zoom = target
+            zoomNow = target
             return
         }
-        let start = state.zoom
+        let start = zoomNow
         gliding = Task { [weak self] in
             let steps = 18
             for step in 1...steps {
                 try? await Task.sleep(for: .seconds(Zoom.glideSeconds / Double(steps)))
                 if Task.isCancelled { return }
-                self?.state.zoom = start * pow(target / start, Double(step) / Double(steps))
+                self?.zoomNow = start * pow(target / start, Double(step) / Double(steps))
             }
         }
     }
@@ -175,11 +227,12 @@ final class StandInCamera: CaptureBackend {
         return Int(Date().timeIntervalSince1970 * 1000) &* 31 &+ taken
     }
 
-    func takePhoto(_ request: PhotoRequest) async -> TakenPhoto? {
+    func takePhoto(_ request: PhotoRequest, preview: (@Sendable (CGImage) -> Void)?) async -> TakenPhoto? {
         guard mode.isStill else { return nil }
         let seed = nextSeed()
         let data = await Task.detached { SampleMedia.photo(seed: seed) }.value
         guard let data else { return nil }
+        if let preview, let small = PhotoCapture.small(data) { preview(small) }
         var photo = TakenPhoto(data: data, heic: false, width: 1600, height: 1200)
         if request.raw || request.proRAW {
             photo.rawData = data
@@ -293,7 +346,7 @@ final class StandInCamera: CaptureBackend {
         if mode == .dual {
             state.presets = swapped ? [1] : [1, 2]
             state.zoomRange = swapped ? 1...1 : 1...5
-            state.zoom = 1
+            zoomNow = 1
         }
     }
 
@@ -386,28 +439,65 @@ final class StandInCamera: CaptureBackend {
     }
 }
 
-/// What the stand-in camera "sees", rendering active Photographic Styles and Filters with Core Image.
+/// What the stand-in camera "sees": a small made-up landscape with sky, sun, hills and a face,
+/// so styles and filters can be judged in the simulator; looks are drawn with Core Image.
 final class StandInPreview: UIView {
-    private let gradient = CAGradientLayer()
+    private let sceneView = UIImageView()
     private let lookImageView = UIImageView()
     private static let ciContext = CIContext()
 
+    /// The scene, 360 × 480 points.
+    static let scene: CGImage? = {
+        let size = CGSize(width: 360, height: 480)
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        let image = UIGraphicsImageRenderer(size: size, format: format).image { context in
+            let cg = context.cgContext
+            let space = CGColorSpaceCreateDeviceRGB()
+            let sky =
+                [
+                    UIColor(red: 0.28, green: 0.55, blue: 0.92, alpha: 1).cgColor,
+                    UIColor(red: 0.98, green: 0.78, blue: 0.55, alpha: 1).cgColor,
+                ] as CFArray
+            if let gradient = CGGradient(colorsSpace: space, colors: sky, locations: [0, 1]) {
+                cg.drawLinearGradient(gradient, start: .zero, end: CGPoint(x: 0, y: 300), options: [])
+            }
+            cg.setFillColor(UIColor(red: 1, green: 0.86, blue: 0.4, alpha: 1).cgColor)
+            cg.fillEllipse(in: CGRect(x: 240, y: 70, width: 70, height: 70))
+            cg.setFillColor(UIColor(red: 0.22, green: 0.52, blue: 0.25, alpha: 1).cgColor)
+            cg.fillEllipse(in: CGRect(x: -120, y: 250, width: 420, height: 300))
+            cg.setFillColor(UIColor(red: 0.35, green: 0.62, blue: 0.3, alpha: 1).cgColor)
+            cg.fillEllipse(in: CGRect(x: 120, y: 290, width: 400, height: 280))
+            cg.setFillColor(UIColor(red: 0.85, green: 0.25, blue: 0.22, alpha: 1).cgColor)
+            cg.fill(CGRect(x: 40, y: 330, width: 90, height: 70))
+            cg.setFillColor(UIColor(red: 0.93, green: 0.73, blue: 0.6, alpha: 1).cgColor)
+            cg.fillEllipse(in: CGRect(x: 170, y: 330, width: 90, height: 110))
+            cg.setFillColor(UIColor(red: 0.25, green: 0.18, blue: 0.14, alpha: 1).cgColor)
+            cg.fill(CGRect(x: 165, y: 320, width: 100, height: 30))
+            cg.setFillColor(UIColor.white.cgColor)
+            cg.fill(CGRect(x: 60, y: 120, width: 110, height: 28))
+        }
+        return image.cgImage
+    }()
+
     override init(frame: CGRect) {
         super.init(frame: frame)
-        gradient.colors = [UIColor.systemTeal.cgColor, UIColor.systemIndigo.cgColor]
-        layer.addSublayer(gradient)
-        lookImageView.contentMode = .scaleAspectFill
-        lookImageView.clipsToBounds = true
+        backgroundColor = .black
+        for view in [sceneView, lookImageView] {
+            view.contentMode = .scaleAspectFill
+            view.clipsToBounds = true
+            view.frame = bounds
+            view.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+            addSubview(view)
+        }
+        sceneView.image = Self.scene.map { UIImage(cgImage: $0) }
         lookImageView.isHidden = true
-        lookImageView.frame = bounds
-        lookImageView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
-        addSubview(lookImageView)
         let label = UILabel()
         label.text = "Stand-in camera"
-        label.textColor = .white
+        label.textColor = .white.withAlphaComponent(0.8)
         label.shadowColor = .black.withAlphaComponent(0.65)
         label.shadowOffset = CGSize(width: 0, height: 1)
-        label.font = .preferredFont(forTextStyle: .headline)
+        label.font = .preferredFont(forTextStyle: .caption1)
         label.translatesAutoresizingMaskIntoConstraints = false
         addSubview(label)
         NSLayoutConstraint.activate([
@@ -420,39 +510,28 @@ final class StandInPreview: UIView {
     required init?(coder: NSCoder) { fatalError("not used") }
 
     func applyLook(
-        style: PhotographicStyle?, filter: PhotoFilter?,
+        style: PhotographicStyle?, filter: PhotoFilter?, filterIntensity: Double = 1,
         portraitAperture: Double? = nil, portraitLighting: PortraitLighting? = nil
     ) {
         let isPortrait = portraitAperture != nil || (portraitLighting != nil && portraitLighting != .natural)
-        guard LookRenderer.needsCustomPreview(style: style, filter: filter, isPortrait: isPortrait) else {
+        let shownFilter = filterIntensity > 0.005 ? filter : nil
+        guard LookRenderer.needsCustomPreview(style: style, filter: shownFilter, isPortrait: isPortrait),
+            let scene = Self.scene
+        else {
             lookImageView.isHidden = true
             lookImageView.image = nil
             return
         }
-        let renderer = UIGraphicsImageRenderer(size: CGSize(width: 96, height: 128))
-        let base = renderer.image { ctx in
-            let colors = [UIColor.systemTeal.cgColor, UIColor.systemIndigo.cgColor] as CFArray
-            if let cgGradient = CGGradient(
-                colorsSpace: CGColorSpaceCreateDeviceRGB(), colors: colors, locations: [0, 1])
-            {
-                ctx.cgContext.drawLinearGradient(
-                    cgGradient, start: .zero, end: CGPoint(x: 0, y: 128), options: [])
-            }
+        var image = CIImage(cgImage: scene)
+        if isPortrait {
+            image = PortraitRenderer.apply(to: image, aperture: portraitAperture, lighting: portraitLighting)
         }
-        if var ci = CIImage(image: base) {
-            if isPortrait {
-                ci = PortraitRenderer.apply(to: ci, aperture: portraitAperture, lighting: portraitLighting)
-            }
-            let styled = LookRenderer.apply(style: style, filter: filter, to: ci)
-            if let cg = Self.ciContext.createCGImage(styled, from: styled.extent) {
-                lookImageView.image = UIImage(cgImage: cg)
-                lookImageView.isHidden = false
-            }
+        let styled = LookRenderer.apply(
+            style: style, filter: shownFilter, filterIntensity: filterIntensity, to: image
+        ).cropped(to: image.extent)
+        if let cg = Self.ciContext.createCGImage(styled, from: image.extent) {
+            lookImageView.image = UIImage(cgImage: cg)
+            lookImageView.isHidden = false
         }
-    }
-
-    override func layoutSubviews() {
-        super.layoutSubviews()
-        gradient.frame = bounds
     }
 }

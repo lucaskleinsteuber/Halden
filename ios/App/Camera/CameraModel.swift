@@ -1,3 +1,4 @@
+import CoreImage
 import CoreLocation
 import Foundation
 import HaldenKit
@@ -71,7 +72,10 @@ final class CameraModel {
     @ObservationIgnored private var burstTask: Task<Void, Never>?
     @ObservationIgnored private var video: (request: VideoRequest, place: ClientLocation?)?
     @ObservationIgnored private var applied: CaptureOptions?
+    /// The settings the camera was last given, to tell what a change touches.
+    @ObservationIgnored private var appliedSettings: AppSettings?
     @ObservationIgnored private var switches = 0
+    @ObservationIgnored private var shotToken = 0
 
     init(backend: any CaptureBackend) {
         self.backend = backend
@@ -109,7 +113,7 @@ final class CameraModel {
 
     /// The zoom to show: the one asked for (at once), or the camera's when something else moved it.
     var zoom: Double {
-        zoomShown.value(device: backend.state.zoom, at: ProcessInfo.processInfo.systemUptime)
+        zoomShown.value(device: backend.zoomNow, at: ProcessInfo.processInfo.systemUptime)
     }
 
     /// Zoom as shown (0.5, 1, 2, …), within what the camera offers. `glide` for the lens buttons.
@@ -126,7 +130,16 @@ final class CameraModel {
             return
         }
         zoomShown.forget()
-        backend.flip()
+        switches += 1
+        let mine = switches
+        switching = true
+        Task {
+            let started = ContinuousClock.now
+            await backend.flip()
+            guard mine == switches else { return }
+            switching = false
+            CameraTimingLog.shared.record(.flip, milliseconds: started.duration(to: .now).milliseconds)
+        }
     }
 
     /// Tapping a zoom button: glides there, and on the main back 1× button cycles 24 / 28 / 35 mm.
@@ -140,9 +153,8 @@ final class CameraModel {
         return result.badge
     }
 
-    /// Hands a mode or format to the camera; meanwhile the picture is blurred. It clears again
-    /// once the camera has the new one and a frame later, at the earliest when the frame has
-    /// changed its shape on the screen.
+    /// Hands a mode or format to the camera; meanwhile the picture is blurred. It clears as soon
+    /// as the camera shows its first picture in the new mode (no fixed wait).
     private func change(to mode: CameraMode, options: CaptureOptions) {
         switches += 1
         let mine = switches
@@ -150,25 +162,24 @@ final class CameraModel {
         Task {
             let started = ContinuousClock.now
             await backend.setMode(mode, options: options)
-            let left = Self.switchAtLeast - (ContinuousClock.now - started)
-            try? await Task.sleep(for: max(left, .zero) + Self.firstFrame)
-            if mine == switches { switching = false }
+            guard mine == switches else { return }
+            switching = false
+            CameraTimingLog.shared.record(.modeSwitch, milliseconds: started.duration(to: .now).milliseconds)
         }
     }
 
-    /// How long the frame takes to change between 4:3 and 16:9 on the screen.
-    static let switchAtLeast = Duration.milliseconds(280)
-    /// About how long the camera takes to show a picture again after a change.
-    static let firstFrame = Duration.milliseconds(120)
-
     /// At app start, so the picture is there at once when the camera opens.
     func prepare() {
+        // What isn't kept by "Preserve Settings" starts fresh with each launch of the app (not
+        // each time the camera tab shows, which rebuilt the camera on every return).
+        updateSettings? { $0 = CameraControls.resetUnpreserved(in: $0) }
         let current = settings()
         if current.preserveMode, let kept = current.keptMode, let restored = CameraMode(rawValue: kept) {
             mode = restored
         }
         let options = CaptureOptions(current)
         applied = options
+        appliedSettings = current
         backend.prepare(mode: mode, options: options)
         if current.defaultFocalLength != .mm24 {
             zoom(to: current.defaultFocalLength.zoomFactor, glide: false)
@@ -208,18 +219,24 @@ final class CameraModel {
     /// The video or Live Photo settings may have changed (in the settings, or on the camera
     /// screen): the camera takes them over, unless it is recording.
     func settingsChanged() {
-        let options = CaptureOptions(settings())
-        guard options != applied, !recording else { return }
+        let current = settings()
+        guard !recording else { return }
+        let options = CaptureOptions(current)
+        let scope = appliedSettings.map { CameraChangeScope.between($0, current) } ?? .session
+        appliedSettings = current
         applied = options
-        change(to: mode, options: options)
+        // Only what the change needs: a look goes into the next frame, nothing is rebuilt.
+        switch scope {
+        case .none: return
+        case .look: backend.applyLook(options)
+        case .device: backend.applyDevice(options)
+        case .session: change(to: mode, options: options)
+        }
     }
 
     /// The next mode to the right (1) or left (-1) on the screen, as after a swipe.
     func switchMode(by step: Int) {
-        let modes = CameraMode.strip.filter { candidate in
-            (candidate != .dual || backend.state.canMultiCam)
-                && (candidate != .spatial || backend.state.capabilities.canSpatialVideo)
-        }
+        let modes = CameraMode.strip.filter { CameraMode.available($0, state: backend.state) }
         guard let index = modes.firstIndex(of: mode), modes.indices.contains(index + step) else { return }
         switchTo(modes[index + step])
     }
@@ -246,7 +263,6 @@ final class CameraModel {
         updateSettings? { s in
             if s.preserveMode { s.keptMode = currentMode }
             if s.preserveExposure { s.keptExposureBias = bias }
-            s = CameraControls.resetUnpreserved(in: s)
         }
         location.stop()
         backend.stop()
@@ -257,8 +273,10 @@ final class CameraModel {
         cancelCountdown()
         setTorch(false)
         self.mode = mode
-        let options = CaptureOptions(settings())
+        let current = settings()
+        let options = CaptureOptions(current)
         applied = options
+        appliedSettings = current
         change(to: mode, options: options)
     }
 
@@ -337,7 +355,7 @@ final class CameraModel {
             problem = nil
             let data = photo.data
             if let small = await Task.detached(operation: { Self.small(data) }).value {
-                withAnimation(.snappy(duration: 0.25)) { lastShot = small }
+                lastShot = small
             }
             var metadata = Self.metadata(at: now, place: place)
             metadata.width = photo.width
@@ -407,7 +425,7 @@ final class CameraModel {
             problem = nil
             let data = photo.data
             if let small = await Task.detached(operation: { Self.small(data) }).value {
-                withAnimation(.snappy(duration: 0.25)) { lastShot = small }
+                lastShot = small
             }
             var metadata = Self.metadata(at: now, place: place)
             metadata.width = photo.width
@@ -508,7 +526,7 @@ final class CameraModel {
             guard let photo = await backend.takeStillWhileRecording(request) else { return }
             let data = photo.data
             if let small = await Task.detached(operation: { Self.small(data) }).value {
-                withAnimation(.snappy(duration: 0.25)) { lastShot = small }
+                lastShot = small
             }
             var metadata = Self.metadata(at: now, place: place)
             metadata.width = photo.width
@@ -547,6 +565,7 @@ final class CameraModel {
         let aspectRatio = currentSettings.photoAspectRatio
         let style = currentSettings.photographicStyle
         let filter = currentSettings.photoFilter
+        let intensity = currentSettings.filterIntensity
         shots += 1
         let request = PhotoRequest(
             format: currentSettings.photoFormat, flash: .off, location: place,
@@ -556,10 +575,12 @@ final class CameraModel {
         guard var photo = await backend.takePhoto(request) else { return false }
         problem = nil
         photo.edit = Self.captureEdit(
-            aspectRatio: aspectRatio, width: photo.width, height: photo.height, style: style, filter: filter)
+            aspectRatio: aspectRatio, width: photo.width, height: photo.height, style: style, filter: filter,
+            filterIntensity: intensity)
         let data = photo.data
-        if let small = await Task.detached(operation: { Self.small(data) }).value {
-            withAnimation(.snappy(duration: 0.25)) { lastShot = small }
+        let edit = photo.edit
+        if let small = await Task.detached(operation: { Self.small(data, edit: edit) }).value {
+            lastShot = small
         }
         var metadata = Self.metadata(at: now, place: place)
         metadata.width = photo.width
@@ -595,13 +616,19 @@ final class CameraModel {
             && ProDeviceRules.effectiveProRAW(
                 enabled: settings.captureProRAW, capabilities: backend.state.capabilities)
         let raw = !isPortrait && !proRAW && settings.captureRAW && backend.state.canRAW
-        let autoDepth = mode == .photo && backend.state.subjectDetected && backend.state.canDepth && !raw && !proRAW
+        let autoDepth =
+            mode == .photo && settings.autoDepth && backend.state.subjectDetected && backend.state.canDepth && !raw
+            && !proRAW
         let aspectRatio = settings.photoAspectRatio
         let style = settings.photographicStyle
         let filter = settings.photoFilter
+        let intensity = settings.filterIntensity
         let aperture = isPortrait ? settings.portraitAperture : nil
         let lighting = isPortrait ? settings.portraitLighting : nil
         shots += 1
+        shotToken += 1
+        let token = shotToken
+        let tapped = ContinuousClock.now
         let request = PhotoRequest(
             format: settings.photoFormat, flash: settings.flash, location: place,
             trueNorth: location.compass?.trueNorth ?? false, takenAt: now,
@@ -611,18 +638,30 @@ final class CameraModel {
             mirrorFrontCamera: settings.mirrorFrontCamera,
             captureDepth: isPortrait || autoDepth,
             capturePortraitMatte: isPortrait)
+        // The small picture next to the shutter as soon as the camera has it, with the look.
+        let preview: @Sendable (CGImage) -> Void = { [weak self] image in
+            let edit = Self.captureEdit(
+                aspectRatio: aspectRatio, width: image.width, height: image.height, style: style, filter: filter,
+                filterIntensity: intensity, portraitAperture: aperture, portraitLighting: lighting)
+            let shown = Self.styled(image, edit: edit)
+            Task { @MainActor in self?.showShot(shown, token: token, tapped: tapped) }
+        }
         Task {
-            guard var photo = await backend.takePhoto(request) else {
+            guard var photo = await backend.takePhoto(request, preview: preview) else {
                 problem = "The photo could not be taken."
                 return
             }
             problem = nil
             photo.edit = Self.captureEdit(
                 aspectRatio: aspectRatio, width: photo.width, height: photo.height,
-                style: style, filter: filter, portraitAperture: aperture, portraitLighting: lighting)
-            let data = photo.data
-            if let small = await Task.detached(operation: { Self.small(data) }).value {
-                withAnimation(.snappy(duration: 0.25)) { lastShot = small }
+                style: style, filter: filter, filterIntensity: intensity, portraitAperture: aperture,
+                portraitLighting: lighting)
+            if shownToken != token {
+                let data = photo.data
+                let edit = photo.edit
+                if let small = await Task.detached(operation: { Self.small(data, edit: edit) }).value {
+                    showShot(small, token: token, tapped: tapped)
+                }
             }
             var metadata = Self.metadata(at: now, place: place)
             metadata.width = photo.width
@@ -636,6 +675,8 @@ final class CameraModel {
         let aspectRatio = settings.photoAspectRatio
         let style = settings.photographicStyle
         let filter = settings.photoFilter
+        let intensity = settings.filterIntensity
+        let tapped = ContinuousClock.now
         let preferHEIC = settings.photoFormat == .heic
         let request = PhotoRequest(
             format: settings.photoFormat, flash: .off, location: place,
@@ -645,21 +686,28 @@ final class CameraModel {
         nightCaptureProgress = 0.05
         nightCaptureSecondsLeft = seconds
         Task {
-            defer {
-                nightCaptureProgress = nil
-                nightCaptureSecondsLeft = nil
-            }
             let frames = await backend.takeNightBurst(count: frameCount, request: request) { done, total in
                 let ratio = Double(done) / Double(max(total, 1))
-                self.nightCaptureProgress = 0.05 + ratio * 0.8
+                self.nightCaptureProgress = 0.05 + ratio * 0.9
                 self.nightCaptureSecondsLeft = max(1, Int(ceil(Double(seconds) * (1.0 - ratio))))
             }
-            guard !frames.isEmpty else {
+            // The frames are in: the camera is free for the next photo while they are combined.
+            nightCaptureProgress = nil
+            nightCaptureSecondsLeft = nil
+            CameraTimingLog.shared.record(.shutterToReady, milliseconds: tapped.duration(to: .now).milliseconds)
+            guard let first = frames.first else {
                 problem = "The Night Mode photo could not be taken."
                 return
             }
-            nightCaptureProgress = 0.9
-            nightCaptureSecondsLeft = 0
+            shots += 1
+            let quick = await Task.detached { () -> CGImage? in
+                guard let small = Self.small(first) else { return nil }
+                let edit = Self.captureEdit(
+                    aspectRatio: aspectRatio, width: small.width, height: small.height, style: style, filter: filter,
+                    filterIntensity: intensity)
+                return Self.styled(small, edit: edit)
+            }.value
+            if let quick { lastShot = quick }
             let stacked = await Task.detached(priority: .userInitiated) {
                 NightStacker.stack(frameData: frames, preferHEIC: preferHEIC)
             }.value
@@ -667,16 +715,12 @@ final class CameraModel {
                 problem = "Night Mode stacking failed."
                 return
             }
-            shots += 1
             problem = nil
             var photo = TakenPhoto(
                 data: stacked.data, heic: stacked.heic, width: stacked.width, height: stacked.height)
             photo.edit = Self.captureEdit(
-                aspectRatio: aspectRatio, width: photo.width, height: photo.height, style: style, filter: filter)
-            let data = photo.data
-            if let small = await Task.detached(operation: { Self.small(data) }).value {
-                withAnimation(.snappy(duration: 0.25)) { lastShot = small }
-            }
+                aspectRatio: aspectRatio, width: photo.width, height: photo.height, style: style, filter: filter,
+                filterIntensity: intensity)
             var metadata = Self.metadata(at: now, place: place)
             metadata.width = photo.width
             metadata.height = photo.height
@@ -685,14 +729,15 @@ final class CameraModel {
     }
 
     /// Combines non-destructive aspect crop, Photographic Style, Filter and Portrait settings into one v2 edit recipe.
-    static func captureEdit(
+    nonisolated static func captureEdit(
         aspectRatio: PhotoAspectRatio, width: Int, height: Int, style: PhotographicStyle?, filter: PhotoFilter?,
-        portraitAperture: Double? = nil, portraitLighting: PortraitLighting? = nil
+        filterIntensity: Double = 1, portraitAperture: Double? = nil, portraitLighting: PortraitLighting? = nil
     ) -> EditRecipe? {
         var recipe = EditRecipe()
         recipe.crop = aspectRatio.crop(forWidth: width, height: height)
         if let style = style?.fitted, !style.isDefault { recipe.style = style }
-        recipe.filter = filter
+        recipe.filter = filterIntensity > 0.005 ? filter : nil
+        recipe.filterIntensity = filterIntensity
         if let portraitAperture { recipe.portraitAperture = PortraitMath.clampedAperture(portraitAperture) }
         if let portraitLighting, portraitLighting != .natural { recipe.portraitLighting = portraitLighting }
         return recipe.isEmpty ? nil : recipe.fitted
@@ -701,6 +746,29 @@ final class CameraModel {
     /// The library shows the newest photo itself now.
     func forgetLastShot() {
         lastShot = nil
+    }
+
+    @ObservationIgnored private var shownToken = 0
+
+    /// The photo just taken next to the shutter (once per photo), and how long that took.
+    private func showShot(_ image: CGImage?, token: Int, tapped: ContinuousClock.Instant) {
+        guard let image, token > shownToken else { return }
+        shownToken = token
+        lastShot = image
+        CameraTimingLog.shared.record(.shutterToThumbnail, milliseconds: tapped.duration(to: .now).milliseconds)
+    }
+
+    /// The small picture with the photo's edit (crop, style, filter, portrait), as the library
+    /// will show it.
+    nonisolated static func styled(_ image: CGImage, edit: EditRecipe?) -> CGImage {
+        guard let edit, !edit.isEmpty else { return image }
+        let rendered = EditRenderer.apply(edit, to: CIImage(cgImage: image))
+        return ImagePipeline.editContext.createCGImage(rendered, from: rendered.extent.integral) ?? image
+    }
+
+    /// `small` with the photo's edit.
+    nonisolated static func small(_ data: Data, edit: EditRecipe?) -> CGImage? {
+        small(data).map { styled($0, edit: edit) }
     }
 
     /// A photo's picture at button size (from the embedded thumbnail when there is one).

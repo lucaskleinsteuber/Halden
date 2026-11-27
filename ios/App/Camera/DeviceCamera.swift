@@ -13,6 +13,9 @@ import Vision
 @Observable
 final class DeviceCamera: CaptureBackend {
     private(set) var state = CameraState()
+    private(set) var zoomNow = 1.0
+    private(set) var lookSample: CGImage?
+    private(set) var reconfigurations = 0
     @ObservationIgnored let preview = PreviewContainerView()
     var previewView: UIView { preview }
     @ObservationIgnored private let core: CaptureCore
@@ -28,6 +31,7 @@ final class DeviceCamera: CaptureBackend {
     @ObservationIgnored private var readingsWatch: ReadingsWatch?
     @ObservationIgnored private var scopesRelay: Relay<LiveScopesData?>?
     @ObservationIgnored private var pipRelay: Relay<UIImage?>?
+    @ObservationIgnored private var sampleRelay: Relay<CGImage>?
     @ObservationIgnored private let multiCam: MultiCamEngine
     @ObservationIgnored private var dualRecording = false
     @ObservationIgnored private var dualCorner = PiPCorner.topRight
@@ -51,7 +55,9 @@ final class DeviceCamera: CaptureBackend {
         core.onControlStyleChanged = { [weak self] style in
             Task { @MainActor in self?.onControlStyleChanged?(style) }
         }
-        zoomRelay = Relay { [weak self] zoom in self?.state.zoom = zoom }
+        zoomRelay = Relay { [weak self] zoom in
+            if let self, abs(self.zoomNow - zoom) > 0.0005 { self.zoomNow = zoom }
+        }
         smudgeRelay = Relay { [weak self] smudged in self?.state.lensSmudged = smudged }
         readingsWatch = ReadingsWatch { [weak self] readings in
             if self?.readings != readings { self?.readings = readings }
@@ -66,6 +72,9 @@ final class DeviceCamera: CaptureBackend {
         }
         self.pipRelay = pipRelay
         multiCam.onPipImage = { image in pipRelay.send(image) }
+        let sampleRelay = Relay<CGImage> { [weak self] image in self?.lookSample = image }
+        self.sampleRelay = sampleRelay
+        core.lookSampled = { image in sampleRelay.send(image) }
     }
 
     static var allowed: Bool { AVCaptureDevice.authorizationStatus(for: .video) == .authorized }
@@ -102,7 +111,14 @@ final class DeviceCamera: CaptureBackend {
                 }
             }
             configureOnce()
-            core.run { $0.startRunning() }
+            let started = ContinuousClock.now
+            await withCheckedContinuation { (done: CheckedContinuation<Void, Never>) in
+                core.run { core in
+                    core.startRunning()
+                    core.waitForFirstFrame { done.resume() }
+                }
+            }
+            CameraTimingLog.shared.record(.open, milliseconds: started.duration(to: .now).milliseconds)
         }
     }
 
@@ -139,7 +155,7 @@ final class DeviceCamera: CaptureBackend {
             state.videoFormat = nil
             state.presets = dualSwapped ? [1] : [1, 2]
             state.zoomRange = dualSwapped ? 1...1 : 1...5
-            state.zoom = 1
+            zoomNow = 1
             multiCam.start(swapped: dualSwapped, corner: dualCorner)
             return
         }
@@ -148,18 +164,50 @@ final class DeviceCamera: CaptureBackend {
             dualPipImage = nil
             core.run { $0.startRunning() }
         }
+        reconfigurations += 1
         await withCheckedContinuation { (done: CheckedContinuation<Void, Never>) in
             core.run { core in
                 core.change(mode: mode, video: video)
-                done.resume()
+                core.waitForFirstFrame { done.resume() }
             }
         }
     }
 
-    func flip() {
+    func applyLook(_ options: CaptureOptions) {
+        video = options
+        guard mode != .dual else { return }
+        let started = ContinuousClock.now
+        let measure = mode.isStill
+        core.run { core in
+            core.applyLook(options)
+            guard measure else { return }
+            core.waitForFirstFrame {
+                CameraTimingLog.shared.record(.look, milliseconds: started.duration(to: .now).milliseconds)
+            }
+        }
+    }
+
+    func applyDevice(_ options: CaptureOptions) {
+        video = options
+        guard mode != .dual else { return }
+        core.run { $0.applyDevice(options) }
+    }
+
+    func sampleLooks(_ on: Bool) {
+        core.sampleLooks(on)
+        if !on { lookSample = nil }
+    }
+
+    func flip() async {
         let side: CameraSide = state.side == .back ? .front : .back
         let (mode, video) = (mode, video)
-        core.run { $0.configure(side: side, mode: mode, video: video) }
+        reconfigurations += 1
+        await withCheckedContinuation { (done: CheckedContinuation<Void, Never>) in
+            core.run { core in
+                core.configure(side: side, mode: mode, video: video)
+                core.waitForFirstFrame { done.resume() }
+            }
+        }
     }
 
     /// The zoom shown follows the camera itself (see `update`), so it moves along with a glide
@@ -167,7 +215,7 @@ final class DeviceCamera: CaptureBackend {
     func zoom(to factor: Double, glide: Bool) {
         if mode == .dual {
             let clamped = min(max(factor, state.zoomRange.lowerBound), state.zoomRange.upperBound)
-            state.zoom = clamped
+            zoomNow = clamped
             multiCam.zoom(to: clamped, glide: glide)
             return
         }
@@ -192,10 +240,12 @@ final class DeviceCamera: CaptureBackend {
         rotation?.videoRotationAngleForHorizonLevelCapture ?? 90
     }
 
-    func takePhoto(_ request: PhotoRequest) async -> TakenPhoto? {
+    func takePhoto(_ request: PhotoRequest, preview: (@Sendable (CGImage) -> Void)?) async -> TakenPhoto? {
         let angle = captureAngle
         return await withCheckedContinuation { continuation in
-            core.run { $0.takePhoto(request, angle: angle) { continuation.resume(returning: $0) } }
+            core.run {
+                $0.takePhoto(request, angle: angle, preview: preview) { continuation.resume(returning: $0) }
+            }
         }
     }
 
@@ -209,16 +259,24 @@ final class DeviceCamera: CaptureBackend {
         fast.prioritizeFaster = true
         fast.captureDepth = false
         fast.capturePortraitMatte = false
-        var frames: [Data] = []
+        fast.prioritizeFastest = true
         let total = max(1, count)
-        frames.reserveCapacity(total)
-        for index in 0..<total {
-            if let shot = await takePhoto(fast) {
-                frames.append(shot.data)
+        let angle = captureAngle
+        let request = fast
+        // All frames asked for at once: the camera takes them back to back instead of waiting for
+        // each one to be processed before starting the next.
+        return await withCheckedContinuation { (continuation: CheckedContinuation<[Data], Never>) in
+            let collector = FrameCollector(total: total) { done in
+                Task { @MainActor in onFrame(done, total) }
+            } finished: { frames in
+                continuation.resume(returning: frames)
             }
-            onFrame(index + 1, total)
+            core.run { core in
+                for index in 0..<total {
+                    core.takePhoto(request, angle: angle) { photo in collector.add(index, photo?.data) }
+                }
+            }
         }
-        return frames
     }
 
     func takeStillWhileRecording(_ request: PhotoRequest) async -> TakenPhoto? {
@@ -286,7 +344,7 @@ final class DeviceCamera: CaptureBackend {
         if mode == .dual {
             state.presets = swapped ? [1] : [1, 2]
             state.zoomRange = swapped ? 1...1 : 1...5
-            state.zoom = 1
+            zoomNow = 1
         }
         multiCam.updateLayout(swapped: swapped, corner: corner)
     }
@@ -328,12 +386,11 @@ final class DeviceCamera: CaptureBackend {
 
     private func update(_ new: CameraState, device: AVCaptureDevice?) {
         var new = new
-        // The zoom and smudge status come from KVO on the device; a state sent without a new device is older.
-        if device == nil {
-            new.zoom = state.zoom
-            new.lensSmudged = state.lensSmudged
-        }
-        state = new
+        // The smudge status comes from KVO on the device; a state sent without a new device is older.
+        if device == nil { new.lensSmudged = state.lensSmudged }
+        if new.ready, new.side == .back { Self.rememberCapabilities(new.capabilities) }
+        // Only a real change redraws what reads the state.
+        if state != new { state = new }
         preview.setMetalActive(new.customPreviewActive)
         guard let device, device !== rotation?.device else { return }
         if let zoomRelay { zoomObservation = Self.follow(zoomOf: device, into: zoomRelay) }
@@ -356,6 +413,14 @@ final class DeviceCamera: CaptureBackend {
 
     /// Sends the zoom as shown (0.5, 1, 2, …) whenever the camera's zoom changes: every frame of
     /// a glide, on whichever thread the camera changes it (so not isolated to the main actor).
+    /// What the back camera can do, for Settings before the camera opens.
+    private static var remembered: DeviceCapabilities?
+    private static func rememberCapabilities(_ capabilities: DeviceCapabilities) {
+        guard remembered != capabilities else { return }
+        remembered = capabilities
+        CapabilityCache().save(capabilities)
+    }
+
     nonisolated private static func follow(zoomOf device: AVCaptureDevice, into relay: Relay<Double>)
         -> NSKeyValueObservation
     {
@@ -408,6 +473,61 @@ final class Relay<Value: Sendable>: @unchecked Sendable {
     }
 }
 
+/// Gathers the frames of a Night Mode series as they come, in the order they were asked for.
+final class FrameCollector: @unchecked Sendable {
+    private let lock = NSLock()
+    private let total: Int
+    private var frames: [Int: Data] = [:]
+    private var done = 0
+    private let progress: @Sendable (Int) -> Void
+    private let finished: @Sendable ([Data]) -> Void
+
+    init(
+        total: Int, progress: @escaping @Sendable (Int) -> Void, finished: @escaping @Sendable ([Data]) -> Void
+    ) {
+        self.total = total
+        self.progress = progress
+        self.finished = finished
+    }
+
+    func add(_ index: Int, _ data: Data?) {
+        let (count, all): (Int, [Data]?) = lock.withLock {
+            done += 1
+            if let data { frames[index] = data }
+            let all = done == total ? frames.sorted { $0.key < $1.key }.map(\.value) : nil
+            return (done, all)
+        }
+        progress(count)
+        if let all { finished(all) }
+    }
+}
+
+/// Runs its work the first time it is asked to, never again (for whichever comes first: the
+/// awaited event or its time-out).
+final class RunOnce: @unchecked Sendable {
+    private let lock = NSLock()
+    private var work: (@Sendable () -> Void)?
+
+    init(_ work: @escaping @Sendable () -> Void) {
+        self.work = work
+    }
+
+    func run() {
+        let pending: (@Sendable () -> Void)? = lock.withLock {
+            defer { work = nil }
+            return work
+        }
+        pending?()
+    }
+}
+
+extension Duration {
+    var milliseconds: Double {
+        let (seconds, attoseconds) = components
+        return Double(seconds) * 1000 + Double(attoseconds) / 1e15
+    }
+}
+
 /// Everything that touches AVFoundation. Only ever used on `queue` (that is what makes the
 /// `@unchecked Sendable` true).
 final class CaptureCore: NSObject, @unchecked Sendable {
@@ -418,6 +538,8 @@ final class CaptureCore: NSObject, @unchecked Sendable {
     /// Time-lapses: the frames, of which `timeLapse` keeps a few.
     private let frameOutput = AVCaptureVideoDataOutput()
     /// Custom Metal preview output: attached only when a style, filter, portrait or scopes need GPU rendering.
+    /// Preview-sized frames for the custom viewfinder (looks, portrait, scopes), Live Text and the
+    /// filter buttons. Always attached in Photo and Portrait, so a filter never rebuilds the session.
     private let previewOutput = AVCaptureVideoDataOutput()
     /// Depth map stream for live Portrait bokeh preview.
     private let depthOutput = AVCaptureDepthDataOutput()
@@ -462,6 +584,25 @@ final class CaptureCore: NSObject, @unchecked Sendable {
     private let watchContext = CIContext(options: [.cacheIntermediates: false])
     private let watchLock = NSLock()
     private var lastWatchTime: Double = 0
+    /// Gets the small picture for the filter buttons.
+    var lookSampled: (@Sendable (CGImage) -> Void)?
+    /// The audio session as last set up (`nil` before the camera first ran): set only when it changes.
+    private var audioSessionSetup: String?
+    /// Facts about a camera that never change (its formats), found once per camera.
+    private var facts: [String: CameraFacts] = [:]
+    private static let profile = DeviceProfile.named(DeviceProfile.currentIdentifier)
+
+    /// What `describe` would otherwise search all formats for every time.
+    struct CameraFacts {
+        var canFlip: Bool
+        var canCinematic: Bool
+        var canSpatialVideo: Bool
+        var canAppleLog: Bool
+        var canActionMode: Bool
+        var canMacro: Bool
+        var canBayerRAW: Bool
+        var kelvin: ClosedRange<Double>
+    }
 
     init(metalView: MetalPreviewView) {
         self.metalView = metalView
@@ -471,7 +612,12 @@ final class CaptureCore: NSObject, @unchecked Sendable {
         frameOutput.setSampleBufferDelegate(timeLapse, queue: timeLapse.queue)
         previewOutput.alwaysDiscardsLateVideoFrames = true
         previewOutput.videoSettings = [kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA]
+        // About screen size in every format (not 4K frames in video modes): less to draw, quicker focus.
+        previewOutput.automaticallyConfiguresOutputBufferDimensions = false
+        previewOutput.deliversPreviewSizedOutputBuffers = true
         previewOutput.setSampleBufferDelegate(previewRelay, queue: previewRelay.queue)
+        previewRelay.textDetector = textDetector
+        previewRelay.lookSampled = { [weak self] image in self?.lookSampled?(image) }
         depthOutput.isFilteringEnabled = true
         subjectRelay.onDetect = { [weak self] detected in
             self?.run { core in
@@ -615,7 +761,79 @@ final class CaptureCore: NSObject, @unchecked Sendable {
 
     func startRunning() {
         wantRunning = true
+        if audioSessionSetup == nil {
+            // Only now that the camera opens (not at app start, which would interrupt music).
+            configureAudioSession(
+                allowPlayback: video?.allowAudioPlayback == true, allowAirPodsMic: video?.allowAirPodsMic == true,
+                needsAudio: mode != .timeLapse)
+        }
         if !session.isRunning { session.startRunning() }
+    }
+
+    /// Calls `done` (on the camera's queue) once the next picture arrives, so a switch ends when
+    /// the new picture is there and not after a fixed time. Without frames to watch, a moment later.
+    func waitForFirstFrame(_ done: @escaping @Sendable () -> Void) {
+        guard session.isRunning, session.outputs.contains(previewOutput) else {
+            queue.asyncAfter(deadline: .now() + 0.06) { done() }
+            return
+        }
+        let once = RunOnce(done)
+        previewRelay.whenNextFrame { [weak self] in self?.queue.async { once.run() } }
+        // Never longer than this, whatever happens.
+        queue.asyncAfter(deadline: .now() + 0.8) { once.run() }
+    }
+
+    /// The small live picture for the filter buttons, five times a second while on.
+    func sampleLooks(_ on: Bool) {
+        previewRelay.setSampling(on)
+    }
+
+    /// Only how the picture looks: drawn into the next frame, nothing rebuilt.
+    func applyLook(_ options: CaptureOptions) {
+        video = options
+        configureLook()
+        let custom = needsMetalPreview && session.outputs.contains(previewOutput)
+        guard custom != state.customPreviewActive else { return }
+        state.customPreviewActive = custom
+        publish(device: nil)
+    }
+
+    /// Settings the camera takes on the fly: lens correction and macro, what it looks for (faces,
+    /// QR codes, text), mirroring, the Cinematic aperture and wind noise removal.
+    func applyDevice(_ options: CaptureOptions) {
+        video = options
+        guard let device else { return }
+        applyComposition(on: device)
+        configureSubjectMetadata()
+        previewRelay.setTextDetection(mode == .photo && options.showLiveText)
+        if !options.showLiveText, state.detectedText != nil { state.detectedText = nil }
+        if let connection = previewOutput.connection(with: .video) {
+            applyMirroring(on: connection, mirror: side == .front)
+        }
+        if let audioInput, audioInput.isWindNoiseRemovalSupported {
+            let wanted = options.windNoiseRemoval && audioInput.multichannelAudioMode != .none
+            if audioInput.isWindNoiseRemovalEnabled != wanted { audioInput.isWindNoiseRemovalEnabled = wanted }
+        }
+        if mode == .cinematic, let input, input.isCinematicVideoCaptureEnabled {
+            let format = device.activeFormat
+            let aperture = CinematicRules.clampedAperture(
+                options.cinematicAperture, min: Double(max(format.minSimulatedAperture, 2.0)),
+                max: Double(max(format.maxSimulatedAperture, 2.0)))
+            input.simulatedAperture = Float(aperture)
+            state.videoFormat = "Cinematic · \(CinematicRules.formatAperture(aperture))"
+        }
+        state = describe(device)
+        publish(device: nil)
+    }
+
+    /// The look the custom viewfinder draws (none in video modes).
+    private func configureLook() {
+        metalView.configure(
+            style: mode.isStill ? video?.style : nil, filter: mode.isStill ? video?.filter : nil,
+            filterIntensity: video?.filterIntensity ?? 1,
+            portraitAperture: mode == .portrait ? (video?.portraitAperture ?? PortraitMath.defaultAperture) : nil,
+            portraitLighting: mode == .portrait ? video?.portraitLighting : nil,
+            frameObserver: makeFrameObserver())
     }
 
     func stopRunning() {
@@ -660,8 +878,10 @@ final class CaptureCore: NSObject, @unchecked Sendable {
         mode != .timeLapse && mode != .panorama && (video?.showHistogram == true || video?.showWaveform == true)
     }
 
+    /// Photo and Portrait always have the preview frames (looks, Live Text, the filter buttons);
+    /// other modes only for scopes or the Apple Watch.
     private var wantsPreviewFrames: Bool {
-        needsMetalPreview || watchFrameHandler != nil
+        mode.isStill || needsMetalPreview || watchFrameHandler != nil
     }
 
     private var isBayerRAWActive: Bool {
@@ -673,8 +893,8 @@ final class CaptureCore: NSObject, @unchecked Sendable {
     private var needsMetalPreview: Bool {
         if wantsScopes { return true }
         guard mode.isStill else { return false }
-        return LookRenderer.needsCustomPreview(
-            style: video?.style, filter: video?.filter, isPortrait: mode == .portrait)
+        let filter = (video?.filterIntensity ?? 1) > 0.005 ? video?.filter : nil
+        return LookRenderer.needsCustomPreview(style: video?.style, filter: filter, isPortrait: mode == .portrait)
     }
 
     private func sampleScopes(_ image: CIImage) {
@@ -728,11 +948,7 @@ final class CaptureCore: NSObject, @unchecked Sendable {
                 frameObserver: makeFrameObserver())
             return
         }
-        metalView.configure(
-            style: mode.isStill ? video?.style : nil, filter: mode.isStill ? video?.filter : nil,
-            portraitAperture: mode == .portrait ? (video?.portraitAperture ?? PortraitMath.defaultAperture) : nil,
-            portraitLighting: mode == .portrait ? video?.portraitLighting : nil,
-            frameObserver: makeFrameObserver())
+        configureLook()
         let hasHandler = handler != nil
         guard hadHandler != hasHandler, let device, !movieOutput.isRecording, !timeLapsing, !panoramaCapturing else {
             return
@@ -752,31 +968,26 @@ final class CaptureCore: NSObject, @unchecked Sendable {
     /// Cinematic: iOS 26 `isCinematicVideoCaptureEnabled` + required metadata output.
     /// Video: movie + photo output (Live Photos off) for photo-while-recording, Action Mode & audio.
     private func apply(mode: CameraMode, on device: AVCaptureDevice) {
-        session.automaticallyConfiguresCaptureDeviceForWideColor = mode.isStill
+        if session.automaticallyConfiguresCaptureDeviceForWideColor != mode.isStill {
+            session.automaticallyConfiguresCaptureDeviceForWideColor = mode.isStill
+        }
         if mode != .cinematic, let input, input.isCinematicVideoCaptureEnabled {
             input.isCinematicVideoCaptureEnabled = false
         }
-        configureAudioSession(
-            allowPlayback: video?.allowAudioPlayback == true,
-            allowAirPodsMic: video?.allowAirPodsMic == true,
-            needsAudio: mode != .timeLapse)
+        if audioSessionSetup != nil {
+            configureAudioSession(
+                allowPlayback: video?.allowAudioPlayback == true,
+                allowAirPodsMic: video?.allowAirPodsMic == true,
+                needsAudio: mode != .timeLapse)
+        }
         if !wantsScopes { scopesChanged?(nil) }
-        metalView.configure(
-            style: mode.isStill ? video?.style : nil, filter: mode.isStill ? video?.filter : nil,
-            portraitAperture: mode == .portrait ? (video?.portraitAperture ?? PortraitMath.defaultAperture) : nil,
-            portraitLighting: mode == .portrait ? video?.portraitLighting : nil,
-            frameObserver: makeFrameObserver())
+        configureLook()
+        previewRelay.setTextDetection(mode == .photo && video?.showLiveText != false)
+        if mode != .photo || video?.showLiveText == false { state.detectedText = nil }
         switch mode {
         case .photo:
-            var outputs: [AVCaptureOutput] = [photoOutput, metadataOutput]
-            if wantsPreviewFrames { outputs.append(previewOutput) }
-            if video?.showLiveText != false {
-                outputs.append(frameOutput)
-                frameOutput.setSampleBufferDelegate(textDetector, queue: textDetector.queue)
-            } else {
-                state.detectedText = nil
-            }
-            use(outputs)
+            // Live Text reads the preview frames: no extra full-size output.
+            use([photoOutput, metadataOutput, previewOutput])
             configureSubjectMetadata()
             if let connection = previewOutput.connection(with: .video) {
                 if connection.isVideoRotationAngleSupported(90) { connection.videoRotationAngle = 90 }
@@ -793,32 +1004,55 @@ final class CaptureCore: NSObject, @unchecked Sendable {
                 session.removeInput(audioInput)
                 self.audioInput = nil
             }
-            if session.canSetSessionPreset(.photo) { session.sessionPreset = .photo }
+            if session.sessionPreset != .photo, session.canSetSessionPreset(.photo) { session.sessionPreset = .photo }
             if raw, (try? device.lockForConfiguration()) != nil {
                 device.videoZoomFactor = 1.0
                 device.unlockForConfiguration()
             }
+            // Every one of these may rebuild the camera's pipeline, so each is set only when it changes.
             let faster = video?.prioritizeFasterShooting ?? true
-            photoOutput.maxPhotoQualityPrioritization = faster ? .balanced : .quality
+            let priority: AVCapturePhotoOutput.QualityPrioritization = faster ? .balanced : .quality
+            if photoOutput.maxPhotoQualityPrioritization != priority {
+                photoOutput.maxPhotoQualityPrioritization = priority
+            }
             let supported = device.activeFormat.supportedMaxPhotoDimensions
             let tuples = supported.map { (width: Int($0.width), height: Int($0.height)) }
-            let wanted: PhotoResolution = raw ? .mp12 : (video?.photoResolution ?? .mp24)
-            if let index = PhotoResolution.bestDimensionIndex(wanted: wanted, in: tuples) {
-                photoOutput.maxPhotoDimensions = supported[index]
-            } else if let largest = supported.max(by: { $0.width * $0.height < $1.width * $1.height }) {
-                photoOutput.maxPhotoDimensions = largest
+            let available = PhotoResolution.available(for: tuples)
+            let wanted: PhotoResolution =
+                raw ? .mp12 : PhotoResolution.fitted(video?.photoResolution ?? .mp24, in: available)
+            let dimensions: CMVideoDimensions? =
+                if let index = PhotoResolution.bestDimensionIndex(wanted: wanted, in: tuples) {
+                    supported[index]
+                } else {
+                    supported.max(by: { $0.width * $0.height < $1.width * $1.height })
+                }
+            if let dimensions,
+                photoOutput.maxPhotoDimensions.width != dimensions.width
+                    || photoOutput.maxPhotoDimensions.height != dimensions.height
+            {
+                photoOutput.maxPhotoDimensions = dimensions
             }
-            if photoOutput.isResponsiveCaptureSupported {
+            if photoOutput.isResponsiveCaptureSupported, photoOutput.isResponsiveCaptureEnabled != faster {
                 photoOutput.isResponsiveCaptureEnabled = faster
             }
-            if photoOutput.isAppleProRAWSupported {
+            if photoOutput.isFastCapturePrioritizationSupported,
+                photoOutput.isFastCapturePrioritizationEnabled != faster
+            {
+                photoOutput.isFastCapturePrioritizationEnabled = faster
+            }
+            if photoOutput.isAppleProRAWSupported, photoOutput.isAppleProRAWEnabled != proRAW {
                 photoOutput.isAppleProRAWEnabled = proRAW
             }
-            photoOutput.isDepthDataDeliveryEnabled = !raw && !proRAW && photoOutput.isDepthDataDeliverySupported
-            photoOutput.isPortraitEffectsMatteDeliveryEnabled =
-                photoOutput.isDepthDataDeliveryEnabled && photoOutput.isPortraitEffectsMatteDeliverySupported
-            photoOutput.isLivePhotoCaptureEnabled = live && photoOutput.isLivePhotoCaptureSupported
-            if photoOutput.isLivePhotoCaptureEnabled { photoOutput.isLivePhotoAutoTrimmingEnabled = true }
+            let depth =
+                video?.autoDepth != false && !raw && !proRAW && photoOutput.isDepthDataDeliverySupported
+            if photoOutput.isDepthDataDeliveryEnabled != depth { photoOutput.isDepthDataDeliveryEnabled = depth }
+            let matte = depth && photoOutput.isPortraitEffectsMatteDeliverySupported
+            if photoOutput.isPortraitEffectsMatteDeliveryEnabled != matte {
+                photoOutput.isPortraitEffectsMatteDeliveryEnabled = matte
+            }
+            let liveOn = live && photoOutput.isLivePhotoCaptureSupported
+            if photoOutput.isLivePhotoCaptureEnabled != liveOn { photoOutput.isLivePhotoCaptureEnabled = liveOn }
+            if liveOn, !photoOutput.isLivePhotoAutoTrimmingEnabled { photoOutput.isLivePhotoAutoTrimmingEnabled = true }
             state.videoFormat = nil
         case .portrait:
             var outputs: [AVCaptureOutput] = [photoOutput, previewOutput, metadataOutput]
@@ -830,11 +1064,15 @@ final class CaptureCore: NSObject, @unchecked Sendable {
                 session.removeInput(audioInput)
                 self.audioInput = nil
             }
-            if session.canSetSessionPreset(.photo) { session.sessionPreset = .photo }
-            photoOutput.isLivePhotoCaptureEnabled = false
-            photoOutput.isDepthDataDeliveryEnabled = photoOutput.isDepthDataDeliverySupported
-            photoOutput.isPortraitEffectsMatteDeliveryEnabled =
-                photoOutput.isDepthDataDeliveryEnabled && photoOutput.isPortraitEffectsMatteDeliverySupported
+            if session.sessionPreset != .photo, session.canSetSessionPreset(.photo) { session.sessionPreset = .photo }
+            if photoOutput.isLivePhotoCaptureEnabled { photoOutput.isLivePhotoCaptureEnabled = false }
+            if photoOutput.isDepthDataDeliveryEnabled != photoOutput.isDepthDataDeliverySupported {
+                photoOutput.isDepthDataDeliveryEnabled = photoOutput.isDepthDataDeliverySupported
+            }
+            let matte = photoOutput.isDepthDataDeliveryEnabled && photoOutput.isPortraitEffectsMatteDeliverySupported
+            if photoOutput.isPortraitEffectsMatteDeliveryEnabled != matte {
+                photoOutput.isPortraitEffectsMatteDeliveryEnabled = matte
+            }
             if let connection = previewOutput.connection(with: .video) {
                 if connection.isVideoRotationAngleSupported(90) { connection.videoRotationAngle = 90 }
                 applyMirroring(on: connection, mirror: side == .front)
@@ -854,7 +1092,7 @@ final class CaptureCore: NSObject, @unchecked Sendable {
         case .video, .cinematic, .slowMotion, .spatial:
             // Disable Live Photos before adding `movieOutput`, then keep `photoOutput` attached in
             // `.video` mode so users can snap still photos while recording.
-            photoOutput.isLivePhotoCaptureEnabled = false
+            if photoOutput.isLivePhotoCaptureEnabled { photoOutput.isLivePhotoCaptureEnabled = false }
             var outputs: [AVCaptureOutput] =
                 switch mode {
                 case .video: [movieOutput, photoOutput]
@@ -891,7 +1129,10 @@ final class CaptureCore: NSObject, @unchecked Sendable {
                     } else if wantedProFormat == .proResLog, let base = state.videoFormat {
                         state.videoFormat = "\(base) · ProRes Log"
                     }
-                    if video.actionMode, let base = state.videoFormat {
+                    if video.actionMode,
+                        device.activeFormat.isVideoStabilizationModeSupported(.cinematicExtendedEnhanced),
+                        let base = state.videoFormat
+                    {
                         state.videoFormat = "\(base) · Action"
                     }
                 }
@@ -904,7 +1145,9 @@ final class CaptureCore: NSObject, @unchecked Sendable {
             if mode == .video,
                 let largest = device.activeFormat.supportedMaxPhotoDimensions.max(by: {
                     $0.width * $0.height < $1.width * $1.height
-                })
+                }),
+                photoOutput.maxPhotoDimensions.width != largest.width
+                    || photoOutput.maxPhotoDimensions.height != largest.height
             {
                 photoOutput.maxPhotoDimensions = largest
             }
@@ -921,12 +1164,17 @@ final class CaptureCore: NSObject, @unchecked Sendable {
                     movieOutput.setOutputSettings([AVVideoCodecKey: AVVideoCodecType.hevc], for: connection)
                 }
                 if connection.isVideoStabilizationSupported {
-                    connection.preferredVideoStabilizationMode =
-                        (mode == .video && video?.actionMode == true) ? .cinematicExtendedEnhanced : .auto
+                    let action =
+                        mode == .video && video?.actionMode == true
+                        && device.activeFormat.isVideoStabilizationModeSupported(.cinematicExtendedEnhanced)
+                    let wanted: AVCaptureVideoStabilizationMode = action ? .cinematicExtendedEnhanced : .auto
+                    if connection.preferredVideoStabilizationMode != wanted {
+                        connection.preferredVideoStabilizationMode = wanted
+                    }
                 }
             }
         case .panorama:
-            photoOutput.isLivePhotoCaptureEnabled = false
+            if photoOutput.isLivePhotoCaptureEnabled { photoOutput.isLivePhotoCaptureEnabled = false }
             frameOutput.setSampleBufferDelegate(panoramaCollector, queue: panoramaCollector.queue)
             use([frameOutput])
             if let audioInput {
@@ -968,7 +1216,10 @@ final class CaptureCore: NSObject, @unchecked Sendable {
     /// automatically, plus `.qr` in photo mode when QR scanning is enabled.
     private func configureSubjectMetadata() {
         guard session.outputs.contains(metadataOutput) else { return }
-        var wanted: [AVMetadataObject.ObjectType] = [.face, .humanBody, .dogBody, .catBody]
+        // People and pets only matter for depth: always in Portrait, in Photo with automatic depth.
+        let wantsSubjects = mode == .portrait || (video?.autoDepth != false && photoOutput.isDepthDataDeliveryEnabled)
+        var wanted: [AVMetadataObject.ObjectType] = wantsSubjects ? [.face, .humanBody, .dogBody, .catBody] : []
+        if !wantsSubjects, state.subjectDetected { state.subjectDetected = false }
         if mode == .photo && video?.scanQRCodes != false {
             wanted.append(.qr)
         } else {
@@ -977,16 +1228,17 @@ final class CaptureCore: NSObject, @unchecked Sendable {
         }
         let available = Set(metadataOutput.availableMetadataObjectTypes)
         let types = wanted.filter { available.contains($0) }
-        metadataOutput.metadataObjectTypes = types
+        if metadataOutput.metadataObjectTypes != types { metadataOutput.metadataObjectTypes = types }
     }
 
     /// Geometric distortion correction and lens smudge detection (where supported by hardware).
     private func applyComposition(on device: AVCaptureDevice) {
         guard (try? device.lockForConfiguration()) != nil else { return }
-        if device.isGeometricDistortionCorrectionSupported {
-            device.isGeometricDistortionCorrectionEnabled = video?.lensCorrection ?? true
+        let correct = video?.lensCorrection ?? true
+        if device.isGeometricDistortionCorrectionSupported, device.isGeometricDistortionCorrectionEnabled != correct {
+            device.isGeometricDistortionCorrectionEnabled = correct
         }
-        if device.activeFormat.isCameraLensSmudgeDetectionSupported {
+        if device.activeFormat.isCameraLensSmudgeDetectionSupported, !device.isCameraLensSmudgeDetectionEnabled {
             device.setCameraLensSmudgeDetectionEnabled(
                 true, detectionInterval: CMTime(seconds: 3, preferredTimescale: 1))
         }
@@ -1155,6 +1407,10 @@ final class CaptureCore: NSObject, @unchecked Sendable {
 
     /// Lets music or podcasts keep playing while filming and/or routes audio from AirPods / Bluetooth HFP.
     private func configureAudioSession(allowPlayback: Bool, allowAirPodsMic: Bool, needsAudio: Bool) {
+        // Setting the audio session up is slow; only when what is wanted changes.
+        let setup = "\(allowPlayback)-\(allowAirPodsMic)-\(needsAudio)"
+        guard setup != audioSessionSetup else { return }
+        audioSessionSetup = setup
         guard needsAudio else {
             session.automaticallyConfiguresApplicationAudioSession = true
             return
@@ -1296,11 +1552,12 @@ final class CaptureCore: NSObject, @unchecked Sendable {
 
     /// What the screen shows: the zoom buttons, the range, flash and torch.
     private func describe(_ device: AVCaptureDevice) -> CameraState {
+        let facts = cameraFacts(device)
         var described = CameraState()
         described.ready = true
         described.side = side
-        described.canFlip = Self.camera(side == .back ? .front : .back) != nil
-        described.canMultiCam = MultiCamEngine.isSupported
+        described.canFlip = facts.canFlip
+        described.canMultiCam = MultiCamEngine.isSupported && (Self.profile?.multiCam ?? true)
         let multiplier = Double(device.displayVideoZoomFactorMultiplier)
         let lowest = Double(device.minAvailableVideoZoomFactor) * multiplier
         var presets: [Double] = []
@@ -1315,12 +1572,10 @@ final class CaptureCore: NSObject, @unchecked Sendable {
             device: Double(device.maxAvailableVideoZoomFactor) * multiplier, cap: max(10, (presets.max() ?? 1) * 5))
         described.presets = presets.filter { $0 <= highest }.sorted()
         described.zoomRange = lowest...max(lowest, highest)
-        described.zoom = Double(device.videoZoomFactor) * multiplier
         described.hasFlash = device.hasFlash
         described.hasTorch = device.hasTorch
         described.canLive = mode == .photo && photoOutput.isLivePhotoCaptureSupported
-        described.canRAW =
-            mode == .photo && (availableBayerRAW() != nil || (side == .back && Self.supportsBackBayerRAW()))
+        described.canRAW = mode == .photo && (availableBayerRAW() != nil || (side == .back && facts.canBayerRAW))
         let dims = device.activeFormat.supportedMaxPhotoDimensions.map {
             (width: Int($0.width), height: Int($0.height))
         }
@@ -1328,7 +1583,6 @@ final class CaptureCore: NSObject, @unchecked Sendable {
         if isBayerRAWActive {
             described.presets = [1]
             described.zoomRange = 1...1
-            described.zoom = 1
             described.availableResolutions = [.mp12]
         }
         described.customPreviewActive = needsMetalPreview && session.outputs.contains(previewOutput)
@@ -1336,19 +1590,16 @@ final class CaptureCore: NSObject, @unchecked Sendable {
         described.subjectDetected = state.subjectDetected
         described.portraitHint =
             mode == .portrait ? PortraitMath.hint(distanceMeters: nil, iso: Double(device.iso)) : nil
-        described.canCinematic = device.formats.contains(where: \.isCinematicVideoCaptureSupported)
-        described.canWindNoiseRemoval = audioInput?.isWindNoiseRemovalSupported ?? false
-        let canSpatialVideo = device.formats.contains(where: \.isSpatialVideoCaptureSupported)
-        let canAppleLog = device.formats.contains { $0.supportedColorSpaces.contains(.appleLog) }
-        let canProRes = canAppleLog || movieOutput.availableVideoCodecTypes.contains(.proRes422)
-        let canMacro =
-            device.isVirtualDevice
-            && device.constituentDevices.contains {
-                $0.deviceType == .builtInUltraWideCamera && $0.isFocusModeSupported(.autoFocus)
-            }
+        let canSpatialVideo = facts.canSpatialVideo
+        let canAppleLog = facts.canAppleLog
+        // ProRes shows on the movie output only while it is attached; the Log formats imply it.
+        let canProRes =
+            canAppleLog || movieOutput.availableVideoCodecTypes.contains(.proRes422)
+            || (Self.profile?.proRes == true && photoOutput.isAppleProRAWSupported)
+        let canMacro = facts.canMacro
         let canSpatialAudio =
             audioInput?.isMultichannelAudioModeSupported(.firstOrderAmbisonics) ?? canSpatialVideo
-        described.capabilities = DeviceCapabilities(
+        let runtime = DeviceCapabilities(
             canProRAW: photoOutput.isAppleProRAWSupported,
             canProRes: canProRes,
             canAppleLog: canAppleLog,
@@ -1357,16 +1608,48 @@ final class CaptureCore: NSObject, @unchecked Sendable {
             canMacroControl: canMacro,
             canCameraControl: session.supportsControls,
             canSpatialAudio: canSpatialAudio,
-            canAudioMix: canSpatialAudio)
+            canAudioMix: canSpatialAudio,
+            canActionMode: facts.canActionMode,
+            canCinematic: facts.canCinematic,
+            canDepth: photoOutput.isDepthDataDeliverySupported || side == .back,
+            canBayerRAW: facts.canBayerRAW,
+            canWindNoiseRemoval: audioInput?.isWindNoiseRemovalSupported ?? false)
+        described.capabilities = DeviceProfile.effective(runtime: runtime, profile: Self.profile)
+        described.canCinematic = described.capabilities.canCinematic
+        described.canWindNoiseRemoval = runtime.canWindNoiseRemoval
         described.externalStorage = connectedExternalStorage()?.info
         described.macroActive =
             canMacro && device.activePrimaryConstituent?.deviceType == .builtInUltraWideCamera
-            && described.zoom >= 0.95
+            && Double(device.videoZoomFactor) * multiplier >= 0.95
         described.controlsFullscreen = state.controlsFullscreen
         described.manualLimits = limits(of: device)
         described.focusLocked = state.focusLocked
         described.videoFormat = state.videoFormat
         return described
+    }
+
+    /// The facts about `device` that never change, searched for once.
+    private func cameraFacts(_ device: AVCaptureDevice) -> CameraFacts {
+        if let known = facts[device.uniqueID] { return known }
+        let formats = device.formats
+        let found = CameraFacts(
+            canFlip: Self.camera(side == .back ? .front : .back) != nil,
+            canCinematic: formats.contains(where: \.isCinematicVideoCaptureSupported),
+            canSpatialVideo: formats.contains(where: \.isSpatialVideoCaptureSupported),
+            canAppleLog: formats.contains { $0.supportedColorSpaces.contains(.appleLog) },
+            canActionMode: formats.contains { $0.isVideoStabilizationModeSupported(.cinematicExtendedEnhanced) },
+            canMacro: device.isVirtualDevice
+                && device.constituentDevices.contains {
+                    $0.deviceType == .builtInUltraWideCamera && $0.isFocusModeSupported(.autoFocus)
+                },
+            canBayerRAW: side == .back && Self.supportsBackBayerRAW(),
+            kelvin: ManualLimits.reachableKelvin { kelvin in
+                let gains = device.deviceWhiteBalanceGains(for: .init(temperature: Float(kelvin), tint: 0))
+                let most = device.maxWhiteBalanceGain
+                return [gains.redGain, gains.greenGain, gains.blueGain].allSatisfy { $0 >= 1 && $0 <= most }
+            })
+        facts[device.uniqueID] = found
+        return found
     }
 
     /// Always a ramp: a glide for the lens buttons (about the same time for any distance), and
@@ -1396,7 +1679,8 @@ final class CaptureCore: NSObject, @unchecked Sendable {
             shutter: shortest...longest, iso: Double(format.minISO)...Double(format.maxISO),
             exposureBias: Double(device.minExposureTargetBias)...Double(device.maxExposureTargetBias),
             canFocus: device.isLockingFocusWithCustomLensPositionSupported,
-            canSetWhiteBalance: device.isLockingWhiteBalanceWithCustomDeviceGainsSupported)
+            canSetWhiteBalance: device.isLockingWhiteBalanceWithCustomDeviceGainsSupported,
+            kelvin: cameraFacts(device).kelvin)
     }
 
     func manual(_ settings: ManualSettings) {
@@ -1484,7 +1768,10 @@ final class CaptureCore: NSObject, @unchecked Sendable {
         device.unlockForConfiguration()
     }
 
-    func takePhoto(_ request: PhotoRequest, angle: CGFloat, done: @escaping @Sendable (TakenPhoto?) -> Void) {
+    func takePhoto(
+        _ request: PhotoRequest, angle: CGFloat, preview: (@Sendable (CGImage) -> Void)? = nil,
+        done: @escaping @Sendable (TakenPhoto?) -> Void
+    ) {
         guard mode.isStill, session.isRunning, let connection = photoOutput.connection(with: .video) else {
             return done(nil)
         }
@@ -1522,12 +1809,18 @@ final class CaptureCore: NSObject, @unchecked Sendable {
             if photoOutput.isConstantColorSupported { settings.isConstantColorEnabled = false }
         } else {
             let wantedPriority: AVCapturePhotoOutput.QualityPrioritization =
-                request.prioritizeFaster ? .balanced : .quality
+                request.prioritizeFastest ? .speed : request.prioritizeFaster ? .balanced : .quality
             settings.photoQualityPrioritization =
                 wantedPriority.rawValue <= photoOutput.maxPhotoQualityPrioritization.rawValue
                 ? wantedPriority : photoOutput.maxPhotoQualityPrioritization
         }
         settings.maxPhotoDimensions = photoOutput.maxPhotoDimensions
+        // A small JPEG inside the file: the button next to the shutter shows it at once.
+        if preview != nil, settings.availableEmbeddedThumbnailPhotoCodecTypes.contains(.jpeg) {
+            settings.embeddedThumbnailPhotoFormat = [
+                AVVideoCodecKey: AVVideoCodecType.jpeg, AVVideoWidthKey: 320, AVVideoHeightKey: 320,
+            ]
+        }
         let flash: AVCaptureDevice.FlashMode =
             switch request.flash {
             case .auto: .auto
@@ -1551,7 +1844,7 @@ final class CaptureCore: NSObject, @unchecked Sendable {
                 location: request.location, takenAt: request.takenAt, timeZone: .current)
         }
         let id = settings.uniqueID
-        let capture = PhotoCapture(request: request, heic: heic) { [weak self] photo in
+        let capture = PhotoCapture(request: request, heic: heic, preview: preview) { [weak self] photo in
             self?.run { $0.photos[id] = nil }
             done(photo)
         }
@@ -1829,26 +2122,40 @@ final class PanoramaCollector: NSObject, AVCaptureVideoDataOutputSampleBufferDel
     }
 }
 
-/// Runs throttled fast Vision text recognition (~0.8 Hz) in Photo mode so the viewfinder can offer
-/// a Live Text button whenever legible text enters the frame.
-final class ViewfinderTextDetector: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate, @unchecked Sendable {
+/// Runs throttled fast Vision text recognition in Photo mode on the preview frames (at most every
+/// 1.5 s, one at a time) so the viewfinder can offer a Live Text button when text comes into view.
+final class ViewfinderTextDetector: @unchecked Sendable {
     let queue = DispatchQueue(label: "halden.livetext", qos: .utility)
     var onText: (@Sendable (String?) -> Void)?
+    private let lock = NSLock()
     private var lastScanTime: Double = 0
+    private var busy = false
     private var lastDetectedAt: Double = 0
     private var lastText: String?
 
-    func captureOutput(
-        _ output: AVCaptureOutput, didOutput sampleBuffer: CMSampleBuffer, from connection: AVCaptureConnection
-    ) {
+    /// A frame from the preview: looked at when enough time has passed and none is being read.
+    func offer(_ buffer: CVPixelBuffer) {
         let now = ProcessInfo.processInfo.systemUptime
-        guard now - lastScanTime >= 1.25 else { return }
-        lastScanTime = now
-        guard let buffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
+        let take = lock.withLock { () -> Bool in
+            guard !busy, now - lastScanTime >= 1.5 else { return false }
+            busy = true
+            lastScanTime = now
+            return true
+        }
+        guard take else { return }
+        let frame = Carry(value: buffer)
+        queue.async { [weak self] in
+            self?.read(frame.value, at: now)
+            self?.lock.withLock { self?.busy = false }
+        }
+    }
+
+    private func read(_ buffer: CVPixelBuffer, at now: Double) {
         let request = VNRecognizeTextRequest()
         request.recognitionLevel = .fast
         request.usesLanguageCorrection = false
-        let handler = VNImageRequestHandler(cvPixelBuffer: buffer, orientation: .right, options: [:])
+        // The preview frames are already upright.
+        let handler = VNImageRequestHandler(cvPixelBuffer: buffer, orientation: .up, options: [:])
         try? handler.perform([request])
         let lines = (request.results ?? [])
             .compactMap { $0.topCandidates(1).first?.string }
@@ -1872,14 +2179,20 @@ final class ViewfinderTextDetector: NSObject, AVCaptureVideoDataOutputSampleBuff
 final class PhotoCapture: NSObject, AVCapturePhotoCaptureDelegate, @unchecked Sendable {
     let request: PhotoRequest
     let heic: Bool
+    let preview: (@Sendable (CGImage) -> Void)?
     let done: @Sendable (TakenPhoto?) -> Void
     private var photo: TakenPhoto?
     private var rawData: Data?
     private var movie: URL?
+    private let started = ContinuousClock.now
 
-    init(request: PhotoRequest, heic: Bool, done: @escaping @Sendable (TakenPhoto?) -> Void) {
+    init(
+        request: PhotoRequest, heic: Bool, preview: (@Sendable (CGImage) -> Void)? = nil,
+        done: @escaping @Sendable (TakenPhoto?) -> Void
+    ) {
         self.request = request
         self.heic = heic
+        self.preview = preview
         self.done = done
     }
 
@@ -1892,11 +2205,32 @@ final class PhotoCapture: NSObject, AVCapturePhotoCaptureDelegate, @unchecked Se
             rawData = data
             return
         }
+        // Before a Live Photo's video is finished: the small picture for the shutter's neighbour.
+        if let preview, let small = Self.small(data) { preview(small) }
         let size = Thumbnails.shownSize(of: data)
         let dimensions = photo.resolvedSettings.photoDimensions
         self.photo = TakenPhoto(
             data: data, heic: heic, width: size?.width ?? Int(dimensions.width),
             height: size?.height ?? Int(dimensions.height))
+    }
+
+    /// The sensor has the picture: the camera can take the next one.
+    func photoOutput(
+        _ output: AVCapturePhotoOutput, didCapturePhotoFor resolvedSettings: AVCaptureResolvedPhotoSettings
+    ) {
+        CameraTimingLog.shared.record(.shutterToReady, milliseconds: started.duration(to: .now).milliseconds)
+    }
+
+    /// The embedded thumbnail (or a quick downscale), turned upright.
+    static func small(_ data: Data) -> CGImage? {
+        guard let source = CGImageSourceCreateWithData(data as CFData, nil) else { return nil }
+        let options: [CFString: Any] = [
+            kCGImageSourceCreateThumbnailFromImageIfAbsent: true,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceThumbnailMaxPixelSize: 180,
+            kCGImageSourceShouldCacheImmediately: true,
+        ]
+        return CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary)
     }
 
     func photoOutput(
@@ -1964,6 +2298,20 @@ final class GPSWriter: NSObject, AVCapturePhotoFileDataRepresentationCustomizer 
         self.moment = moment
     }
 
+    /// Made once (a formatter is slow to make).
+    private static let time: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.timeZone = TimeZone(identifier: "UTC")
+        formatter.dateFormat = "HH:mm:ss.SS"
+        return formatter
+    }()
+    private static let day: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.timeZone = TimeZone(identifier: "UTC")
+        formatter.dateFormat = "yyyy:MM:dd"
+        return formatter
+    }()
+
     func replacementMetadata(for photo: AVCapturePhoto) -> [String: Any]? {
         guard let location else { return nil }
         var metadata = photo.metadata
@@ -1973,15 +2321,8 @@ final class GPSWriter: NSObject, AVCapturePhotoFileDataRepresentationCustomizer 
             kCGImagePropertyGPSLongitude as String: abs(location.longitude),
             kCGImagePropertyGPSLongitudeRef as String: location.longitude >= 0 ? "E" : "W",
         ]
-        let utc = TimeZone(identifier: "UTC")!
-        let time = DateFormatter()
-        time.timeZone = utc
-        time.dateFormat = "HH:mm:ss.SS"
-        let day = DateFormatter()
-        day.timeZone = utc
-        day.dateFormat = "yyyy:MM:dd"
-        gps[kCGImagePropertyGPSTimeStamp as String] = time.string(from: moment)
-        gps[kCGImagePropertyGPSDateStamp as String] = day.string(from: moment)
+        gps[kCGImagePropertyGPSTimeStamp as String] = Self.time.string(from: moment)
+        gps[kCGImagePropertyGPSDateStamp as String] = Self.day.string(from: moment)
         if let accuracy = location.horizontalAccuracy {
             gps[kCGImagePropertyGPSHPositioningError as String] = accuracy
         }

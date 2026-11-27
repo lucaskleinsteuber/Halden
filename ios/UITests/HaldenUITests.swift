@@ -177,9 +177,9 @@ final class HaldenUITests: XCTestCase {
             let chip = app.buttons[id]
             for _ in 0..<5 where chip.exists && (chip.frame.maxX > screenWidth - 8 || chip.frame.minX < 0) {
                 let from = drawer.coordinate(
-                    withNormalizedOffset: CGVector(dx: chip.frame.minX < 0 ? 0.2 : 0.85, dy: 0.92))
+                    withNormalizedOffset: CGVector(dx: chip.frame.minX < 0 ? 0.2 : 0.85, dy: 0.5))
                 let to = drawer.coordinate(
-                    withNormalizedOffset: CGVector(dx: chip.frame.minX < 0 ? 0.85 : 0.2, dy: 0.92))
+                    withNormalizedOffset: CGVector(dx: chip.frame.minX < 0 ? 0.85 : 0.2, dy: 0.5))
                 from.press(forDuration: 0.02, thenDragTo: to)
             }
             return chip
@@ -356,6 +356,77 @@ final class HaldenUITests: XCTestCase {
         XCTAssertTrue(select.waitForNonExistence(timeout: 5))
     }
 
+    /// Round 4: as an iPhone 15 the camera offers only what that iPhone can do (no ProRes, Log,
+    /// ProRAW, Spatial, Macro or wind removal; Action and Cinematic stay), and Settings names it.
+    @MainActor
+    func testIPhone15ShowsOnlyWhatItCanDo() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-ui-testing-signed-in", "-ui-testing-device", "iPhone15,4"]
+        app.launch()
+        XCTAssertTrue(app.buttons["shutter"].waitForExistence(timeout: 30))
+        XCTAssertFalse(app.buttons["mode-spatial"].exists, "no Spatial video on an iPhone 15")
+        XCTAssertTrue(app.buttons["mode-cinematic"].exists)
+        XCTAssertFalse(app.buttons["macro-toggle"].exists)
+        app.buttons["camera-controls-toggle"].tap()
+        XCTAssertTrue(app.buttons["drawer-style"].waitForExistence(timeout: 5))
+        XCTAssertFalse(app.buttons["drawer-proraw"].exists)
+        XCTAssertFalse(app.buttons["drawer-flash"].exists, "the flash is in the top bar already")
+        app.buttons["camera-controls-toggle"].tap()
+
+        app.buttons["mode-video"].tap()
+        XCTAssertTrue(app.buttons["Record a video"].waitForExistence(timeout: 5))
+        app.buttons["camera-controls-toggle"].tap()
+        XCTAssertTrue(app.buttons["drawer-action"].waitForExistence(timeout: 5), "Action mode is there")
+        XCTAssertFalse(app.buttons["drawer-prores"].exists)
+        XCTAssertFalse(app.buttons["drawer-wind"].exists)
+        app.buttons["camera-controls-toggle"].tap()
+
+        Tabs(app).buttons["Settings"].tap()
+        app.buttons["camera-settings"].tap()
+        let thisIPhone = app.descendants(matching: .any)["camera-this-iphone"].firstMatch
+        XCTAssertTrue(thisIPhone.waitForExistence(timeout: 5))
+        XCTAssertTrue(
+            app.staticTexts.containing(NSPredicate(format: "label CONTAINS 'iPhone 15'")).firstMatch.exists,
+            "Settings names the iPhone")
+        XCTAssertFalse(app.switches["settings-proraw"].exists)
+        XCTAssertFalse(app.descendants(matching: .any)["settings-pro-video"].exists)
+        XCTAssertFalse(app.switches["settings-external-storage"].exists)
+    }
+
+    /// Round 4: a filter, its strength or a style shows in the picture at once: no blur, and the
+    /// camera is not rebuilt (only a mode change does that).
+    @MainActor
+    func testLooksChangeWithoutRebuildingTheCamera() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-ui-testing-signed-in"]
+        app.launch()
+        let preview = app.descendants(matching: .any)["camera-preview"].firstMatch
+        XCTAssertTrue(preview.waitForExistence(timeout: 30))
+        let before = preview.value as? String
+        let switching = app.descendants(matching: .any)["camera-switching"]
+
+        app.buttons["camera-controls-toggle"].tap()
+        app.buttons["drawer-filter"].tap()
+        XCTAssertTrue(app.buttons["filter-film"].waitForExistence(timeout: 5))
+        app.buttons["filter-film"].tapWhenHittable()
+        XCTAssertFalse(switching.exists, "no blur for a filter")
+        let strength = app.sliders["filter-intensity-slider"]
+        XCTAssertTrue(strength.waitForExistence(timeout: 5))
+        strength.adjust(toNormalizedSliderPosition: 0.4)
+        XCTAssertFalse(switching.exists, "no blur while the strength changes")
+        app.buttons["filter-cool"].tapWhenHittable()
+        app.buttons["drawer-style"].tap()
+        app.buttons["style-preset-gold"].tap()
+        XCTAssertFalse(switching.exists, "no blur for a style")
+        XCTAssertEqual(preview.value as? String, before, "the camera was not rebuilt")
+        app.buttons["camera-controls-toggle"].tap()
+
+        app.buttons["mode-video"].tap()
+        XCTAssertTrue(app.buttons["Record a video"].waitForExistence(timeout: 5))
+        expectation(for: NSPredicate(format: "value != %@", before ?? ""), evaluatedWith: preview)
+        waitForExpectations(timeout: 5)
+    }
+
     /// Photographic Styles (preset + tone/color pad + palette) and Filters work in the camera
     /// drawer, and Settings › Preserve Settings exposes Photographic Style preservation.
     @MainActor
@@ -377,12 +448,12 @@ final class HaldenUITests: XCTestCase {
         app.buttons["style-reset"].tap()
         XCTAssertEqual(app.buttons["drawer-style"].label, "Photographic style")
 
-        // Select Vivid Warm filter, then back to Original.
+        // Select the Warm filter, then back to Original.
         app.buttons["drawer-filter"].tap()
-        XCTAssertTrue(app.buttons["filter-vividWarm"].waitForExistence(timeout: 5))
-        app.buttons["filter-vividWarm"].tap()
-        XCTAssertEqual(app.buttons["drawer-filter"].label, "Filter Vivid Warm")
-        app.buttons["filter-original"].tap()
+        XCTAssertTrue(app.buttons["filter-warm"].waitForExistence(timeout: 5))
+        app.buttons["filter-warm"].tapWhenHittable()
+        XCTAssertEqual(app.buttons["drawer-filter"].label, "Filter Warm")
+        app.buttons["filter-original"].tapWhenHittable()
         XCTAssertEqual(app.buttons["drawer-filter"].label, "Filter off")
         toggle.tap()
 
@@ -487,9 +558,9 @@ final class HaldenUITests: XCTestCase {
             let chip = app.buttons[chipId]
             for _ in 0..<5 where chip.frame.maxX > screenWidth - 8 || chip.frame.minX < 0 {
                 let from = drawer.coordinate(
-                    withNormalizedOffset: CGVector(dx: chip.frame.minX < 0 ? 0.2 : 0.85, dy: 0.9))
+                    withNormalizedOffset: CGVector(dx: chip.frame.minX < 0 ? 0.2 : 0.85, dy: 0.5))
                 let to = drawer.coordinate(
-                    withNormalizedOffset: CGVector(dx: chip.frame.minX < 0 ? 0.85 : 0.2, dy: 0.9))
+                    withNormalizedOffset: CGVector(dx: chip.frame.minX < 0 ? 0.85 : 0.2, dy: 0.5))
                 from.press(forDuration: 0.02, thenDragTo: to)
             }
             chip.tap()

@@ -34,6 +34,10 @@ final class LayoutTests: XCTestCase {
     private func walk(textSize: String?) throws {
         let app = XCUIApplication()
         app.launchArguments = ["-ui-testing-signed-in", "-ui-testing-library", "300"]
+        // `layout-tests.sh` also runs as a given iPhone (`HALDEN_DEVICE_PROFILE=iPhone15,4`).
+        if let profile = ProcessInfo.processInfo.environment["HALDEN_DEVICE_PROFILE"], !profile.isEmpty {
+            app.launchArguments += ["-ui-testing-device", profile]
+        }
         if let textSize { app.launchArguments += ["-UIPreferredContentSizeCategoryName", textSize] }
         app.launch()
         let prefix = textSize == nil ? "" : "big-text-"
@@ -42,7 +46,8 @@ final class LayoutTests: XCTestCase {
         // The camera, in every mode and with what opens on it.
         let shutter = app.buttons["shutter"]
         XCTAssertTrue(shutter.waitForExistence(timeout: 30))
-        XCTAssertTrue(app.tabBars.firstMatch.waitForExistence(timeout: 5), "the tab bar is visible in the camera")
+        XCTAssertTrue(
+            app.buttons["camera-tab-photos"].waitForExistence(timeout: 5), "the camera's own tab bar is visible")
         settle()
         shot("camera-photo")
         app.buttons["manual"].tap()
@@ -121,8 +126,8 @@ final class LayoutTests: XCTestCase {
                 settle()
                 shot("camera-controls-video")
                 let proResChip = app.buttons["drawer-prores"]
-                scrollDrawerTo(proResChip)
                 if proResChip.exists {
+                    scrollDrawerTo(proResChip)
                     proResChip.tap()
                     settle(0.5)
                     shot("camera-controls-pro")

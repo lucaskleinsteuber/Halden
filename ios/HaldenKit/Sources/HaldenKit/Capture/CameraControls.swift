@@ -58,13 +58,21 @@ public enum PhotoResolution: Int, Codable, Sendable, CaseIterable, Identifiable 
         Double(width) * Double(height) / 1_000_000.0
     }
 
-    /// Which resolution options the camera's supported photo dimensions allow.
+    /// Which resolution options the camera's supported photo dimensions allow: only those it
+    /// really has (a camera with 12 and 48 MP but nothing near 24 MP doesn't offer 24 MP, which
+    /// would silently become 12 MP).
     public static func available(for dimensions: [(width: Int, height: Int)]) -> [PhotoResolution] {
-        let highest = dimensions.map { megapixels(width: $0.width, height: $0.height) }.max() ?? 12
+        let sizes = dimensions.map { megapixels(width: $0.width, height: $0.height) }
         var found: [PhotoResolution] = [.mp12]
-        if highest >= 22 { found.append(.mp24) }
-        if highest >= 44 { found.append(.mp48) }
+        if sizes.contains(where: { (21.5...27).contains($0) }) { found.append(.mp24) }
+        if sizes.contains(where: { (43...53).contains($0) }) { found.append(.mp48) }
         return found
+    }
+
+    /// The resolution to use when `wanted` isn't available: the largest one below it.
+    public static func fitted(_ wanted: PhotoResolution, in available: [PhotoResolution]) -> PhotoResolution {
+        if available.contains(wanted) { return wanted }
+        return available.filter { $0.rawValue < wanted.rawValue }.max { $0.rawValue < $1.rawValue } ?? .mp12
     }
 
     /// Index into `dimensions` that best matches `wanted`: highest dimension not exceeding

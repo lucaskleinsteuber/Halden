@@ -96,6 +96,11 @@ public struct AppSettings: Codable, Sendable, Equatable {
     public var photographicStyle: PhotographicStyle?
     /// Active camera filter (`nil` = original).
     public var photoFilter: PhotoFilter?
+    /// How strongly the camera filter is applied (0…1).
+    public var filterIntensity = 1.0
+    /// Capture depth automatically in Photo mode when a person or pet is in the picture (so the
+    /// photo can become a portrait later). Costs a little time per photo.
+    public var autoDepth = true
     /// Portrait mode depth-of-field f-stop (1.4…16).
     public var portraitAperture = PortraitMath.defaultAperture
     /// Portrait mode lighting style.
@@ -174,7 +179,8 @@ public struct AppSettings: Codable, Sendable, Equatable {
         case flash, showGrid, showLevel, mirrorFrontCamera, lensCorrection
         case livePhotos, slowMotionRate, timeLapseInterval
         case prioritizeFasterShooting, allowAudioPlayback, defaultFocalLength, volumeUpForBurst
-        case topBarControls, photographicStyle, photoFilter, portraitAperture, portraitLighting, nightMode
+        case topBarControls, photographicStyle, photoFilter, filterIntensity, autoDepth, portraitAperture,
+            portraitLighting, nightMode
         case actionMode, cinematicAperture, audioChannelMode, windNoiseRemoval, allowAirPodsMic, showHistogram,
             showWaveform, scanQRCodes, showLiveText, viewOutsideTheFrame
         case preserveMode, keptMode, preserveStyle, preservePortraitZoom, preserveNightMode, preserveActionMode,
@@ -229,6 +235,9 @@ public struct AppSettings: Codable, Sendable, Equatable {
         settings.topBarControls = CameraControls.sanitizedTopBar(settings.topBarControls)
         read(.photographicStyle, into: &settings.photographicStyle)
         read(.photoFilter, into: &settings.photoFilter)
+        read(.filterIntensity, into: &settings.filterIntensity)
+        settings.filterIntensity = PhotoFilter.clampedIntensity(settings.filterIntensity)
+        read(.autoDepth, into: &settings.autoDepth)
         read(.portraitAperture, into: &settings.portraitAperture)
         read(.portraitLighting, into: &settings.portraitLighting)
         read(.nightMode, into: &settings.nightMode)

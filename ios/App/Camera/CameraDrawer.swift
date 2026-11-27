@@ -1,10 +1,18 @@
 import HaldenKit
 import SwiftUI
 
-/// Expandable iOS 26 camera control drawer shown above the mode strip (opened by the top-bar
-/// chevron or by swiping up over the modes). Keeps quick photo & video controls one tap away.
-/// Future stages add Night, Photographic Styles, Portrait, Action and Audio items here.
+/// The camera's control drawer, as in iOS 26: opened by the top-bar chevron or by swiping up over
+/// the modes, its row of controls takes the modes' place; the details of the chosen control
+/// (a slider, the styles, the filters) lie over the picture above the lens buttons. Only what
+/// this iPhone can do is offered, and nothing that is already in the top bar.
 struct CameraDrawer: View {
+    enum Part {
+        /// The row of controls, where the modes were.
+        case chips
+        /// The chosen control's details, over the picture.
+        case detail
+    }
+
     enum Panel: Hashable {
         case night, aperture, lighting, style, filter, exposure, aspectRatio, timer, resolution, videoFrameRate,
             proVideoFormat, cinematicAperture, scopes, timeLapseInterval
@@ -14,15 +22,24 @@ struct CameraDrawer: View {
     let settings: AppSettings
     let update: ((inout AppSettings) -> Void) -> Void
     @Binding var expanded: Panel?
+    var part = Part.chips
 
     private var state: CameraState { camera.backend.state }
+    private var topBar: [TopBarControl] { CameraControls.sanitizedTopBar(settings.topBarControls) }
 
     var body: some View {
-        VStack(spacing: 6) {
+        switch part {
+        case .detail:
             if let expanded {
                 detailBar(for: expanded)
-                    .transition(.opacity.combined(with: .move(edge: .bottom)))
             }
+        case .chips:
+            chips
+        }
+    }
+
+    private var chips: some View {
+        VStack(spacing: 0) {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 6) {
                     if camera.mode == .photo {
@@ -43,7 +60,15 @@ struct CameraDrawer: View {
                 }
                 .padding(.horizontal, 12)
             }
-            .frame(height: 48)
+            .frame(height: 44)
+            // The row fades out at the edges, so a cut-off control reads as "scroll for more".
+            .mask(
+                LinearGradient(
+                    stops: [
+                        .init(color: .clear, location: 0), .init(color: .black, location: 0.04),
+                        .init(color: .black, location: 0.96), .init(color: .clear, location: 1),
+                    ], startPoint: .leading, endPoint: .trailing)
+            )
             .accessibilityIdentifier("camera-drawer-chips")
         }
         .animation(.snappy(duration: 0.2), value: expanded)
@@ -54,7 +79,20 @@ struct CameraDrawer: View {
     // MARK: Photo controls
 
     @ViewBuilder private var photoButtons: some View {
-        // Flash: Auto / On / Off
+        // Flash: Auto / On / Off (when it isn't in the top bar already)
+        if !topBar.contains(.flash) {
+            flashChip
+        }
+
+        // Live Photo
+        if state.canLive && !topBar.contains(.live) {
+            liveChip
+        }
+
+        photoLookAndExposureChips
+    }
+
+    private var flashChip: some View {
         drawerChip(
             symbol: flashSymbol, text: settings.flash.rawValue.uppercased(), active: settings.flash == .on,
             label: "Flash \(settings.flash.rawValue)", id: "drawer-flash"
@@ -65,29 +103,34 @@ struct CameraDrawer: View {
                 case .on: .off
                 case .off: .auto
                 }
-            update { $0.flash = next }
-        }
-        .disabled(!state.hasFlash)
-
-        // Live Photo
-        if state.canLive {
-            let liveActive = settings.livePhotos && !settings.captureRAW && !settings.captureProRAW
-            drawerChip(
-                symbol: liveActive ? "livephoto" : "livephoto.slash", text: "LIVE",
-                active: liveActive,
-                label: liveActive ? "Live Photo on" : "Live Photo off", id: "drawer-live"
-            ) {
-                update {
-                    $0.livePhotos.toggle()
-                    if $0.livePhotos {
-                        $0.captureRAW = false
-                        $0.captureProRAW = false
-                    }
-                }
-                camera.settingsChanged()
+            update {
+                $0.flash = next
+                // Flash and Night Mode exclude each other, as in Apple's camera.
+                if next == .on && $0.nightMode != .off { $0.nightMode = .off }
             }
         }
+        .disabled(!state.hasFlash)
+    }
 
+    private var liveChip: some View {
+        let liveActive = settings.livePhotos && !settings.captureRAW && !settings.captureProRAW
+        return drawerChip(
+            symbol: liveActive ? "livephoto" : "livephoto.slash", text: "LIVE",
+            active: liveActive,
+            label: liveActive ? "Live Photo on" : "Live Photo off", id: "drawer-live"
+        ) {
+            update {
+                $0.livePhotos.toggle()
+                if $0.livePhotos {
+                    $0.captureRAW = false
+                    $0.captureProRAW = false
+                }
+            }
+            camera.settingsChanged()
+        }
+    }
+
+    @ViewBuilder private var photoLookAndExposureChips: some View {
         // Night Mode
         let nightSuggested = camera.nightSuggestedSeconds
         let nightActive = camera.nightActiveSeconds > 0
@@ -182,9 +225,9 @@ struct CameraDrawer: View {
         }
 
         // Bayer RAW (DNG)
-        if state.canRAW {
+        if state.canRAW && state.capabilities.canBayerRAW && !topBar.contains(.raw) {
             drawerChip(
-                symbol: nil, text: "RAW", active: settings.captureRAW,
+                symbol: nil, text: settings.captureRAW ? "RAW · 12 MP · 1×" : "RAW", active: settings.captureRAW,
                 label: settings.captureRAW ? "RAW on" : "RAW off", id: "drawer-raw"
             ) {
                 update {
@@ -240,19 +283,9 @@ struct CameraDrawer: View {
             expanded = expanded == .filter ? nil : .filter
         }
 
-        drawerChip(
-            symbol: flashSymbol, text: settings.flash.rawValue.uppercased(), active: settings.flash == .on,
-            label: "Flash \(settings.flash.rawValue)", id: "drawer-flash"
-        ) {
-            let next: AppSettings.Flash =
-                switch settings.flash {
-                case .auto: .on
-                case .on: .off
-                case .off: .auto
-                }
-            update { $0.flash = next }
+        if !topBar.contains(.flash) {
+            flashChip
         }
-        .disabled(!state.hasFlash)
 
         drawerChip(
             symbol: "timer", text: camera.timer == 0 ? "OFF" : "\(camera.timer)s",
@@ -279,12 +312,14 @@ struct CameraDrawer: View {
     }
 
     @ViewBuilder private var videoButtons: some View {
-        drawerChip(
-            symbol: "figure.run", text: "ACTION", active: settings.actionMode,
-            label: settings.actionMode ? "Action Mode on" : "Action Mode off", id: "drawer-action"
-        ) {
-            update { $0.actionMode.toggle() }
-            camera.settingsChanged()
+        if state.capabilities.canActionMode {
+            drawerChip(
+                symbol: "figure.run", text: "ACTION", active: settings.actionMode,
+                label: settings.actionMode ? "Action Mode on" : "Action Mode off", id: "drawer-action"
+            ) {
+                update { $0.actionMode.toggle() }
+                camera.settingsChanged()
+            }
         }
 
         drawerChip(
@@ -352,12 +387,15 @@ struct CameraDrawer: View {
             camera.settingsChanged()
         }
 
-        drawerChip(
-            symbol: "wind", text: "WIND", active: settings.windNoiseRemoval,
-            label: settings.windNoiseRemoval ? "Wind noise removal on" : "Wind noise removal off", id: "drawer-wind"
-        ) {
-            update { $0.windNoiseRemoval.toggle() }
-            camera.settingsChanged()
+        if state.canWindNoiseRemoval || state.capabilities.canWindNoiseRemoval {
+            drawerChip(
+                symbol: "wind", text: "WIND", active: settings.windNoiseRemoval,
+                label: settings.windNoiseRemoval ? "Wind noise removal on" : "Wind noise removal off",
+                id: "drawer-wind"
+            ) {
+                update { $0.windNoiseRemoval.toggle() }
+                camera.settingsChanged()
+            }
         }
 
         let scopesOn = settings.showHistogram || settings.showWaveform
@@ -412,7 +450,11 @@ struct CameraDrawer: View {
                             get: { currentSec },
                             set: { value in
                                 let rounded = Int(value.rounded())
-                                update { $0.nightMode = rounded <= 0 ? .off : .seconds(rounded) }
+                                update {
+                                    $0.nightMode = rounded <= 0 ? .off : .seconds(rounded)
+                                    // Night Mode turns the flash off (it would end at 0 s otherwise).
+                                    if rounded > 0 && $0.flash == .on { $0.flash = .auto }
+                                }
                             }),
                         in: 0...Double(maxSec),
                         step: 1
@@ -477,13 +519,53 @@ struct CameraDrawer: View {
                             camera.settingsChanged()
                         }))
             case .filter:
-                FilterStripView(
-                    filter: Binding(
-                        get: { settings.photoFilter },
-                        set: { value in
-                            update { $0.photoFilter = value }
-                            camera.settingsChanged()
-                        }))
+                VStack(spacing: 6) {
+                    FilterStripView(
+                        filter: Binding(
+                            get: { settings.photoFilter },
+                            set: { value in
+                                update {
+                                    $0.photoFilter = value
+                                    // A new filter starts at full strength.
+                                    if value != nil { $0.filterIntensity = 1 }
+                                }
+                                camera.settingsChanged()
+                            }),
+                        sample: camera.backend.lookSample,
+                        style: settings.photographicStyle,
+                        pictures: true
+                    )
+                    .padding(.vertical, 6)
+                    .background(.black.opacity(0.5), in: .rect(cornerRadius: 14))
+                    .padding(.horizontal, 8)
+                    if settings.photoFilter != nil {
+                        HStack(spacing: 10) {
+                            Text("Strength")
+                                .font(.caption2.bold())
+                                .foregroundStyle(.white.opacity(0.85))
+                            Slider(
+                                value: Binding(
+                                    get: { settings.filterIntensity },
+                                    set: { value in
+                                        update { $0.filterIntensity = PhotoFilter.clampedIntensity(value) }
+                                        camera.settingsChanged()
+                                    }),
+                                in: 0...1
+                            )
+                            .tint(.yellow)
+                            .accessibilityLabel("Filter strength")
+                            .accessibilityIdentifier("filter-intensity-slider")
+                            Text("\(Int((settings.filterIntensity * 100).rounded()))%")
+                                .font(.caption2.bold().monospacedDigit())
+                                .foregroundStyle(.yellow)
+                                .frame(width: 40, alignment: .trailing)
+                        }
+                        .frame(minHeight: 44)
+                        .padding(.horizontal, 12)
+                        .background(.black.opacity(0.65), in: .rect(cornerRadius: 12))
+                        .padding(.horizontal, 12)
+                    }
+                }
             case .exposure:
                 HStack(spacing: 10) {
                     Button {
@@ -671,7 +753,7 @@ struct CameraDrawer: View {
         Button(action: action) {
             HStack(spacing: 4) {
                 if let symbol { Image(systemName: symbol).font(.caption.bold()) }
-                Text(text).font(.caption2.bold().monospacedDigit()).lineLimit(1)
+                Text(text).font(.caption2.bold().monospacedDigit()).lineLimit(1).fixedSize()
             }
             .foregroundStyle(active ? .yellow : .white)
             .padding(.horizontal, 10)

@@ -6,6 +6,68 @@ The server and the iPhone app have version numbers of their own (semantic versio
 from 0.1.0 on 25.11.2026; a heading names the versions released that day. Everything before is
 part of the first versions.
 
+## 27.11.2026 – App 0.3.0
+
+### Added
+
+- The app knows the iPhone it runs on (`DeviceProfile`: name, chip and camera hardware for every
+  iPhone from the 12 on) and offers only what that iPhone's camera can do: Settings › Camera ›
+  This iPhone names it and lists its features; Cinematic, Portrait, Action mode, wind noise
+  removal, RAW and 24 MP are now checked too, and the capabilities found are kept for Settings
+  (`CapabilityCache`).
+- Settings › Camera Timings: the camera measures opening, mode changes, turning around, filters,
+  shutter to thumbnail and shutter to the next photo on the iPhone and shows them against the
+  targets (`CameraTimingLog`).
+- Filters as small live pictures (each filter shown on what the camera sees, also in the editor)
+  with a strength slider (`filterIntensity` in the edit and the settings).
+- New, clearly different filters: Vivid, Warm, Cool, Dramatic, Film, Faded, Mono, Noir, Sepia
+  (photos with the earlier filters still show them).
+- "Automatic depth" setting (Settings › Camera › Shooting).
+- Tests: device profiles and their limits, what a settings change touches, the timing log, every
+  filter and style distinguishable from every other, filter strength; UI tests for the iPhone 15
+  profile and for looks that change without rebuilding the camera; the layout tests also run as
+  an iPhone 15; a filter-switching measurement.
+
+### Changed
+
+- The camera does only what a change needs (`CameraChangeScope`): a filter, style, its strength or
+  the portrait depth shows in the next frame without rebuilding the capture session or blurring;
+  lens correction, QR scanning or the Cinematic aperture are set on the device; only formats,
+  outputs and resolution reconfigure the session, setting each property only when it changes.
+- The blur of a mode change or camera flip ends with the first new picture instead of after a
+  fixed 0.7 s; the frame changes shape at once under it, so nothing glides out of step.
+- The custom viewfinder draws on its own queue into a `CAMetalLayer` with preview-sized frames,
+  and the system layer stops drawing meanwhile; Live Text reads those frames (at most every
+  1.5 s) instead of an extra full-size output.
+- The thumbnail next to the shutter comes from the photo's embedded thumbnail as soon as it is
+  processed (before a Live Photo's video is finished), with the filter, style and crop.
+- Night Mode "Auto" starts only in really dim light; its frames are taken back to back and the
+  camera is free for the next photo while they are combined.
+- The audio session is set up when the camera first opens (not at app start) and only again when
+  it has to; facts about a camera's formats are found once.
+- Zoom, readings, the level, scopes and the panorama guide redraw only the views that show them,
+  not the whole camera screen; settings are saved 0.3 s after the last change of a slider.
+- Settings that "Preserve Settings" doesn't keep reset with each launch of the app, not each time
+  the camera tab shows (which rebuilt the camera on every return).
+- Layout: the camera has its own slim tab bar (44 instead of 83 points) that fades out while
+  recording; the control drawer takes the modes' place and its details lie over the picture, so
+  the lens buttons no longer jump; flash and Live Photo appear only once; the modes are as wide as
+  their names; the chevron sits in the middle and a shade keeps the controls readable over videos;
+  hints share one line and no longer flicker; the shutter morphs between photo and video.
+- Photographic styles differ clearly (Neutral, Natural and the warm tones), and the default
+  palette is the preset's full strength.
+- Manual controls: fixed widths (the row no longer jumps), a clear AUTO button and the value
+  beside each slider, "Focus 50%" instead of "F 50", EV explained when ISO or shutter are set,
+  and white balance limited to what the camera reaches.
+
+### Fixed
+
+- The palette slider on Standard and the colour axis on black-and-white styles did nothing (now
+  hidden); the "±" button opened the drawer without the EV slider; the Night slider snapped back
+  to 0 with the flash on (Night and flash now exclude each other).
+- Action mode was shown and named in the format on formats without it.
+- 24 MP was offered where the camera has no such size and quietly became 12 MP.
+
 ## 27.11.2026 – Server 0.2.0, App 0.2.0
 
 ### Added

@@ -7,8 +7,11 @@ struct DualPreviewOverlay: View {
     @Binding var kind: DualCaptureKind
     let swapped: Bool
     let recording: Bool
-    let pipImage: UIImage?
+    /// Read here (not by the camera screen), since the small picture changes many times a second.
+    let backend: any CaptureBackend
     let onSwap: () -> Void
+
+    private var pipImage: UIImage? { backend.dualPipImage }
 
     @State private var dragOffset: CGSize = .zero
 

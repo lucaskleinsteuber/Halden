@@ -425,7 +425,8 @@ and never changes the file. `null` goes back to the original. Version 1 fields: 
 `y`, `width`, `height`, 0…1 of the turned and straightened picture, from the top left),
 `trimStartMs`, `trimEndMs`. Version 2 adds:
 - `style`: optional photographic style object `{ "preset": "amber", "tone": 0.25, "color": 0.4, "palette": 0.7 }` (`preset` 1–32 bytes, `tone` and `color` in `-1…1`, `palette` in `0…1`).
-- `filter`: optional filter name (`vivid`, `vividWarm`, `vividCool`, `dramatic`, `dramaticWarm`, `dramaticCool`, `mono`, `silvertone`, `noir`; 1–32 bytes).
+- `filter`: optional filter name (`vivid`, `warm`, `cool`, `dramatic`, `film`, `faded`, `mono`, `noir`, `sepia`; earlier apps also wrote `vividWarm`, `vividCool`, `dramaticWarm`, `dramaticCool`, `silvertone`; 1–32 bytes).
+- `filterIntensity`: optional strength of the filter (`0.0…1.0`, missing is full strength); the server keeps it as it is.
 - `portraitAperture`: optional depth-of-field f-stop (`1.4…16.0`) for Portrait photos or photos with embedded depth.
 - `portraitLighting`: optional Portrait Lighting effect (`natural`, `studio`, `contour`, `stage`, `stageMono`, `highKeyMono`).
 - `cinematicAperture`: optional post-capture f-stop (`2.0…16.0`) for Cinematic videos.

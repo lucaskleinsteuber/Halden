@@ -142,4 +142,21 @@ final class PerformanceTests: XCTestCase {
             app.buttons["camera-controls-toggle"].tap()
         }
     }
+
+    /// Round 4: switching filters and their strength (drawn into the next frame, no rebuild).
+    @MainActor
+    func testFilterSwitching() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-ui-testing-signed-in"]
+        app.launch()
+        XCTAssertTrue(app.buttons["camera-controls-toggle"].waitForExistence(timeout: 30))
+        app.buttons["camera-controls-toggle"].tap()
+        app.buttons["drawer-filter"].tap()
+        XCTAssertTrue(app.buttons["filter-vivid"].waitForExistence(timeout: 5))
+        measure(metrics: [XCTClockMetric(), XCTCPUMetric(application: app)], options: options(5)) {
+            for filter in ["vivid", "warm", "cool", "dramatic", "mono", "original"] {
+                app.buttons["filter-\(filter)"].tapWhenHittable()
+            }
+        }
+    }
 }

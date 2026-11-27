@@ -69,9 +69,12 @@ struct ManualPanel: View {
         case .whiteBalance: return (manual.whiteBalance?.kelvin ?? readings.kelvin).map(ManualText.kelvin) ?? "WB"
         case .focus:
             let focus = manual.focus ?? readings.focus
-            return focus.map { "F \(Int(($0 * 100).rounded()))" } ?? "Focus"
+            return focus.map { "Focus \(Int(($0 * 100).rounded()))%" } ?? "Focus"
         }
     }
+
+    /// EV only works while the camera chooses the exposure itself.
+    private var biasDisabled: Bool { manual.exposureIsManual }
 
     private func chip(_ value: Value) -> some View {
         let set = isSet(value)
@@ -81,10 +84,13 @@ struct ManualPanel: View {
             Text(text(value))
                 .font(.caption2.bold().monospacedDigit())
                 .lineLimit(1)
-                .minimumScaleFactor(0.7)
-                .foregroundStyle(set ? .yellow : .white)
-                .padding(.horizontal, 8)
-                .frame(height: 28)
+                .minimumScaleFactor(0.6)
+                .foregroundStyle(
+                    value == .exposureBias && biasDisabled ? .white.opacity(0.4) : set ? .yellow : .white
+                )
+                .padding(.horizontal, 6)
+                // The same width whatever the value, so the row never jumps while values change.
+                .frame(width: 70, height: 28)
                 .background(
                     chosen == value ? Color.white.opacity(0.3) : Color.black.opacity(0.5), in: .capsule
                 )
@@ -99,11 +105,27 @@ struct ManualPanel: View {
 
     @ViewBuilder private func slider(for value: Value, limits: ManualLimits) -> some View {
         HStack(spacing: 10) {
-            Button("Auto") { change(value, to: nil) }
-                .font(.caption.bold())
-                .foregroundStyle(isSet(value) ? .white : .yellow)
-                .accessibilityIdentifier("manual-auto")
+            Button {
+                change(value, to: nil)
+            } label: {
+                Text("AUTO")
+                    .font(.caption2.bold())
+                    .foregroundStyle(isSet(value) ? .white : .black)
+                    .padding(.horizontal, 10)
+                    .frame(height: 28)
+                    .background(isSet(value) ? Color.white.opacity(0.2) : Color.yellow, in: .capsule)
+                    .frame(minWidth: 44, minHeight: 44)
+                    .contentShape(.rect)
+            }
+            .accessibilityLabel(isSet(value) ? "Back to automatic" : "Automatic")
+            .accessibilityIdentifier("manual-auto")
             switch value {
+            case .exposureBias where biasDisabled:
+                Text("EV works when ISO and shutter are automatic")
+                    .font(.caption2)
+                    .foregroundStyle(.white.opacity(0.8))
+                    .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                    .accessibilityIdentifier("manual-ev-hint")
             case .exposureBias:
                 Slider(
                     value: Binding(
@@ -133,7 +155,7 @@ struct ManualPanel: View {
                                         kelvin: kelvin, tint: settings.whiteBalance?.tint ?? 0)
                                 }
                             }),
-                        in: ManualLimits.whiteBalanceKelvin)
+                        in: limits.kelvin)
                     Slider(
                         value: Binding(
                             get: {
@@ -162,6 +184,12 @@ struct ManualPanel: View {
                     focusing = editing
                 }
             }
+            Text(text(value))
+                .font(.caption2.bold().monospacedDigit())
+                .foregroundStyle(isSet(value) ? .yellow : .white)
+                .lineLimit(1)
+                .minimumScaleFactor(0.6)
+                .frame(width: 62, alignment: .trailing)
         }
         .tint(.yellow)
         .padding(.horizontal, 10)

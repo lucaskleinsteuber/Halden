@@ -69,6 +69,12 @@ struct SettingsView: View {
                 Section {
                     LabeledContent("Version", value: Self.version)
                         .accessibilityIdentifier("app-version")
+                    NavigationLink {
+                        CameraTimingsView()
+                    } label: {
+                        Label("Camera Timings", systemImage: "stopwatch")
+                    }
+                    .accessibilityIdentifier("camera-timings")
                 }
                 if let problem = app.problem {
                     Section { Text(problem).foregroundStyle(.red) }
@@ -237,14 +243,103 @@ struct UploadSettings: View {
     }
 }
 
+/// What the camera measured about itself on this iPhone, next to the targets, to compare.
+struct CameraTimingsView: View {
+    @State private var refresh = 0
+
+    var body: some View {
+        Form {
+            Section {
+                ForEach(CameraTimingKind.allCases) { kind in
+                    let summary = CameraTimingLog.shared.summary(kind)
+                    VStack(alignment: .leading, spacing: 4) {
+                        HStack {
+                            Text(kind.title)
+                            Spacer()
+                            if let summary {
+                                Text("\(Self.ms(summary.median))")
+                                    .monospacedDigit()
+                                    .foregroundStyle(summary.median <= kind.targetMilliseconds ? .green : .orange)
+                            } else {
+                                Text("–").foregroundStyle(.secondary)
+                            }
+                        }
+                        Text(Self.detail(summary, target: kind.targetMilliseconds))
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
+                    .accessibilityElement(children: .combine)
+                    .accessibilityIdentifier("timing-\(kind.rawValue)")
+                }
+            } footer: {
+                Text("The middle value of the last measurements. Green is within the target.")
+            }
+            .id(refresh)
+            Section {
+                Button("Clear", role: .destructive) {
+                    CameraTimingLog.shared.clear()
+                    refresh += 1
+                }
+            }
+        }
+        .navigationTitle("Camera Timings")
+    }
+
+    static func detail(_ summary: CameraTimingLog.Summary?, target: Double) -> String {
+        guard let summary else { return "target \(ms(target))" }
+        let times = summary.count == 1 ? "once" : "\(summary.count) times"
+        return "last \(ms(summary.last)) · \(times) · target \(ms(target))"
+    }
+
+    static func ms(_ value: Double) -> String {
+        value >= 1000 ? String(format: "%.1f s", value / 1000) : "\(Int(value.rounded())) ms"
+    }
+}
+
 /// How photos and videos are taken, structured like Apple's Settings › Camera.
 struct CameraSettings: View {
     @Environment(AppModel.self) private var app
 
-    private var capabilities: DeviceCapabilities { app.camera.backend.state.capabilities }
+    /// What this iPhone's back camera can do: from the camera when it runs, else as found the
+    /// last time it ran, else from the model's profile.
+    private var capabilities: DeviceCapabilities {
+        let state = app.camera.backend.state
+        if state.ready && state.side == .back { return state.capabilities }
+        if let cached = CapabilityCache().load() { return cached }
+        if let profile { return profile.capabilities }
+        return state.capabilities
+    }
+
+    private var profile: DeviceProfile? { ThisIPhone.profile }
+
+    /// The photo resolutions this iPhone has.
+    private var resolutions: [PhotoResolution] {
+        let state = app.camera.backend.state
+        if state.ready && state.side == .back && app.camera.mode == .photo { return state.availableResolutions }
+        if let profile { return profile.has48MP ? PhotoResolution.allCases : [.mp12] }
+        return PhotoResolution.allCases
+    }
 
     var body: some View {
         Form {
+            Section {
+                if let profile {
+                    DisclosureGroup {
+                        ForEach(profile.featureList, id: \.self) { line in
+                            Text(line).font(.footnote)
+                        }
+                    } label: {
+                        LabeledContent("This iPhone", value: profile.title)
+                    }
+                    .accessibilityIdentifier("camera-this-iphone")
+                } else {
+                    LabeledContent("This iPhone", value: DeviceProfile.currentIdentifier)
+                        .accessibilityIdentifier("camera-this-iphone")
+                }
+            } footer: {
+                Text("The camera offers only what this iPhone can do.")
+            }
+
             Section {
                 NavigationLink {
                     PreserveCameraSettingsView()
@@ -279,7 +374,7 @@ struct CameraSettings: View {
                     Explained("Photo format", "HEIC is half the size at the same quality; JPEG opens everywhere.")
                 }
                 Picker(selection: app.setting(\.photoResolution)) {
-                    ForEach(PhotoResolution.allCases) { res in
+                    ForEach(resolutions) { res in
                         Text(res == .mp48 ? "48 MP (HEIF Max)" : res.label).tag(res)
                     }
                 } label: {
@@ -295,10 +390,14 @@ struct CameraSettings: View {
                         "Aspect ratio",
                         "16:9 and 1:1 are kept non-destructively in Halden; Apple Photos gets the cropped copy.")
                 }
-                Toggle(isOn: app.setting(\.captureRAW)) {
-                    Explained("RAW (Bayer DNG)", "Keep a RAW file alongside the photo when the camera supports it.")
+                if capabilities.canBayerRAW {
+                    Toggle(isOn: app.setting(\.captureRAW)) {
+                        Explained(
+                            "RAW (Bayer DNG)",
+                            "Keep a RAW file alongside the photo: 12 MP, on the 1× lens, without Live Photo.")
+                    }
+                    .accessibilityIdentifier("settings-raw")
                 }
-                .accessibilityIdentifier("settings-raw")
                 if capabilities.canProRAW {
                     Toggle(isOn: app.setting(\.captureProRAW)) {
                         Explained(
@@ -384,10 +483,12 @@ struct CameraSettings: View {
                             : "Stereo captures directional sound; Mono uses a single channel.")
                 }
                 .accessibilityIdentifier("settings-audio-channel")
-                Toggle(isOn: app.setting(\.windNoiseRemoval)) {
-                    Explained("Wind noise removal", "Reduce wind rumble during stereo video capture when supported.")
+                if capabilities.canWindNoiseRemoval {
+                    Toggle(isOn: app.setting(\.windNoiseRemoval)) {
+                        Explained("Wind noise removal", "Reduce wind rumble during stereo video capture.")
+                    }
+                    .accessibilityIdentifier("settings-wind-noise")
                 }
-                .accessibilityIdentifier("settings-wind-noise")
                 Toggle(isOn: app.setting(\.allowAirPodsMic)) {
                     Explained("AirPods microphone", "Record video audio through connected AirPods or Bluetooth mic.")
                 }
@@ -434,6 +535,14 @@ struct CameraSettings: View {
                 Toggle(isOn: app.setting(\.livePhotos)) {
                     Explained(
                         "Live Photos", "With 1.5 seconds of video and sound before and after; also on the camera.")
+                }
+                if capabilities.canDepth {
+                    Toggle(isOn: app.setting(\.autoDepth)) {
+                        Explained(
+                            "Automatic depth",
+                            "Keep depth with photos of people and pets, so they can become portraits later.")
+                    }
+                    .accessibilityIdentifier("settings-auto-depth")
                 }
                 Toggle(isOn: app.setting(\.volumeUpForBurst)) {
                     Explained("Volume Up for burst", "Hold Volume Up in photo mode to shoot a burst.")

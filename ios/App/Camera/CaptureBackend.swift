@@ -25,6 +25,12 @@ enum CameraMode: String, CaseIterable, Sendable {
     }
 }
 
+/// The iPhone the camera runs on (in the simulator, the one the stand-in camera pretends to be).
+enum ThisIPhone {
+    @MainActor static let profile: DeviceProfile? =
+        StandInCamera.profile ?? DeviceProfile.named(DeviceProfile.currentIdentifier)
+}
+
 enum CameraSide: Sendable {
     case back, front
 }
@@ -51,6 +57,8 @@ struct CaptureOptions: Equatable, Sendable {
     var lockVideoWhiteBalance: Bool
     var style: PhotographicStyle?
     var filter: PhotoFilter?
+    var filterIntensity: Double
+    var autoDepth: Bool
     var portraitAperture: Double
     var portraitLighting: PortraitLighting
     var actionMode: Bool
@@ -88,6 +96,8 @@ struct CaptureOptions: Equatable, Sendable {
         lockVideoWhiteBalance = settings.lockVideoWhiteBalance
         style = settings.photographicStyle
         filter = settings.photoFilter
+        filterIntensity = settings.filterIntensity
+        autoDepth = settings.autoDepth
         portraitAperture = settings.portraitAperture
         portraitLighting = settings.portraitLighting
         actionMode = settings.actionMode
@@ -112,8 +122,9 @@ struct CameraState: Equatable, Sendable {
     var side = CameraSide.back
     var canFlip = false
     /// Zoom as people know it from Apple's camera: 0.5 ultra wide, 1 main camera, 2, 3 or 5 tele.
+    /// (The zoom itself changes every frame of a glide, so it is the backend's `zoomNow`, apart
+    /// from this state that changes rarely: what reads only this isn't redrawn while zooming.)
     var presets: [Double] = [1]
-    var zoom = 1.0
     var zoomRange: ClosedRange<Double> = 1...1
     var hasFlash = false
     var hasTorch = false
@@ -144,7 +155,8 @@ struct CameraState: Equatable, Sendable {
     var canMultiCam = false
     /// True when hardware wind noise removal is available on the active microphone input.
     var canWindNoiseRemoval = false
-    /// Capabilities available only on newer / Pro iPhones (ProRAW, ProRes, Log, SSD, Spatial, Macro, Camera Control, Spatial Audio).
+    /// What this iPhone's camera can do: the runtime checks, narrowed by the model's
+    /// `DeviceProfile` (ProRAW, ProRes, Log, SSD, Spatial, Macro, Camera Control, Action, …).
     var capabilities = DeviceCapabilities()
     /// Connected USB-C external storage device, if any.
     var externalStorage: ExternalStorageInfo?
@@ -189,6 +201,8 @@ struct PhotoRequest: Sendable {
     var proRAW = false
     /// Prefer faster capture over maximum processing latency.
     var prioritizeFaster = true
+    /// As fast as the camera can (`.speed`): the frames of a Night Mode series.
+    var prioritizeFastest = false
     /// Mirror front-camera photos so they match the preview.
     var mirrorFrontCamera = false
     /// Include depth data (Portrait mode or automatic person/pet detection in Photo mode).
@@ -208,11 +222,24 @@ struct VideoRequest: Sendable {
     var preferExternalStorage = false
 }
 
+extension CaptureBackend {
+    func takePhoto(_ request: PhotoRequest) async -> TakenPhoto? {
+        await takePhoto(request, preview: nil)
+    }
+}
+
 /// A camera for the camera screen: the real one (`DeviceCamera`), or the stand-in that the
 /// simulator and the UI tests use (`StandInCamera`).
 @MainActor
 protocol CaptureBackend: AnyObject {
     var state: CameraState { get }
+    /// The zoom as shown (0.5, 1, 2, …) as the camera has it now: every frame of a glide.
+    var zoomNow: Double { get }
+    /// A small picture of what the camera sees (without any look), a few times a second while
+    /// `sampleLooks(true)`: for the filter buttons that show each filter on the live picture.
+    var lookSample: CGImage? { get }
+    /// How often the capture session was rebuilt (tests check that a filter doesn't).
+    var reconfigurations: Int { get }
     /// ISO, shutter, white balance and focus as the camera has them now (a few times a second).
     var readings: CameraReadings { get }
     /// Live RGB+Luma histogram and luma waveform data when enabled (`nil` when scopes are off).
@@ -226,11 +253,19 @@ protocol CaptureBackend: AnyObject {
     func prepare(mode: CameraMode, options: CaptureOptions)
     func start()
     func stop()
-    /// Returns once the camera works in the new mode.
+    /// Returns once the camera works in the new mode and shows its first picture.
     func setMode(_ mode: CameraMode, options: CaptureOptions) async
-    func flip()
+    /// Only how the picture looks changed (style, filter, portrait): into the next frame, no
+    /// reconfiguration.
+    func applyLook(_ options: CaptureOptions)
+    /// Settings the camera takes without rebuilding the session (lens correction, QR, mirroring).
+    func applyDevice(_ options: CaptureOptions)
+    /// Turns the small live picture for the filter buttons on or off.
+    func sampleLooks(_ on: Bool)
+    /// Returns once the other camera shows its first picture.
+    func flip() async
     /// Zoom as shown (0.5, 1, 2, …). `glide` for the lens buttons (about 0.3 s for any
-    /// distance); otherwise it follows a finger closely. `state.zoom` follows the camera (the
+    /// distance); otherwise it follows a finger closely. `zoomNow` follows the camera (the
     /// screen shows `CameraModel.zoom`, the zoom asked for).
     func zoom(to factor: Double, glide: Bool)
     /// A point in `previewView`. `lock` keeps focus and exposure until the next tap.
@@ -238,7 +273,9 @@ protocol CaptureBackend: AnyObject {
     func setTorch(_ on: Bool)
     /// Values set by hand; what is `nil` the camera decides. Kept across lenses and modes.
     func setManual(_ settings: ManualSettings)
-    func takePhoto(_ request: PhotoRequest) async -> TakenPhoto?
+    /// `preview` gets a small picture as soon as the photo is processed, before a Live Photo's
+    /// video is finished, for the button next to the shutter.
+    func takePhoto(_ request: PhotoRequest, preview: (@Sendable (CGImage) -> Void)?) async -> TakenPhoto?
     /// Captures a rapid burst of short exposures for Night Mode stacking.
     func takeNightBurst(
         count: Int, request: PhotoRequest, onFrame: @MainActor @escaping (Int, Int) -> Void
